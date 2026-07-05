@@ -526,6 +526,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
 
       {activeTab === "console" && (
         <AgentConsole
+          memoryEditable
           state={consoleState}
           onTeach={({ blockId, phaseId }) => {
             const qs = new URLSearchParams();

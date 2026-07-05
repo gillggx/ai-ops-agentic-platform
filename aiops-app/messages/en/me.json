@@ -1,0 +1,12 @@
+{
+  "title": "My preferences",
+  "subtitle": "Personal preferences the agent learned from your actions (W1) — they only affect your own builds",
+  "empty": "No personal preferences yet — edit a phase on the plan confirmation card and the agent will record your preference here",
+  "disable": "Disable",
+  "enable": "Enable",
+  "delete": "Delete",
+  "deleteConfirm": "Delete this preference?",
+  "learnedAt": "Learned",
+  "active": "Active",
+  "disabled": "Disabled"
+}

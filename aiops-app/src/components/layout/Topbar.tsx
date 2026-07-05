@@ -146,6 +146,7 @@ function UserMenu() {
             </div>
 
             <DropdownLink href="/me/profile" icon="⚙️" label={t("accountSettings")} onClick={() => setOpen(false)} />
+            <DropdownLink href="/me/preferences" icon="◆" label={t("myPreferences")} onClick={() => setOpen(false)} />
             <DropdownLink href="/me/change-password" icon="🔑" label={t("changePassword")} onClick={() => setOpen(false)} />
 
             <div style={{ borderTop: "1px solid #f1f5f9" }} />

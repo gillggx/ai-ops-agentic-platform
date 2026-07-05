@@ -1,0 +1,82 @@
+{
+  "header": {
+    "path": "/ agent-knowledge · Knowledge Studio"
+  },
+  "loading": "Loading…",
+  "manual": {
+    "title": "Manual · Truths in effect",
+    "tabKnowledge": "Knowledge {count}",
+    "tabLexicon": "Lexicon {count}",
+    "tabExamples": "Examples {count}",
+    "searchPlaceholder": "Search entries / How-to-apply…",
+    "add": "+ New entry",
+    "colId": "ID",
+    "colClass": "Class",
+    "colText": "Entry (first line of How-to-apply)",
+    "colUses": "uses 90d",
+    "colLast": "Last recalled",
+    "colSrc": "Source",
+    "colUsesShort": "uses",
+    "exColTitle": "Title",
+    "newDistilled": "Newly distilled",
+    "disabled": "Disabled",
+    "empty": "No entries yet — click \"+ New entry\" to create the first one",
+    "directivesMoved": "Directives moved out → Supervisor workbench governance area (admin-only) · ON_DUTY cannot see this page and can only submit drafts via the Console \"Teach it\" entry",
+    "lexColTerm": "Your term",
+    "lexColStandard": "Standard term",
+    "lexColNote": "Note"
+  },
+  "src": {
+    "human": "Human",
+    "distilled": "Supervisor distilled",
+    "teach": "Teach it"
+  },
+  "inbox": {
+    "title": "Inbox · Awaiting your review",
+    "breakdown": "W2 doc memo {count}",
+    "chipW2": "W2 memo",
+    "pending": "Pending",
+    "proposal": "Proposal",
+    "why": "Why",
+    "evidence": "Evidence",
+    "episode": "▣ episode {id}",
+    "approve": "Approve and merge",
+    "reject": "Reject…",
+    "disabledTip": "Backend lands in the W2 wave",
+    "signNote": "Sign-off commits to DB",
+    "empty": "Nothing awaiting review in the inbox"
+  },
+  "editor": {
+    "newEntry": "New entry",
+    "editEntry": "Edit entry",
+    "fieldTitle": "Title",
+    "fieldBody": "Body (the actual rule)",
+    "fieldScope": "Scope",
+    "fieldScopeValue": "Scope value",
+    "fieldScopeNone": "(no value)",
+    "fieldPriority": "Priority",
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this entry?",
+    "enable": "Enable",
+    "disable": "Disable",
+    "lexNew": "New Lexicon entry",
+    "lexEdit": "Edit Lexicon entry",
+    "fieldTerm": "Your term (jargon)",
+    "fieldStandard": "Standard term",
+    "fieldNote": "Note (optional)",
+    "exNew": "New Example",
+    "exEdit": "Edit Example",
+    "fieldUser": "USER (input that triggers this style)",
+    "fieldIdeal": "IDEAL (desired response)"
+  },
+  "teach": {
+    "titlePrefix": "[Teach it] {name}",
+    "block": "tool/block: {value}",
+    "phase": "phase: {value}",
+    "instruction": "original instruction: {value}",
+    "bodyHint": "(describe the correct approach)"
+  }
+}

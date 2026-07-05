@@ -1,0 +1,112 @@
+{
+  "title": "Supervisor ワークベンチ",
+  "subtitle": "Supervisor は提案のみ — 反映は必ず人の承認を経ます。危険な操作は認証済み UI 限定です",
+  "loading": "読み込み中…",
+  "loadError": "読み込みに失敗しました：{msg}",
+  "roleNote": "あなたのロール：{roles}",
+  "health": {
+    "title": "ヘルス概要",
+    "updatedAt": "最終更新 {time}",
+    "s1Title": "実行ヘルス",
+    "s1SuccessRate": "直近 {n} 回の build 成功率",
+    "s1AvgRounds": "平均 LLM calls",
+    "s1Divergence": "divergence 件数",
+    "s2Title": "知識品質",
+    "s2Pending": "承認待ち提案",
+    "s2DocMemos": "Builder doc memo",
+    "s2RecallRate": "今週のリコール命中率",
+    "s3Title": "コストとリソース",
+    "s3Cost": "本日のコスト",
+    "s3Cache": "cache hit",
+    "s3Empty": "LLM 空応答率",
+    "s3Note": "W2 バックエンド待ち — プレースホルダー"
+  },
+  "tabs": {
+    "inbox": "提案受信箱",
+    "digest": "定期レポート",
+    "audit": "承認履歴"
+  },
+  "inbox": {
+    "countNote": "承認可能 {mine} 件 · 他ロール {others} 件（淡色表示）",
+    "empty": "承認待ちの提案はありません",
+    "signerLabel": "承認者 {signer}"
+  },
+  "status": {
+    "pending": "承認待ち",
+    "approved": "承認済み",
+    "rejected": "却下",
+    "expired": "期限切れ"
+  },
+  "detail": {
+    "none": "左のリストから提案を選択してください",
+    "what": "提案",
+    "why": "理由",
+    "evidence": "根拠",
+    "targetHint": "— クリックでナレッジワークショップの該当エントリを開きます",
+    "legendSys": "システム事実（機械検証、実線）",
+    "legendSelf": "agent 自己申告（破線）",
+    "legendMem": "メモリ",
+    "readOnly": "この案件の承認者は {signer} です — あなたのロール（{role}）は読み取り専用です",
+    "reviewedNote": "{status} · 承認者 #{reviewer} · {time}",
+    "expiredNote": "期限切れの提案は承認できません — 監査用のみです",
+    "supersedePre": "この提案は期限切れです — 新しい証拠により自動 supersede され、",
+    "supersedePost": "に置き換えられました（同一テーマ・より新しい証拠）。ゾンビ提案は残しません。",
+    "supersedeNoRef": "この提案は期限切れです — より新しい提案に置き換えられました（監査用のみ）",
+    "lifecycleNote": "承認後は「人の実行待ち」の中間状態になります。Supervisor が検証結果をこの行に書き戻します"
+  },
+  "life": {
+    "propose": "提案",
+    "sign": "承認",
+    "land": "反映",
+    "verify": "検証",
+    "waitSigner": "{signer} 待ち"
+  },
+  "actions": {
+    "approve": "承認",
+    "reject": "却下",
+    "shelve": "保留",
+    "rejectPlaceholder": "却下理由（必須・一文）",
+    "rejectReasonRequired": "先に却下理由を入力してください",
+    "commitNote": "承認すると即時に変更が適用されます（DB 書き込み）",
+    "working": "処理中…",
+    "actionError": "操作に失敗しました：{msg}"
+  },
+  "typeDesc": {
+    "MERGE": "意味が重複するメモリを統合します",
+    "CORRECT": "draft correction を明確な教訓に書き直します",
+    "PRUNE": "古い / 再利用価値のないメモリを無効化します（ソフト削除）",
+    "PROMOTE": "domain / procedure の長期知識に蒸留します",
+    "DOC_REVISE": "block ドキュメントの改訂草案（doc は直接変更しません）"
+  },
+  "what": {
+    "mergeKeep": "#{id} を保持",
+    "mergeRemove": "{ids} を無効化",
+    "mergeBody": "統合後の本文を更新",
+    "correctRewrite": "#{id} を明確な教訓に書き直し",
+    "correctTitle": "新タイトル：{title}",
+    "correctPromote": "承認と同時に有効化（active）",
+    "correctDraft": "draft のまま維持",
+    "pruneTargets": "{ids} を無効化（ソフト削除）",
+    "promoteNew": "{cls} エントリ「{title}」を追加",
+    "promoteApplies": "applies_to：{applies}",
+    "docBlock": "{block} のドキュメント改訂草案",
+    "docMemos": "doc memo {count} 件を promoted に変更",
+    "docDraft": "改訂草案は提案行に保持 — block docs は変更しません"
+  },
+  "evidence": {
+    "raw": "proposal 原文"
+  },
+  "digest": {
+    "empty": "Supervisor レポートは未生成です",
+    "hint": "定期レポート（週報 / 日報）は W2 スケジューラーが生成し、ここに表示されます"
+  },
+  "audit": {
+    "colCase": "案件",
+    "colProposed": "提案",
+    "colSign": "承認",
+    "colLand": "反映",
+    "colVerify": "Supervisor 検証",
+    "lifecycle": "1 行 1 案件 · 提案 → 承認 → 反映 → 検証 の 4 段ライフサイクル",
+    "empty": "承認履歴はまだありません"
+  }
+}

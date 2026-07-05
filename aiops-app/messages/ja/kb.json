@@ -1,0 +1,82 @@
+{
+  "header": {
+    "path": "/ agent-knowledge · ナレッジ工房"
+  },
+  "loading": "読み込み中…",
+  "manual": {
+    "title": "マニュアル · 反映済みの真理",
+    "tabKnowledge": "Knowledge {count}",
+    "tabLexicon": "Lexicon {count}",
+    "tabExamples": "Examples {count}",
+    "searchPlaceholder": "エントリ / How-to-apply を検索…",
+    "add": "+ 新規エントリ",
+    "colId": "ID",
+    "colClass": "分類",
+    "colText": "エントリ（How-to-apply の冒頭）",
+    "colUses": "uses 90d",
+    "colLast": "最終リコール",
+    "colSrc": "出所",
+    "colUsesShort": "uses",
+    "exColTitle": "タイトル",
+    "newDistilled": "新規蒸留",
+    "disabled": "無効",
+    "empty": "エントリはまだありません — 「+ 新規エントリ」から作成してください",
+    "directivesMoved": "Directives は Supervisor ワークベンチのガバナンス領域へ移動しました（admin 専用）· ON_DUTY はこのページを閲覧できず、Console の「教える」から下書きの提出のみ可能です",
+    "lexColTerm": "あなたの用語",
+    "lexColStandard": "標準用語",
+    "lexColNote": "メモ"
+  },
+  "src": {
+    "human": "人手",
+    "distilled": "Supervisor 蒸留",
+    "teach": "教える"
+  },
+  "inbox": {
+    "title": "受信箱 · レビュー待ち",
+    "breakdown": "W2 doc memo {count}",
+    "chipW2": "W2 memo",
+    "pending": "審査待ち",
+    "proposal": "提案",
+    "why": "理由",
+    "evidence": "根拠",
+    "episode": "▣ episode {id}",
+    "approve": "承認して統合",
+    "reject": "却下…",
+    "disabledTip": "バックエンドは W2 で接続予定です",
+    "signNote": "承認すると DB に反映されます",
+    "empty": "レビュー待ちの項目はありません"
+  },
+  "editor": {
+    "newEntry": "新規エントリ",
+    "editEntry": "エントリを編集",
+    "fieldTitle": "タイトル",
+    "fieldBody": "内容（実際のルール）",
+    "fieldScope": "Scope",
+    "fieldScopeValue": "Scope 値",
+    "fieldScopeNone": "（値なし）",
+    "fieldPriority": "優先度",
+    "save": "保存",
+    "saving": "保存中…",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "deleteConfirm": "このエントリを削除しますか？",
+    "enable": "有効化",
+    "disable": "無効化",
+    "lexNew": "Lexicon エントリを追加",
+    "lexEdit": "Lexicon エントリを編集",
+    "fieldTerm": "あなたの用語（jargon）",
+    "fieldStandard": "標準用語",
+    "fieldNote": "メモ（任意）",
+    "exNew": "Example を追加",
+    "exEdit": "Example を編集",
+    "fieldUser": "USER（このスタイルを引き出す入力）",
+    "fieldIdeal": "IDEAL（理想の応答）"
+  },
+  "teach": {
+    "titlePrefix": "[教える] {name}",
+    "block": "tool/block：{value}",
+    "phase": "phase：{value}",
+    "instruction": "元の指示：{value}",
+    "bodyHint": "（正しいやり方を記述してください）"
+  }
+}

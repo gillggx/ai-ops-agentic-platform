@@ -1,0 +1,12 @@
+{
+  "title": "マイ設定",
+  "subtitle": "あなたの操作から agent が学んだ個人設定（W1）— 自分の build のみに影響します",
+  "empty": "個人設定はまだありません — plan 確認カードで phase を編集すると、agent がここに記録します",
+  "disable": "無効化",
+  "enable": "有効化",
+  "delete": "削除",
+  "deleteConfirm": "この設定を削除しますか？",
+  "learnedAt": "学習日",
+  "active": "有効",
+  "disabled": "無効"
+}

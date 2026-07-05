@@ -1,0 +1,12 @@
+{
+  "title": "我的偏好",
+  "subtitle": "Agent 從你的操作學到的個人偏好（W1）— 只影響你自己的 build",
+  "empty": "還沒有任何個人偏好 — 在 plan 確認卡上編輯 phase 後，agent 會把你的偏好記在這裡",
+  "disable": "停用",
+  "enable": "啟用",
+  "delete": "刪除",
+  "deleteConfirm": "刪除這筆偏好？",
+  "learnedAt": "學到於",
+  "active": "生效中",
+  "disabled": "已停用"
+}

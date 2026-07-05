@@ -1,0 +1,112 @@
+{
+  "title": "Supervisor Workbench",
+  "subtitle": "The Supervisor only proposes — changes land only after human sign-off; dangerous actions run only from the authed UI",
+  "loading": "Loading…",
+  "loadError": "Load failed: {msg}",
+  "roleNote": "Your role: {roles}",
+  "health": {
+    "title": "Health overview",
+    "updatedAt": "Last updated {time}",
+    "s1Title": "Execution health",
+    "s1SuccessRate": "build success rate (last {n})",
+    "s1AvgRounds": "avg LLM calls",
+    "s1Divergence": "divergence count",
+    "s2Title": "Knowledge quality",
+    "s2Pending": "pending proposals",
+    "s2DocMemos": "Builder doc memos",
+    "s2RecallRate": "recall hit rate (this week)",
+    "s3Title": "Cost and resources",
+    "s3Cost": "cost today",
+    "s3Cache": "cache hit",
+    "s3Empty": "LLM empty-response rate",
+    "s3Note": "pending W2 backend — placeholder"
+  },
+  "tabs": {
+    "inbox": "Proposal inbox",
+    "digest": "Periodic reports",
+    "audit": "Sign-off log"
+  },
+  "inbox": {
+    "countNote": "{mine} pending you can sign · {others} for other roles (dimmed)",
+    "empty": "No pending proposals",
+    "signerLabel": "signer {signer}"
+  },
+  "status": {
+    "pending": "Pending",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "expired": "Expired"
+  },
+  "detail": {
+    "none": "Select a proposal from the list on the left",
+    "what": "Proposal",
+    "why": "Why",
+    "evidence": "Evidence",
+    "targetHint": "— click to open the entry in the knowledge workshop",
+    "legendSys": "system fact (machine-verified, solid)",
+    "legendSelf": "agent self-report (dashed)",
+    "legendMem": "memory",
+    "readOnly": "This case is signed by {signer} — your role ({role}) is read-only",
+    "reviewedNote": "{status} · reviewer #{reviewer} · {time}",
+    "expiredNote": "Expired proposals cannot be signed — audit only",
+    "supersedePre": "This proposal is expired — auto-superseded when newer evidence appeared; replaced by",
+    "supersedePost": "(same topic, newer evidence). No zombie proposals.",
+    "supersedeNoRef": "This proposal is expired — superseded by a newer proposal; audit only",
+    "lifecycleNote": "Approval enters a waiting-for-human state; the Supervisor writes verification results back to this row"
+  },
+  "life": {
+    "propose": "Propose",
+    "sign": "Sign-off",
+    "land": "Land",
+    "verify": "Verify",
+    "waitSigner": "waiting for {signer}"
+  },
+  "actions": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "shelve": "Shelve",
+    "rejectPlaceholder": "Reject reason (required, one line)",
+    "rejectReasonRequired": "Enter a reject reason first",
+    "commitNote": "Approval applies the change immediately (DB write)",
+    "working": "Working…",
+    "actionError": "Action failed: {msg}"
+  },
+  "typeDesc": {
+    "MERGE": "merge semantically duplicate memories",
+    "CORRECT": "rewrite a draft correction into a clean lesson",
+    "PRUNE": "deactivate stale / no-longer-useful memories (soft delete)",
+    "PROMOTE": "distil into durable domain / procedure knowledge",
+    "DOC_REVISE": "block doc revision draft (does not touch the doc directly)"
+  },
+  "what": {
+    "mergeKeep": "keep #{id}",
+    "mergeRemove": "deactivate {ids}",
+    "mergeBody": "update the merged body",
+    "correctRewrite": "rewrite #{id} into a clean lesson",
+    "correctTitle": "new title: {title}",
+    "correctPromote": "activates on approval (active)",
+    "correctDraft": "stays draft",
+    "pruneTargets": "deactivate {ids} (soft delete)",
+    "promoteNew": "add {cls} entry: \"{title}\"",
+    "promoteApplies": "applies_to: {applies}",
+    "docBlock": "doc revision draft for {block}",
+    "docMemos": "{count} doc memos marked promoted",
+    "docDraft": "revised draft kept on the proposal row — block docs untouched"
+  },
+  "evidence": {
+    "raw": "raw proposal"
+  },
+  "digest": {
+    "empty": "Supervisor reports not generated yet",
+    "hint": "Periodic reports (weekly / daily) are produced by the W2 scheduler and will appear here"
+  },
+  "audit": {
+    "colCase": "Case",
+    "colProposed": "Proposed",
+    "colSign": "Sign-off",
+    "colLand": "Landed",
+    "colVerify": "Supervisor verify",
+    "lifecycle": "One row per case · propose → sign-off → land → verify lifecycle",
+    "empty": "No sign-off records yet"
+  }
+}

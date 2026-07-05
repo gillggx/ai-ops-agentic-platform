@@ -456,17 +456,23 @@ export function AgentConsole({
   state,
   onTeach,
   onOpenMemory,
+  memoryEditable = false,
 }: {
   state: ConsoleState;
   /** open /agent-knowledge with prefilled context (teach moment) */
   onTeach?: (ctx: { blockId?: string; phaseId?: string }) => void;
   /** jump to /agent-knowledge?id=… */
   onOpenMemory?: (id: string | number) => void;
+  /** 稿 1d（2026-07-06）：PE/IT_ADMIN 點記憶 chip 進工房該筆；
+   *  其他角色（ON_DUTY）開唯讀浮卡，不離開 Console。 */
+  memoryEditable?: boolean;
 }) {
   const t = useTranslations("console");
+  const tm = useTranslations("mem");
   const { events, usage, phases, building, done, doneStatus } = state;
   const [expanded, setExpanded] = React.useState<Record<number, boolean>>({});
   const [costOpen, setCostOpen] = React.useState(false);
+  const [readonlyMem, setReadonlyMem] = React.useState<RecalledMem | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const followRef = useRef(true);
 
@@ -608,12 +614,70 @@ export function AgentConsole({
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
-                  background: "#fbfbf9", color: "#211f1c" }}>
+                  background: "#fbfbf9", color: "#211f1c", position: "relative" }}>
       <style>{`
         @keyframes acPulse{0%,100%{opacity:1}50%{opacity:.3}}
         @keyframes acIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
         @media (prefers-reduced-motion: reduce){.ac-anim{animation:none !important;transition:none !important}}
       `}</style>
+      {/* 稿 1d — 記憶唯讀浮卡（非 PE 角色點 chip 開啟，不離開 Console） */}
+      {readonlyMem && (
+        <>
+          <div onClick={() => setReadonlyMem(null)}
+               style={{ position: "absolute", inset: 0, zIndex: 40, background: "rgba(33,31,28,.18)" }} />
+          <div style={{ position: "absolute", left: 10, right: 10, bottom: 96, zIndex: 41,
+                        background: "#fff", border: "1px solid #ddd6fe", borderRadius: 10,
+                        boxShadow: "0 8px 26px rgba(109,40,217,.13)", overflow: "hidden" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "11px 14px",
+                          borderBottom: "1px solid #f0edfb" }}>
+              <span style={{ fontFamily: M, fontWeight: 700, fontSize: 12, color: "#6d28d9" }}>
+                ◆ #{String(readonlyMem.id ?? "?")}
+              </span>
+              {readonlyMem.memo_class && (
+                <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
+                               border: "1px solid #c4b5fd", color: "#6d28d9" }}>
+                  {readonlyMem.memo_class}
+                </span>
+              )}
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 10, color: "#8a877e", border: "1px solid #e9e7e2",
+                             borderRadius: 4, padding: "1px 6px" }}>{tm("readonly")}</span>
+              <span onClick={() => setReadonlyMem(null)}
+                    style={{ cursor: "pointer", color: "#8a877e", fontSize: 12, padding: "0 2px" }}
+                    title={tm("close")}>✕</span>
+            </div>
+            <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.55 }}>
+                {readonlyMem.title || tm("removed")}
+              </div>
+              {readonlyMem.how_apply && (
+                <div style={{ fontSize: 11.5, color: "#3d3a34", lineHeight: 1.65,
+                              background: "#faf9f6", borderRadius: 6, padding: "8px 10px" }}>
+                  <b style={{ fontSize: 10, color: "#8a877e" }}>{tm("howApply")}</b><br />
+                  {readonlyMem.how_apply}
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: "#8a877e" }}>
+                {tm("source")}{" "}
+                {readonlyMem.written_by && ["planner", "builder", "repair", "supervisor"].includes(readonlyMem.written_by)
+                  ? tm("sourceAgent")
+                  : readonlyMem.written_by === "teach" ? tm("sourceTeach") : tm("sourceHuman")}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 14px",
+                          borderTop: "1px solid #f0edfb", background: "#fcfbf7" }}>
+              <span style={{ fontSize: 10.5, color: "#8a877e", flex: 1 }}>{tm("footerNote")}</span>
+              <button
+                onClick={() => { setReadonlyMem(null); onTeach?.({}); }}
+                style={{ border: "1px solid #dcdad4", background: "#fff", color: "#55534d",
+                         borderRadius: 6, fontSize: 11, padding: "4px 10px", cursor: "pointer",
+                         fontFamily: "inherit" }}>
+                {tm("reportIssue")}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── 3.1 agent status bar ── */}
       <div style={{ padding: "10px 12px 9px", borderBottom: "1px solid #e9e7e2",
@@ -848,10 +912,15 @@ export function AgentConsole({
             return (
               <span key={key}
                     title={`${mem.memo_class ?? ""} — ${mem.how_apply || mem.title || ""}`}
-                    onClick={() => mem.id != null && onOpenMemory?.(mem.id)}
+                    onClick={() => {
+                      if (mem.id == null) return;
+                      // 稿 1d：非 PE 開唯讀浮卡（不離開 Console）；PE 進工房該筆
+                      if (memoryEditable) onOpenMemory?.(mem.id);
+                      else setReadonlyMem(mem);
+                    }}
                     style={{ ...(isNew ? chipS("#7c3aed", "#fff")
                              : chipS("#efe8fc", "#6d28d9", "#ddd0f7")),
-                             cursor: onOpenMemory ? "pointer" : "default" }}>
+                             cursor: "pointer" }}>
                 #{String(mem.id ?? "?")}{n > 1 ? ` ×${n}` : ""}{isNew ? ` ${t("memory.new")}` : ""}
               </span>
             );

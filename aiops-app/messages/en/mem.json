@@ -1,0 +1,12 @@
+{
+  "readonly": "Read-only",
+  "howApply": "How to apply",
+  "source": "Source",
+  "sourceHuman": "Manual",
+  "sourceTeach": "Teach-it",
+  "sourceAgent": "Supervisor distilled",
+  "footerNote": "Your role is read-only — entries are maintained by PE in the Knowledge Workshop",
+  "reportIssue": "Report an issue → PE inbox",
+  "removed": "Entry has been removed",
+  "close": "Close"
+}

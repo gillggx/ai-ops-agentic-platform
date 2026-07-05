@@ -1,0 +1,12 @@
+{
+  "readonly": "唯讀",
+  "howApply": "How to apply",
+  "source": "來源",
+  "sourceHuman": "人工",
+  "sourceTeach": "教它",
+  "sourceAgent": "Supervisor 蒸餾",
+  "footerNote": "你的角色為唯讀 — 條目由 PE 在知識工房維護",
+  "reportIssue": "回報問題 → PE 收件匣",
+  "removed": "條目已移除",
+  "close": "關閉"
+}

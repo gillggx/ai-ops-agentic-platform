@@ -1,20 +1,38 @@
 "use client";
 
 /**
- * Agent Rules & Knowledge — user-owned maintenance surface (V32, 2026-05-11).
+ * 知識工房 /agent-knowledge — redesign per docs-design/supervisor-design.dc.html §1c
+ * (2026-07-06).
  *
- * 4 tabs: Directives / Knowledge / Lexicon / Examples — each backed by
- * a /api/agent-* proxy that forwards to Java. Sidecar's context_loader
- * retrieves these at conversation start to enrich the system prompt.
+ * Information architecture:
+ *  - 手冊（top, white table）= truths in effect. Pill switcher Knowledge /
+ *    Lexicon / Examples, search, + 新增條目. Row click opens the existing
+ *    editor modal (PE editing preserved).
+ *  - 收件匣（bottom, beige panel）= pending review queue. W2 doc memos
+ *    (block_doc_memos) rendered as three-段式 cards (提案 / 為什麼 / 依據).
  *
- * Adapted from /Users/gill/Downloads/agent-rules-standalone (mockup).
+ * NOTE: the Directives tab was REMOVED from this page — directives moved to
+ * the Supervisor workbench governance area (admin-only surface). The old
+ * DirectivesView / ItemRow components were deleted (nothing else imported
+ * them); /api/agent-directives routes are untouched for the new surface.
+ *
+ * NOTE: doc-memo approve — java-backend only exposes
+ * GET /api/v1/agent-knowledge/doc-memos (AgentKnowledgeController). There is
+ * no per-memo approve endpoint yet (memos are only promoted indirectly via
+ * Supervisor DOC_REVISE proposals). Card actions render disabled with a
+ * "W2 波後端接入" tooltip until that endpoint ships.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
+import { useSession } from "next-auth/react";
+
+// ── Types (wire shapes unchanged — snake_case per Java Jackson config) ──
 
 type ScopeType = "global" | "skill" | "tool" | "recipe";
 type Priority = "high" | "med" | "low";
+type MemoClass = "domain" | "preference" | "presentation" | "correction" | "episodic" | "procedure";
 
-interface Directive {
+interface Knowledge {
   id: number;
   scope_type: ScopeType;
   scope_value?: string | null;
@@ -25,17 +43,10 @@ interface Directive {
   source: string;
   created_at: string;
   updated_at: string;
-  uses?: number;
-}
-
-type MemoClass = "domain" | "preference" | "presentation" | "correction" | "episodic" | "procedure";
-type WrittenBy = "planner" | "builder" | "repair" | "human";
-
-interface Knowledge extends Directive {
   uses: number;
   last_used_at?: string | null;
   memo_class?: MemoClass | null;
-  written_by?: WrittenBy | null;
+  written_by?: string | null; // planner|builder|repair|supervisor|human|null
   applies_to?: "plan" | "execute" | "both" | null;
   always_on?: boolean;
 }
@@ -49,18 +60,6 @@ interface DocMemo {
   from_episode?: string | null;
   created_at: string;
 }
-
-// agent provenance (who wrote the memory) — the core "分是誰的" dimension
-const AGENT_META: Record<WrittenBy, { label: string; color: string; bg: string }> = {
-  planner: { label: "Planner", color: "#1d4ed8", bg: "#eff6ff" },
-  builder: { label: "Builder", color: "#047857", bg: "#ecfdf5" },
-  repair:  { label: "Repair",  color: "#b45309", bg: "#fffbeb" },
-  human:   { label: "Human",   color: "#475569", bg: "#f1f5f9" },
-};
-const MEMO_CLASS_COLOR: Record<MemoClass, string> = {
-  domain: "#7c3aed", preference: "#0891b2", presentation: "#db2777",
-  correction: "#dc2626", episodic: "#65a30d", procedure: "#ca8a04",
-};
 
 interface Lexicon {
   id: number;
@@ -85,17 +84,73 @@ interface Example {
   updated_at: string;
 }
 
-const TABS = [
-  { id: "directives", label: "Directives", desc: "always-on prompt rules" },
-  { id: "knowledge",  label: "Knowledge",  desc: "RAG-retrievable domain facts" },
-  { id: "lexicon",    label: "Lexicon",    desc: "your jargon → standard term" },
-  { id: "examples",   label: "Examples",   desc: "few-shot pairs by intent" },
-] as const;
-type Tab = typeof TABS[number]["id"];
+type Pill = "knowledge" | "lexicon" | "examples";
 
-const PRIORITY_COLOR: Record<Priority, string> = {
-  high: "#dc2626", med: "#d97706", low: "#94a3b8",
-};
+// ── Design tokens (docs-design §1c) ─────────────────────────────────────
+
+const C = {
+  ink: "#211f1c",
+  paper: "#fbfbf9",
+  panelBorder: "#dedacf",
+  line: "#e7e3d9",
+  lineSoft: "#f2efe7",
+  headBg: "#f7f5ef",
+  cardHeadLine: "#efece3",
+  cardFoot: "#fcfbf7",
+  mutedStrong: "#54504a",
+  bodyInk: "#3d3a34",
+  muted: "#8a857c",
+  faint: "#a49e91",
+  ghost: "#b6b0a4",
+  purple: "#6d28d9",
+  purpleBg: "#f3effc",
+  purpleBorder: "#ded2f3",
+  purpleChipBorder: "#c4b5fd",
+  purpleSoftBg: "#ede9fe",
+  beige: "#f6f2e8",
+  beigeBorder: "#e8dfc8",
+  amber: "#9a6700",
+  amberBg: "#faf3e2",
+  amberBorder: "#ecd9a8",
+  red: "#b42318",
+  redBorder: "#f0c1b8",
+  inputBorder: "#ddd8cb",
+  pillTrack: "#efece3",
+  evidenceInk: "#475569",
+  evidenceBorder: "#d7dee7",
+} as const;
+
+const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+
+// grid template for the Knowledge manual table (per design)
+const KB_GRID = "64px 92px 1fr 110px 90px 130px 96px";
+const LEX_GRID = "64px 1fr 1fr 1fr 90px";
+const EX_GRID = "64px 1fr 110px 90px";
+
+// written_by values that count as「Supervisor 蒸餾」
+const DISTILLED_WRITERS = new Set(["planner", "builder", "repair", "supervisor"]);
+// teach-drafts are created via the Console 教它 prefill — title carries the marker
+const TEACH_TITLE_MARKERS = ["[教它]", "[Teach it]", "[教える]"];
+
+type SrcKind = "human" | "distilled" | "teach";
+function srcKindOf(k: Knowledge): SrcKind {
+  if (TEACH_TITLE_MARKERS.some((m) => k.title?.startsWith(m))) return "teach";
+  if (k.written_by && DISTILLED_WRITERS.has(k.written_by)) return "distilled";
+  return "human"; // null / "human" / anything unknown → 人工
+}
+
+function fmtShortDate(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}-${dd}`;
+}
+
+function firstLine(text: string): string {
+  return text?.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
@@ -106,10 +161,16 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return j.data as T;
 }
 
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+// ── Main component ──────────────────────────────────────────────────────
+
 export function AgentKnowledgePanel() {
-  // Agent Console 教它入口 (2026-07-04): /agent-knowledge?prefill_block=…&
-  // prefill_phase=…&prefill_instruction=… lands on the knowledge tab with a
-  // draft pre-filled from the build step the user was looking at.
+  const t = useTranslations("kb");
+  const { data: session } = useSession();
+
+  // Agent Console 教它入口 (2026-07-04): ?prefill_block=…&prefill_phase=…&
+  // prefill_instruction=… lands on Knowledge with a pre-filled draft editor.
   const prefill = useMemo(() => {
     if (typeof window === "undefined") return null;
     const q = new URLSearchParams(window.location.search);
@@ -119,168 +180,492 @@ export function AgentKnowledgePanel() {
     if (!block && !phase && !instruction) return null;
     return { block, phase, instruction };
   }, []);
-  // Agent Console 記憶 chip (2026-07-05): /agent-knowledge?id=N 直接打開該筆
-  // 的編輯器，而不是只落在列表頁。
+  // Agent Console 記憶 chip (2026-07-05): ?id=N opens that entry's editor.
   const openId = useMemo(() => {
     if (typeof window === "undefined") return null;
     const raw = new URLSearchParams(window.location.search).get("id");
     const n = raw ? Number(raw) : NaN;
     return Number.isFinite(n) ? n : null;
   }, []);
-  const [tab, setTab] = useState<Tab>((prefill || openId != null) ? "knowledge" : "directives");
 
-  return (
-    <div style={{ padding: 24, maxWidth: 1280, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
-      <header style={{ marginBottom: 18 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Rules &amp; Knowledge</h1>
-        <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>
-          Maintain what the agent knows about your domain. Each tab feeds a
-          different prompt-injection surface — directives ride on every reply,
-          knowledge is RAG-retrieved by relevance, lexicon rewrites jargon
-          inline, examples teach response style.
-        </p>
-      </header>
+  const [pill, setPill] = useState<Pill>("knowledge");
+  const [search, setSearch] = useState("");
 
-      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e2e8f0", marginBottom: 18 }}>
-        {TABS.map((t) => (
-          <button key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: "10px 16px", border: "none", background: "none",
-              borderBottom: tab === t.id ? "2px solid #2563eb" : "2px solid transparent",
-              color: tab === t.id ? "#1e293b" : "#64748b",
-              fontWeight: tab === t.id ? 600 : 400, fontSize: 13.5, cursor: "pointer",
-            }}>
-            {t.label}
-          </button>
-        ))}
-        <span style={{ flex: 1 }}/>
-        <span style={{ alignSelf: "center", fontSize: 12, color: "#94a3b8", paddingRight: 4 }}>
-          {TABS.find((t) => t.id === tab)?.desc}
-        </span>
-      </div>
-
-      {tab === "directives" && <DirectivesView />}
-      {tab === "knowledge"  && <KnowledgeView prefill={prefill} openId={openId} />}
-      {tab === "lexicon"    && <LexiconView />}
-      {tab === "examples"   && <ExamplesView />}
-    </div>
-  );
-}
-
-// ── Directives tab ────────────────────────────────────────────────────
-
-function DirectivesView() {
-  const [items, setItems] = useState<Directive[]>([]);
+  const [knowledge, setKnowledge] = useState<Knowledge[]>([]);
+  const [lexicon, setLexicon] = useState<Lexicon[]>([]);
+  const [examples, setExamples] = useState<Example[]>([]);
+  const [docMemos, setDocMemos] = useState<DocMemo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Directive | "new" | null>(null);
 
-  const load = async () => {
+  const [editingK, setEditingK] = useState<Knowledge | "new" | null>(null);
+  const [editingL, setEditingL] = useState<Lexicon | "new" | null>(null);
+  const [editingE, setEditingE] = useState<Example | "new" | null>(null);
+
+  const loadAll = async () => {
     setLoading(true);
-    try { setItems(await api<Directive[]>("/api/agent-directives")); }
-    finally { setLoading(false); }
+    try {
+      const [ks, ls, es, dm] = await Promise.all([
+        api<Knowledge[]>("/api/agent-knowledge"),
+        api<Lexicon[]>("/api/agent-lexicon").catch(() => [] as Lexicon[]),
+        api<Example[]>("/api/agent-examples").catch(() => [] as Example[]),
+        api<DocMemo[]>("/api/agent-knowledge/doc-memos").catch(() => [] as DocMemo[]),
+      ]);
+      setKnowledge(ks); setLexicon(ls); setExamples(es); setDocMemos(dm);
+    } finally { setLoading(false); }
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void loadAll(); }, []);
 
-  const onSave = async (d: Partial<Directive>, id?: number) => {
-    if (id) await api(`/api/agent-directives/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) });
-    else await api("/api/agent-directives", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) });
-    setEditing(null);
-    await load();
+  // ?id=N — auto-open that entry's editor once the list is in.
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (openId == null || openedRef.current || knowledge.length === 0) return;
+    const hit = knowledge.find((k) => k.id === openId);
+    if (hit) { openedRef.current = true; setEditingK(hit); }
+  }, [openId, knowledge]);
+
+  // 教它 prefill — open the editor once with a draft carrying build-step
+  // context. No id → the editor saves it as a CREATE.
+  useEffect(() => {
+    if (!prefill) return;
+    const ctxLines = [
+      prefill.block ? t("teach.block", { value: prefill.block }) : null,
+      prefill.phase ? t("teach.phase", { value: prefill.phase }) : null,
+      prefill.instruction ? t("teach.instruction", { value: prefill.instruction }) : null,
+    ].filter(Boolean).join("\n");
+    setEditingK({
+      title: t("teach.titlePrefix", { name: prefill.block ?? prefill.phase ?? "build" }),
+      body: `${ctxLines}\n\n${t("teach.bodyHint")}\n**Why:** \n**How to apply:** `,
+      scope_type: "global", scope_value: null, priority: "med",
+    } as unknown as Knowledge);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── CRUD (existing /api proxies reused) ──────────────────────────────
+  const saveKnowledge = async (d: Partial<Knowledge>, id?: number) => {
+    if (id) await api(`/api/agent-knowledge/${id}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(d) });
+    else await api("/api/agent-knowledge", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(d) });
+    setEditingK(null); await loadAll();
+  };
+  const deleteKnowledge = async (id: number) => {
+    if (!confirm(t("editor.deleteConfirm"))) return;
+    await api(`/api/agent-knowledge/${id}`, { method: "DELETE" });
+    setEditingK(null); await loadAll();
+  };
+  const toggleKnowledge = async (d: Knowledge) => {
+    await api(`/api/agent-knowledge/${d.id}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ active: !d.active }) });
+    setEditingK(null); await loadAll();
+  };
+  const saveLexicon = async (term: string, standard: string, note: string, id?: number) => {
+    const body = { term, standard, note: note || null };
+    if (id) await api(`/api/agent-lexicon/${id}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(body) });
+    else await api("/api/agent-lexicon", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) });
+    setEditingL(null); await loadAll();
+  };
+  const deleteLexicon = async (id: number) => {
+    if (!confirm(t("editor.deleteConfirm"))) return;
+    await api(`/api/agent-lexicon/${id}`, { method: "DELETE" });
+    setEditingL(null); await loadAll();
+  };
+  const saveExample = async (d: Partial<Example>, id?: number) => {
+    if (id) await api(`/api/agent-examples/${id}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(d) });
+    else await api("/api/agent-examples", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(d) });
+    setEditingE(null); await loadAll();
+  };
+  const deleteExample = async (id: number) => {
+    if (!confirm(t("editor.deleteConfirm"))) return;
+    await api(`/api/agent-examples/${id}`, { method: "DELETE" });
+    setEditingE(null); await loadAll();
   };
 
-  const onDelete = async (id: number) => {
-    if (!confirm("Delete this directive?")) return;
-    await api(`/api/agent-directives/${id}`, { method: "DELETE" });
-    await load();
-  };
+  // ── Role chip (design top bar: PE purple chip) ───────────────────────
+  const roles = (session as unknown as { roles?: string[] } | null)?.roles ?? [];
+  const username = session?.user?.name ?? session?.user?.email ?? "";
+  const topRole =
+    roles.includes("IT_ADMIN") ? "IT_ADMIN" :
+    roles.includes("PE") ? "PE" :
+    roles.includes("ON_DUTY") ? "ON_DUTY" : null;
 
-  const onToggleActive = async (d: Directive) => {
-    await api(`/api/agent-directives/${d.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: !d.active }) });
-    await load();
+  // ── search filtering per pill ────────────────────────────────────────
+  const q = search.trim().toLowerCase();
+  const filteredK = useMemo(() => !q ? knowledge : knowledge.filter((k) =>
+    k.title?.toLowerCase().includes(q) || k.body?.toLowerCase().includes(q)), [knowledge, q]);
+  const filteredL = useMemo(() => !q ? lexicon : lexicon.filter((l) =>
+    l.term?.toLowerCase().includes(q) || l.standard?.toLowerCase().includes(q) || (l.note ?? "").toLowerCase().includes(q)), [lexicon, q]);
+  const filteredE = useMemo(() => !q ? examples : examples.filter((e) =>
+    e.title?.toLowerCase().includes(q) || e.input_text?.toLowerCase().includes(q) || e.output_text?.toLowerCase().includes(q)), [examples, q]);
+
+  const onAdd = () => {
+    if (pill === "knowledge") setEditingK("new");
+    else if (pill === "lexicon") setEditingL("new");
+    else setEditingE("new");
   };
 
   return (
-    <div>
-      <div style={{ display: "flex", marginBottom: 12 }}>
-        <span style={{ flex: 1 }}/>
-        <button onClick={() => setEditing("new")} style={btnStyle("primary")}>+ New directive</button>
+    <div style={{ padding: 24, maxWidth: 1380, margin: "0 auto", fontFamily: "system-ui, sans-serif", color: C.ink }}>
+      <div style={{
+        background: C.paper, border: `1px solid ${C.panelBorder}`, borderRadius: 12,
+        overflow: "hidden", boxShadow: "0 2px 10px rgba(33,31,28,.07)",
+      }}>
+        {/* top bar — brand + path + role chip (design §1c header) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 20px", borderBottom: `1px solid ${C.line}`, background: "#fff" }}>
+          <span style={{ font: `700 13px ${MONO}`, letterSpacing: ".06em" }}>AIOPS</span>
+          <span style={{ fontSize: 12.5, color: C.muted }}>{t("header.path")}</span>
+          <span style={{ flex: 1 }}/>
+          {topRole && (
+            <span style={{
+              font: `600 11px ${MONO}`, color: C.purple, background: C.purpleBg,
+              border: `1px solid ${C.purpleBorder}`, borderRadius: 6, padding: "3px 10px",
+            }}>
+              {topRole}{username ? ` · ${username}` : ""}
+            </span>
+          )}
+        </div>
+
+        <div style={{ padding: "18px 24px 24px" }}>
+          {/* ── 手冊區 header ── */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>{t("manual.title")}</span>
+            <div style={{ display: "flex", gap: 2, background: C.pillTrack, borderRadius: 7, padding: 2, marginLeft: 6 }}>
+              <PillButton active={pill === "knowledge"} onClick={() => setPill("knowledge")}>
+                {t("manual.tabKnowledge", { count: knowledge.length })}
+              </PillButton>
+              <PillButton active={pill === "lexicon"} onClick={() => setPill("lexicon")}>
+                {t("manual.tabLexicon", { count: lexicon.length })}
+              </PillButton>
+              <PillButton active={pill === "examples"} onClick={() => setPill("examples")}>
+                {t("manual.tabExamples", { count: examples.length })}
+              </PillButton>
+            </div>
+            <span style={{ flex: 1 }}/>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("manual.searchPlaceholder")}
+              style={{
+                border: `1px solid ${C.inputBorder}`, borderRadius: 7, padding: "6px 12px",
+                fontSize: 11.5, width: 220, background: "#fff", fontFamily: "inherit", outline: "none",
+              }}/>
+            <button onClick={onAdd} style={{
+              background: C.ink, color: C.paper, border: "none", borderRadius: 7,
+              padding: "6px 14px", fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+            }}>{t("manual.add")}</button>
+          </div>
+
+          {/* ── 手冊 white table ── */}
+          <div style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden", marginBottom: 24 }}>
+            {loading ? (
+              <div style={{ padding: "28px 16px", textAlign: "center", fontSize: 12, color: C.faint }}>{t("loading")}</div>
+            ) : pill === "knowledge" ? (
+              <KnowledgeTable t={t} items={filteredK} onRowClick={setEditingK}/>
+            ) : pill === "lexicon" ? (
+              <LexiconTable t={t} items={filteredL} onRowClick={setEditingL}/>
+            ) : (
+              <ExamplesTable t={t} items={filteredE} onRowClick={setEditingE}/>
+            )}
+            <div style={{ padding: "8px 16px", fontSize: 10.5, color: C.faint, borderTop: `1px solid ${C.lineSoft}` }}>
+              {t("manual.directivesMoved")}
+            </div>
+          </div>
+
+          {/* ── 收件匣（beige review queue）── */}
+          <div style={{ background: C.beige, border: `1px solid ${C.beigeBorder}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>{t("inbox.title")}</span>
+              <span style={{
+                font: `700 11px ${MONO}`, color: C.amber, background: C.amberBg,
+                border: `1px solid ${C.amberBorder}`, borderRadius: 999, padding: "1px 9px",
+              }}>{docMemos.length}</span>
+              <span style={{ fontSize: 11, color: C.muted }}>{t("inbox.breakdown", { count: docMemos.length })}</span>
+              <span style={{ flex: 1 }}/>
+            </div>
+
+            {docMemos.length === 0 ? (
+              <div style={{ padding: "22px 0", textAlign: "center", fontSize: 12, color: C.faint }}>
+                {loading ? t("loading") : t("inbox.empty")}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+                {docMemos.map((m) => <DocMemoCard key={m.id} t={t} m={m}/>)}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-      {loading ? <p style={muted}>Loading…</p>
-       : items.length === 0 ? <Empty message="No directives yet. Add one to bias every agent response."/>
-       : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-           {items.map((d) => (
-             <ItemRow key={d.id} d={d} onEdit={() => setEditing(d)}
-               onToggleActive={() => onToggleActive(d)}
-               onDelete={() => onDelete(d.id)}/>
-           ))}
-         </div>}
-      {editing && (
-        <DirectiveEditor
-          initial={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSave={onSave}/>
+
+      {/* ── editors (existing modals, PE editing preserved) ── */}
+      {editingK && (
+        <KnowledgeEditor
+          initial={editingK === "new" ? null : editingK}
+          onClose={() => setEditingK(null)}
+          onSave={saveKnowledge}
+          onDelete={deleteKnowledge}
+          onToggleActive={toggleKnowledge}/>
+      )}
+      {editingL && (
+        <LexiconEditor
+          initial={editingL === "new" ? null : editingL}
+          onClose={() => setEditingL(null)}
+          onSave={saveLexicon}
+          onDelete={deleteLexicon}/>
+      )}
+      {editingE && (
+        <ExampleEditor
+          initial={editingE === "new" ? null : editingE}
+          onClose={() => setEditingE(null)}
+          onSave={saveExample}
+          onDelete={deleteExample}/>
       )}
     </div>
   );
 }
 
-function ItemRow({ d, onEdit, onToggleActive, onDelete }: {
-  d: Directive; onEdit: () => void; onToggleActive: () => void; onDelete: () => void;
+type Translator = ReturnType<typeof useTranslations<"kb">>;
+
+// ── 手冊 tables ─────────────────────────────────────────────────────────
+
+function PillButton({ active, onClick, children }: {
+  active: boolean; onClick: () => void; children: React.ReactNode;
 }) {
-  const scopeLabel = d.scope_value ? `${d.scope_type}:${d.scope_value}` : d.scope_type;
+  return (
+    <button onClick={onClick} style={{
+      border: "none", cursor: "pointer", borderRadius: 5, padding: "4px 12px",
+      fontSize: 11.5, fontFamily: "inherit",
+      background: active ? "#fff" : "transparent",
+      color: active ? C.ink : C.muted,
+      fontWeight: active ? 700 : 400,
+      boxShadow: active ? "0 1px 2px rgba(33,31,28,.1)" : "none",
+    }}>{children}</button>
+  );
+}
+
+function TableHead({ grid, cols }: { grid: string; cols: React.ReactNode[] }) {
   return (
     <div style={{
-      padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: 6,
-      background: d.active ? "#fff" : "#f8fafc", opacity: d.active ? 1 : 0.6,
-      display: "flex", alignItems: "flex-start", gap: 12,
+      display: "grid", gridTemplateColumns: grid, padding: "8px 16px",
+      background: C.headBg, borderBottom: `1px solid ${C.line}`,
+      font: `600 10.5px ${MONO}`, color: C.faint, letterSpacing: ".06em",
     }}>
-      <span style={{ width: 8, height: 8, borderRadius: 999, background: PRIORITY_COLOR[d.priority], marginTop: 6, flexShrink: 0 }}/>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>{d.title}</span>
-          <Pill>{scopeLabel}</Pill>
-          <Pill>{d.priority}</Pill>
-          {!d.active && <Pill color="#94a3b8">disabled</Pill>}
-          {d.source === "auto-promoted" && <Pill color="#7c3aed" bg="#f3e8ff">✨ auto</Pill>}
+      {cols.map((c, i) => <span key={i}>{c}</span>)}
+    </div>
+  );
+}
+
+function EmptyRow({ text }: { text: string }) {
+  return <div style={{ padding: "36px 16px", textAlign: "center", fontSize: 12, color: C.faint }}>{text}</div>;
+}
+
+function KnowledgeTable({ t, items, onRowClick }: {
+  t: Translator; items: Knowledge[]; onRowClick: (k: Knowledge) => void;
+}) {
+  return (
+    <div>
+      <TableHead grid={KB_GRID} cols={[
+        t("manual.colId"), t("manual.colClass"), t("manual.colText"),
+        t("manual.colUses"), t("manual.colLast"), t("manual.colSrc"), "",
+      ]}/>
+      {items.length === 0 && <EmptyRow text={t("manual.empty")}/>}
+      {items.map((k) => {
+        const src = srcKindOf(k);
+        return (
+          <div key={k.id}
+            onClick={() => onRowClick(k)}
+            style={{
+              display: "grid", gridTemplateColumns: KB_GRID, padding: "9px 16px",
+              borderBottom: `1px solid ${C.lineSoft}`, alignItems: "center",
+              background: "#fff", cursor: "pointer", opacity: k.active ? 1 : 0.55,
+            }}>
+            <span style={{ font: `700 11px ${MONO}`, color: C.purple }}>◆ #{k.id}</span>
+            <span>
+              {k.memo_class ? (
+                <span style={{
+                  fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
+                  border: `1px solid ${C.purpleChipBorder}`, color: C.purple,
+                }}>{k.memo_class}</span>
+              ) : <span style={{ fontSize: 11, color: C.ghost }}>—</span>}
+            </span>
+            <span style={{ fontSize: 12, paddingRight: 16 }} title={firstLine(k.body)}>
+              {k.title}
+              {src === "distilled" && k.uses === 0 && (
+                <span style={{
+                  fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
+                  background: C.purpleSoftBg, color: C.purple, marginLeft: 6,
+                }}>{t("manual.newDistilled")}</span>
+              )}
+              {!k.active && (
+                <span style={{
+                  fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
+                  background: C.headBg, color: C.faint, marginLeft: 6,
+                }}>{t("manual.disabled")}</span>
+              )}
+            </span>
+            <span style={{ font: `600 12px ${MONO}`, color: (k.uses ?? 0) > 0 ? C.ink : C.ghost }}>
+              {k.uses ?? 0}
+            </span>
+            <span style={{ font: `500 11px ${MONO}`, color: C.muted }}>{fmtShortDate(k.last_used_at)}</span>
+            <span style={{ fontSize: 11, color: C.muted }}>{t(`src.${src}`)}</span>
+            {/* 擬處置 flag — placeholder until W2 wires supervisor proposals */}
+            <span style={{ fontSize: 11, textAlign: "right", color: C.ghost }}>—</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LexiconTable({ t, items, onRowClick }: {
+  t: Translator; items: Lexicon[]; onRowClick: (l: Lexicon) => void;
+}) {
+  return (
+    <div>
+      <TableHead grid={LEX_GRID} cols={[
+        t("manual.colId"), t("manual.lexColTerm"), t("manual.lexColStandard"),
+        t("manual.lexColNote"), t("manual.colUsesShort"),
+      ]}/>
+      {items.length === 0 && <EmptyRow text={t("manual.empty")}/>}
+      {items.map((l) => (
+        <div key={l.id}
+          onClick={() => onRowClick(l)}
+          style={{
+            display: "grid", gridTemplateColumns: LEX_GRID, padding: "9px 16px",
+            borderBottom: `1px solid ${C.lineSoft}`, alignItems: "center",
+            background: "#fff", cursor: "pointer",
+          }}>
+          <span style={{ font: `700 11px ${MONO}`, color: C.purple }}>◆ #{l.id}</span>
+          <span style={{ font: `600 12px ${MONO}` }}>{l.term}</span>
+          <span style={{ fontSize: 12 }}>{l.standard}</span>
+          <span style={{ fontSize: 11.5, color: C.muted }}>{l.note ?? "—"}</span>
+          <span style={{ font: `600 12px ${MONO}`, color: (l.uses ?? 0) > 0 ? C.ink : C.ghost }}>{l.uses ?? 0}</span>
         </div>
-        <div style={{ fontSize: 12.5, color: "#64748b", lineHeight: 1.5 }}>{d.body}</div>
-        {(d.uses ?? 0) > 0 && (
-          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>fired {d.uses} time(s)</div>
-        )}
+      ))}
+    </div>
+  );
+}
+
+function ExamplesTable({ t, items, onRowClick }: {
+  t: Translator; items: Example[]; onRowClick: (e: Example) => void;
+}) {
+  return (
+    <div>
+      <TableHead grid={EX_GRID} cols={[
+        t("manual.colId"), t("manual.exColTitle"), "scope", t("manual.colUsesShort"),
+      ]}/>
+      {items.length === 0 && <EmptyRow text={t("manual.empty")}/>}
+      {items.map((e) => (
+        <div key={e.id}
+          onClick={() => onRowClick(e)}
+          style={{
+            display: "grid", gridTemplateColumns: EX_GRID, padding: "9px 16px",
+            borderBottom: `1px solid ${C.lineSoft}`, alignItems: "center",
+            background: "#fff", cursor: "pointer",
+          }}>
+          <span style={{ font: `700 11px ${MONO}`, color: C.purple }}>◆ #{e.id}</span>
+          <span style={{ fontSize: 12, paddingRight: 16 }} title={firstLine(e.input_text)}>{e.title}</span>
+          <span style={{ font: `500 11px ${MONO}`, color: C.muted }}>
+            {e.scope_value ? `${e.scope_type}:${e.scope_value}` : e.scope_type}
+          </span>
+          <span style={{ font: `600 12px ${MONO}`, color: (e.uses ?? 0) > 0 ? C.ink : C.ghost }}>{e.uses ?? 0}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── 收件匣 doc-memo card（三段式，design §1c W2 card）─────────────────────
+
+function DocMemoCard({ t, m }: { t: Translator; m: DocMemo }) {
+  const pending = m.status === "pending";
+  // No approve endpoint on java-backend yet (checked AgentKnowledgeController:
+  // GET /agent-knowledge/doc-memos only) — actions stay disabled until the W2
+  // wave ships the write path.
+  const disabledBtn: React.CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 10, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "11px 14px 9px", borderBottom: `1px solid ${C.cardHeadLine}` }}>
+        <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 5 }}>
+          <span style={{
+            font: `700 10.5px ${MONO}`, color: C.amber, background: C.amberBg,
+            border: `1px solid ${C.amberBorder}`, borderRadius: 4, padding: "1px 6px",
+          }}>{t("inbox.chipW2")}</span>
+          <span style={{ font: `600 11px ${MONO}`, color: C.faint }}>#m-{m.id}</span>
+          <span style={{ flex: 1 }}/>
+          <span style={{
+            font: `600 10.5px ${MONO}`, borderRadius: 999, padding: "1px 8px",
+            color: pending ? C.amber : C.mutedStrong,
+            background: pending ? C.amberBg : C.headBg,
+            border: `1px solid ${pending ? C.amberBorder : C.line}`,
+          }}>{pending ? t("inbox.pending") : m.status}</span>
+        </div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.45, fontFamily: MONO }}>
+          {m.block_id}{m.param ? ` · ${m.param}` : ""}
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        <button onClick={onToggleActive} style={btnStyle("secondary")} title={d.active ? "disable" : "enable"}>
-          {d.active ? "● on" : "○ off"}
-        </button>
-        <button onClick={onEdit} style={btnStyle("secondary")}>Edit</button>
-        <button onClick={onDelete} style={btnStyle("danger")}>×</button>
+
+      <div style={{
+        padding: "10px 14px", display: "grid", gridTemplateColumns: "48px 1fr",
+        rowGap: 8, columnGap: 10, fontSize: 11.5, lineHeight: 1.6, flex: 1,
+      }}>
+        <div style={{ font: `700 10px ${MONO}`, color: C.muted }}>{t("inbox.proposal")}</div>
+        <div>{m.memo}</div>
+        <div style={{ font: `700 10px ${MONO}`, color: C.muted }}>{t("inbox.why")}</div>
+        <div style={{ color: C.bodyInk }}>—</div>
+        <div style={{ font: `700 10px ${MONO}`, color: C.muted }}>{t("inbox.evidence")}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {m.from_episode ? (
+            <span style={{
+              font: `600 10px ${MONO}`, color: C.evidenceInk,
+              border: `1px solid ${C.evidenceBorder}`, borderRadius: 4, padding: "1px 6px",
+            }}>{t("inbox.episode", { id: m.from_episode })}</span>
+          ) : <span style={{ color: C.ghost }}>—</span>}
+        </div>
+      </div>
+
+      <div style={{
+        display: "flex", gap: 6, padding: "9px 14px", borderTop: `1px solid ${C.cardHeadLine}`,
+        background: C.cardFoot, borderRadius: "0 0 10px 10px",
+      }}>
+        <button disabled title={t("inbox.disabledTip")} style={{
+          background: C.ink, color: C.paper, border: "none", borderRadius: 6,
+          padding: "6px 14px", fontSize: 11.5, fontWeight: 700, ...disabledBtn,
+        }}>{t("inbox.approve")}</button>
+        <button disabled title={t("inbox.disabledTip")} style={{
+          background: "#fff", color: C.red, border: `1px solid ${C.redBorder}`, borderRadius: 6,
+          padding: "6px 12px", fontSize: 11.5, ...disabledBtn,
+        }}>{t("inbox.reject")}</button>
+        <span style={{ flex: 1 }}/>
+        <span style={{ fontSize: 10, color: C.faint, alignSelf: "center" }}>{t("inbox.signNote")}</span>
       </div>
     </div>
   );
 }
 
-function DirectiveEditor({ initial, onClose, onSave }: {
-  initial: Directive | null;
+// ── Editors (pre-redesign modals, restyled to the §1c palette) ──────────
+
+function KnowledgeEditor({ initial, onClose, onSave, onDelete, onToggleActive }: {
+  initial: Knowledge | null;
   onClose: () => void;
-  onSave: (d: Partial<Directive>, id?: number) => Promise<void>;
+  onSave: (d: Partial<Knowledge>, id?: number) => Promise<void>;
+  onDelete: (id: number) => Promise<void>;
+  onToggleActive: (d: Knowledge) => Promise<void>;
 }) {
+  const t = useTranslations("kb");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [scopeType, setScopeType] = useState<ScopeType>(initial?.scope_type ?? "global");
   const [scopeValue, setScopeValue] = useState(initial?.scope_value ?? "");
   const [priority, setPriority] = useState<Priority>(initial?.priority ?? "med");
   const [busy, setBusy] = useState(false);
+  // prefill drafts arrive without id — treat as CREATE
+  const existingId = initial?.id;
   return (
-    <Modal onClose={onClose} title={initial ? "Edit directive" : "New directive"}>
-      <Field label="Title">
+    <Modal onClose={onClose} title={existingId ? t("editor.editEntry") : t("editor.newEntry")}>
+      <Field label={t("editor.fieldTitle")}>
         <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle}/>
       </Field>
-      <Field label="Body (the actual rule)">
+      <Field label={t("editor.fieldBody")}>
         <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={5} style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}/>
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: 10 }}>
-        <Field label="Scope">
+        <Field label={t("editor.fieldScope")}>
           <select value={scopeType} onChange={(e) => setScopeType(e.target.value as ScopeType)} style={inputStyle}>
             <option value="global">global</option>
             <option value="skill">skill</option>
@@ -288,13 +673,13 @@ function DirectiveEditor({ initial, onClose, onSave }: {
             <option value="recipe">recipe</option>
           </select>
         </Field>
-        <Field label={scopeType === "global" ? "(no value)" : "Scope value"}>
+        <Field label={scopeType === "global" ? t("editor.fieldScopeNone") : t("editor.fieldScopeValue")}>
           <input value={scopeValue ?? ""} onChange={(e) => setScopeValue(e.target.value)}
             disabled={scopeType === "global"}
             placeholder={scopeType === "tool" ? "EQP-01" : scopeType === "skill" ? "skill-slug" : ""}
             style={inputStyle}/>
         </Field>
-        <Field label="Priority">
+        <Field label={t("editor.fieldPriority")}>
           <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)} style={inputStyle}>
             <option value="high">high</option>
             <option value="med">med</option>
@@ -311,436 +696,121 @@ function DirectiveEditor({ initial, onClose, onSave }: {
                 title, body, scope_type: scopeType,
                 scope_value: scopeType === "global" ? null : (scopeValue || null),
                 priority,
-              }, initial?.id);
+              }, existingId);
             } finally { setBusy(false); }
           }}
-          style={btnStyle(busy ? "secondary-disabled" : "primary")}>
-          {busy ? "Saving…" : "Save"}
+          style={btnStyle(busy || !title.trim() || !body.trim() ? "disabled" : "primary")}>
+          {busy ? t("editor.saving") : t("editor.save")}
         </button>
-        <button onClick={onClose} style={btnStyle("secondary")}>Cancel</button>
+        <button onClick={onClose} style={btnStyle("secondary")}>{t("editor.cancel")}</button>
+        <span style={{ flex: 1 }}/>
+        {existingId != null && initial && (
+          <>
+            <button onClick={() => void onToggleActive(initial)} style={btnStyle("secondary")}>
+              {initial.active ? t("editor.disable") : t("editor.enable")}
+            </button>
+            <button onClick={() => void onDelete(existingId)} style={btnStyle("danger")}>
+              {t("editor.delete")}
+            </button>
+          </>
+        )}
       </div>
     </Modal>
   );
 }
 
-// ── Knowledge tab (mostly mirrors Directives — same shape) ────────────
-
-type AgentFilter = "all" | WrittenBy | "unclassified";
-type ClassFilter = "all" | MemoClass;
-
-function KnowledgeView({ prefill, openId }: {
-  prefill?: { block: string | null; phase: string | null; instruction: string | null } | null;
-  openId?: number | null;
-}) {
-  const [items, setItems] = useState<Knowledge[]>([]);
-  const [docMemos, setDocMemos] = useState<DocMemo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Knowledge | "new" | null>(null);
-  // ?id=N：清單載入後自動打開該筆編輯器（只開一次）。
-  const openedRef = useRef(false);
-  useEffect(() => {
-    if (openId == null || openedRef.current || items.length === 0) return;
-    const hit = items.find((k) => k.id === openId);
-    if (hit) {
-      openedRef.current = true;
-      setEditing(hit);
-    }
-  }, [openId, items]);
-  const [agentF, setAgentF] = useState<AgentFilter>("all");
-  const [classF, setClassF] = useState<ClassFilter>("all");
-
-  // 教它 prefill: open the editor once with a draft carrying the build-step
-  // context. No id → DirectiveEditor saves it as a CREATE.
-  useEffect(() => {
-    if (!prefill) return;
-    const ctxLines = [
-      prefill.block ? `工具/block：${prefill.block}` : null,
-      prefill.phase ? `phase：${prefill.phase}` : null,
-      prefill.instruction ? `原始指令：${prefill.instruction}` : null,
-    ].filter(Boolean).join("\n");
-    setEditing({
-      title: `[教它] ${prefill.block ?? prefill.phase ?? "build 知識"}`,
-      body: `${ctxLines}\n\n（描述正確做法）\n**Why:** \n**How to apply:** `,
-      scope_type: "global", scope_value: null, priority: "med",
-    } as unknown as Knowledge);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [ks, dm] = await Promise.all([
-        api<Knowledge[]>("/api/agent-knowledge"),
-        api<DocMemo[]>("/api/agent-knowledge/doc-memos").catch(() => [] as DocMemo[]),
-      ]);
-      setItems(ks); setDocMemos(dm);
-    } finally { setLoading(false); }
-  };
-  useEffect(() => { void load(); }, []);
-
-  const onSave = async (d: Partial<Knowledge>, id?: number) => {
-    if (id) await api(`/api/agent-knowledge/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) });
-    else await api("/api/agent-knowledge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) });
-    setEditing(null); await load();
-  };
-  const onDelete = async (id: number) => {
-    if (!confirm("Delete?")) return;
-    await api(`/api/agent-knowledge/${id}`, { method: "DELETE" }); await load();
-  };
-  const onToggleActive = async (d: Knowledge) => {
-    await api(`/api/agent-knowledge/${d.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: !d.active }) });
-    await load();
-  };
-
-  // agent bucket for a row: written_by, or "unclassified" when null (legacy)
-  const bucketOf = (d: Knowledge): AgentFilter => d.written_by ?? "unclassified";
-
-  const showBuilder = agentF === "all" || agentF === "builder";
-  const filtered = useMemo(() => items.filter((d) => {
-    if (agentF !== "all" && bucketOf(d) !== agentF) return false;
-    if (classF !== "all" && d.memo_class !== classF) return false;
-    return true;
-  }), [items, agentF, classF]);
-
-  // per-agent counts for the filter chips (builder = doc-memo count)
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { all: items.length + docMemos.length, builder: docMemos.length };
-    for (const d of items) { const b = bucketOf(d); c[b] = (c[b] ?? 0) + 1; }
-    return c;
-  }, [items, docMemos]);
-
-  return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <FilterGroup label="誰寫的">
-          {(["all", "planner", "builder", "repair", "human", "unclassified"] as AgentFilter[]).map((a) => (
-            <FilterChip key={a} active={agentF === a} onClick={() => setAgentF(a)}
-              color={a !== "all" && a !== "unclassified" ? AGENT_META[a as WrittenBy]?.color : "#475569"}>
-              {a === "all" ? "全部" : a === "unclassified" ? "未分類" : AGENT_META[a as WrittenBy].label}
-              {counts[a] != null && a !== "unclassified" ? ` ${counts[a]}` : ""}
-            </FilterChip>
-          ))}
-        </FilterGroup>
-        <FilterGroup label="類別">
-          {(["all", "domain", "preference", "presentation", "correction", "episodic", "procedure"] as ClassFilter[]).map((c) => (
-            <FilterChip key={c} active={classF === c} onClick={() => setClassF(c)}
-              color={c !== "all" ? MEMO_CLASS_COLOR[c as MemoClass] : "#475569"}>
-              {c === "all" ? "全部" : c}
-            </FilterChip>
-          ))}
-        </FilterGroup>
-        <span style={{ flex: 1 }}/>
-        <button onClick={() => setEditing("new")} style={btnStyle("primary")}>+ New knowledge fact</button>
-      </div>
-
-      {loading ? <p style={muted}>Loading…</p> : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {filtered.map((d) => (
-            <KnowledgeRow key={d.id} d={d} onEdit={() => setEditing(d)}
-              onToggleActive={() => onToggleActive(d)} onDelete={() => onDelete(d.id)}/>
-          ))}
-
-          {/* Builder's memory lives in a separate table (block_doc_memos) —
-              read-only review queue, shown when the agent filter includes it. */}
-          {showBuilder && classF === "all" && docMemos.length > 0 && (
-            <div style={{ marginTop: filtered.length ? 14 : 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: AGENT_META.builder.color, margin: "4px 2px 8px" }}>
-                Builder 的文件備忘（block_doc_memos · 唯讀，Supervisor 審核後才回寫 block docs）
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {docMemos.map((m) => <DocMemoRow key={m.id} m={m}/>)}
-              </div>
-            </div>
-          )}
-
-          {filtered.length === 0 && !(showBuilder && classF === "all" && docMemos.length > 0) && (
-            <Empty message="這個篩選條件下沒有 memory。調整「誰寫的 / 類別」或新增一筆。"/>
-          )}
-        </div>
-      )}
-
-      {editing && (
-        <DirectiveEditor
-          initial={editing === "new" ? null : (editing as unknown as Directive)}
-          onClose={() => setEditing(null)}
-          onSave={onSave as (d: Partial<Directive>, id?: number) => Promise<void>}/>
-      )}
-    </div>
-  );
-}
-
-function KnowledgeRow({ d, onEdit, onToggleActive, onDelete }: {
-  d: Knowledge; onEdit: () => void; onToggleActive: () => void; onDelete: () => void;
-}) {
-  const agent = d.written_by ? AGENT_META[d.written_by] : null;
-  const draft = !d.active;
-  return (
-    <div style={{
-      padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: 6,
-      borderLeft: `3px solid ${agent?.color ?? "#cbd5e1"}`,
-      background: draft ? "#fafafa" : "#fff", opacity: draft ? 0.75 : 1,
-      display: "flex", alignItems: "flex-start", gap: 12,
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>{d.title}</span>
-          {agent
-            ? <Pill color={agent.color} bg={agent.bg}>{agent.label}</Pill>
-            : <Pill color="#94a3b8">未分類</Pill>}
-          {d.memo_class && (
-            <Pill color={MEMO_CLASS_COLOR[d.memo_class]} bg="#fff">{d.memo_class}</Pill>
-          )}
-          {d.always_on && <Pill color="#7c3aed" bg="#f3e8ff">always-on</Pill>}
-          {draft && <Pill color="#b45309" bg="#fffbeb">draft</Pill>}
-          {d.applies_to && d.applies_to !== "both" && <Pill>{d.applies_to}</Pill>}
-        </div>
-        <div style={{ fontSize: 12.5, color: "#64748b", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{d.body}</div>
-        {(d.uses ?? 0) > 0 && (
-          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>recalled {d.uses} time(s)</div>
-        )}
-      </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        <button onClick={onToggleActive} style={btnStyle("secondary")} title={d.active ? "disable" : "enable"}>
-          {d.active ? "● on" : "○ off"}
-        </button>
-        <button onClick={onEdit} style={btnStyle("secondary")}>Edit</button>
-        <button onClick={onDelete} style={btnStyle("danger")}>×</button>
-      </div>
-    </div>
-  );
-}
-
-function DocMemoRow({ m }: { m: DocMemo }) {
-  return (
-    <div style={{
-      padding: "10px 14px", border: "1px solid #e2e8f0", borderRadius: 6,
-      borderLeft: `3px solid ${AGENT_META.builder.color}`, background: "#fff",
-    }}>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
-        <Pill color={AGENT_META.builder.color} bg={AGENT_META.builder.bg}>Builder</Pill>
-        <span style={{ fontFamily: "monospace", fontSize: 12.5, fontWeight: 600, color: "#1e293b" }}>{m.block_id}</span>
-        {m.param && <Pill>{m.param}</Pill>}
-        <Pill color={m.status === "pending" ? "#b45309" : "#475569"} bg={m.status === "pending" ? "#fffbeb" : "#f1f5f9"}>{m.status}</Pill>
-      </div>
-      <div style={{ fontSize: 12.5, color: "#64748b", lineHeight: 1.5 }}>{m.memo}</div>
-      {m.from_episode && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>from episode {m.from_episode}</div>}
-    </div>
-  );
-}
-
-function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginRight: 2 }}>{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function FilterChip({ active, onClick, color, children }: {
-  active: boolean; onClick: () => void; color?: string; children: React.ReactNode;
-}) {
-  return (
-    <button onClick={onClick} style={{
-      padding: "3px 9px", borderRadius: 12, fontSize: 11.5, cursor: "pointer",
-      border: `1px solid ${active ? (color ?? "#2563eb") : "#e2e8f0"}`,
-      background: active ? (color ?? "#2563eb") : "#fff",
-      color: active ? "#fff" : (color ?? "#475569"), fontWeight: active ? 600 : 500,
-    }}>{children}</button>
-  );
-}
-
-// ── Lexicon tab ───────────────────────────────────────────────────────
-
-function LexiconView() {
-  const [items, setItems] = useState<Lexicon[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Lexicon | "new" | null>(null);
-
-  const load = async () => {
-    setLoading(true);
-    try { setItems(await api<Lexicon[]>("/api/agent-lexicon")); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { void load(); }, []);
-
-  const onSave = async (term: string, standard: string, note: string, id?: number) => {
-    const body = { term, standard, note: note || null };
-    if (id) await api(`/api/agent-lexicon/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    else await api("/api/agent-lexicon", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    setEditing(null); await load();
-  };
-
-  const onDelete = async (id: number) => {
-    if (!confirm("Delete?")) return;
-    await api(`/api/agent-lexicon/${id}`, { method: "DELETE" }); await load();
-  };
-
-  return (
-    <div>
-      <div style={{ display: "flex", marginBottom: 12 }}>
-        <span style={{ flex: 1 }}/>
-        <button onClick={() => setEditing("new")} style={btnStyle("primary")}>+ New lexicon entry</button>
-      </div>
-      {loading ? <p style={muted}>Loading…</p>
-       : items.length === 0 ? <Empty message='No lexicon yet. Add jargon → standard pairs (e.g. "打點" → "OOC excursion").'/>
-       : <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-           <thead><tr style={{ background: "#f8fafc" }}>
-             <th style={th}>Your term</th><th style={th}>Standard term</th><th style={th}>Note</th>
-             <th style={th}>Uses</th><th style={th}/>
-           </tr></thead>
-           <tbody>{items.map((l) => (
-             <tr key={l.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
-               <td style={td}><span style={{ fontFamily: "monospace", fontWeight: 600 }}>{l.term}</span></td>
-               <td style={td}>{l.standard}</td>
-               <td style={{ ...td, color: "#94a3b8" }}>{l.note ?? "—"}</td>
-               <td style={td}>{l.uses}</td>
-               <td style={{ ...td, textAlign: "right" }}>
-                 <button onClick={() => setEditing(l)} style={btnStyle("secondary")}>Edit</button>
-                 <button onClick={() => onDelete(l.id)} style={btnStyle("danger")}>×</button>
-               </td>
-             </tr>))}
-           </tbody>
-         </table>}
-      {editing && (
-        <LexiconEditor initial={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)} onSave={onSave}/>
-      )}
-    </div>
-  );
-}
-
-function LexiconEditor({ initial, onClose, onSave }: {
+function LexiconEditor({ initial, onClose, onSave, onDelete }: {
   initial: Lexicon | null; onClose: () => void;
   onSave: (term: string, standard: string, note: string, id?: number) => Promise<void>;
+  onDelete: (id: number) => Promise<void>;
 }) {
+  const t = useTranslations("kb");
   const [term, setTerm] = useState(initial?.term ?? "");
   const [standard, setStandard] = useState(initial?.standard ?? "");
   const [note, setNote] = useState(initial?.note ?? "");
   return (
-    <Modal onClose={onClose} title={initial ? "Edit lexicon" : "New lexicon entry"}>
-      <Field label="Your term (jargon)"><input value={term} onChange={(e) => setTerm(e.target.value)} style={inputStyle} placeholder="e.g. 打點"/></Field>
-      <Field label="Standard term (canonical)"><input value={standard} onChange={(e) => setStandard(e.target.value)} style={inputStyle} placeholder="e.g. OOC excursion"/></Field>
-      <Field label="Note (optional)"><input value={note ?? ""} onChange={(e) => setNote(e.target.value)} style={inputStyle}/></Field>
+    <Modal onClose={onClose} title={initial ? t("editor.lexEdit") : t("editor.lexNew")}>
+      <Field label={t("editor.fieldTerm")}><input value={term} onChange={(e) => setTerm(e.target.value)} style={inputStyle}/></Field>
+      <Field label={t("editor.fieldStandard")}><input value={standard} onChange={(e) => setStandard(e.target.value)} style={inputStyle}/></Field>
+      <Field label={t("editor.fieldNote")}><input value={note ?? ""} onChange={(e) => setNote(e.target.value)} style={inputStyle}/></Field>
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <button disabled={!term.trim() || !standard.trim()} onClick={() => void onSave(term, standard, note, initial?.id)} style={btnStyle(!term.trim() || !standard.trim() ? "secondary-disabled" : "primary")}>Save</button>
-        <button onClick={onClose} style={btnStyle("secondary")}>Cancel</button>
+        <button disabled={!term.trim() || !standard.trim()}
+          onClick={() => void onSave(term, standard, note, initial?.id)}
+          style={btnStyle(!term.trim() || !standard.trim() ? "disabled" : "primary")}>{t("editor.save")}</button>
+        <button onClick={onClose} style={btnStyle("secondary")}>{t("editor.cancel")}</button>
+        <span style={{ flex: 1 }}/>
+        {initial && (
+          <button onClick={() => void onDelete(initial.id)} style={btnStyle("danger")}>{t("editor.delete")}</button>
+        )}
       </div>
     </Modal>
   );
 }
 
-// ── Examples tab ──────────────────────────────────────────────────────
-
-function ExamplesView() {
-  const [items, setItems] = useState<Example[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Example | "new" | null>(null);
-
-  const load = async () => {
-    setLoading(true);
-    try { setItems(await api<Example[]>("/api/agent-examples")); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { void load(); }, []);
-
-  const onSave = async (d: Partial<Example>, id?: number) => {
-    if (id) await api(`/api/agent-examples/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) });
-    else await api("/api/agent-examples", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) });
-    setEditing(null); await load();
-  };
-  const onDelete = async (id: number) => {
-    if (!confirm("Delete?")) return;
-    await api(`/api/agent-examples/${id}`, { method: "DELETE" }); await load();
-  };
-
-  return (
-    <div>
-      <div style={{ display: "flex", marginBottom: 12 }}>
-        <span style={{ flex: 1 }}/>
-        <button onClick={() => setEditing("new")} style={btnStyle("primary")}>+ New few-shot example</button>
-      </div>
-      {loading ? <p style={muted}>Loading…</p>
-       : items.length === 0 ? <Empty message="No examples yet. Add input → desired-output pairs to teach response style."/>
-       : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-           {items.map((e) => (
-             <div key={e.id} style={{ padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: 6, background: "#fff" }}>
-               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                 <span style={{ fontSize: 14, fontWeight: 600 }}>{e.title}</span>
-                 <Pill>{e.scope_value ? `${e.scope_type}:${e.scope_value}` : e.scope_type}</Pill>
-                 <span style={{ flex: 1 }}/>
-                 <button onClick={() => setEditing(e)} style={btnStyle("secondary")}>Edit</button>
-                 <button onClick={() => onDelete(e.id)} style={btnStyle("danger")}>×</button>
-               </div>
-               <div style={{ fontSize: 12, color: "#475569", whiteSpace: "pre-wrap", marginBottom: 6 }}><b>USER:</b> {e.input_text}</div>
-               <div style={{ fontSize: 12, color: "#0f766e", whiteSpace: "pre-wrap" }}><b>IDEAL:</b> {e.output_text}</div>
-             </div>
-           ))}
-         </div>}
-      {editing && (
-        <ExampleEditor initial={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)} onSave={onSave}/>
-      )}
-    </div>
-  );
-}
-
-function ExampleEditor({ initial, onClose, onSave }: {
+function ExampleEditor({ initial, onClose, onSave, onDelete }: {
   initial: Example | null; onClose: () => void;
   onSave: (d: Partial<Example>, id?: number) => Promise<void>;
+  onDelete: (id: number) => Promise<void>;
 }) {
+  const t = useTranslations("kb");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [scopeType, setScopeType] = useState<ScopeType>(initial?.scope_type ?? "global");
   const [scopeValue, setScopeValue] = useState(initial?.scope_value ?? "");
   const [inputText, setInputText] = useState(initial?.input_text ?? "");
   const [outputText, setOutputText] = useState(initial?.output_text ?? "");
+  const invalid = !title.trim() || !inputText.trim() || !outputText.trim();
   return (
-    <Modal onClose={onClose} title={initial ? "Edit example" : "New example"}>
-      <Field label="Title"><input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle}/></Field>
+    <Modal onClose={onClose} title={initial ? t("editor.exEdit") : t("editor.exNew")}>
+      <Field label={t("editor.fieldTitle")}><input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle}/></Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
-        <Field label="Scope">
+        <Field label={t("editor.fieldScope")}>
           <select value={scopeType} onChange={(e) => setScopeType(e.target.value as ScopeType)} style={inputStyle}>
             <option value="global">global</option><option value="skill">skill</option>
             <option value="tool">tool</option><option value="recipe">recipe</option>
           </select>
         </Field>
-        <Field label={scopeType === "global" ? "(no value)" : "Scope value"}>
+        <Field label={scopeType === "global" ? t("editor.fieldScopeNone") : t("editor.fieldScopeValue")}>
           <input value={scopeValue ?? ""} onChange={(e) => setScopeValue(e.target.value)} disabled={scopeType === "global"} style={inputStyle}/>
         </Field>
       </div>
-      <Field label="USER (input that triggers this style)"><textarea value={inputText} onChange={(e) => setInputText(e.target.value)} rows={4} style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}/></Field>
-      <Field label="IDEAL RESPONSE (the agent should answer like this)"><textarea value={outputText} onChange={(e) => setOutputText(e.target.value)} rows={6} style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}/></Field>
+      <Field label={t("editor.fieldUser")}><textarea value={inputText} onChange={(e) => setInputText(e.target.value)} rows={4} style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}/></Field>
+      <Field label={t("editor.fieldIdeal")}><textarea value={outputText} onChange={(e) => setOutputText(e.target.value)} rows={6} style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}/></Field>
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <button disabled={!title.trim() || !inputText.trim() || !outputText.trim()}
+        <button disabled={invalid}
           onClick={() => void onSave({
             title, scope_type: scopeType,
             scope_value: scopeType === "global" ? null : (scopeValue || null),
             input_text: inputText, output_text: outputText,
           }, initial?.id)}
-          style={btnStyle(!title.trim() || !inputText.trim() || !outputText.trim() ? "secondary-disabled" : "primary")}>Save</button>
-        <button onClick={onClose} style={btnStyle("secondary")}>Cancel</button>
+          style={btnStyle(invalid ? "disabled" : "primary")}>{t("editor.save")}</button>
+        <button onClick={onClose} style={btnStyle("secondary")}>{t("editor.cancel")}</button>
+        <span style={{ flex: 1 }}/>
+        {initial && (
+          <button onClick={() => void onDelete(initial.id)} style={btnStyle("danger")}>{t("editor.delete")}</button>
+        )}
       </div>
     </Modal>
   );
 }
 
-// ── Shared bits ───────────────────────────────────────────────────────
+// ── Shared bits ─────────────────────────────────────────────────────────
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
     <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} style={{
       position: "fixed", inset: 0, zIndex: 1000, padding: 24,
-      background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(33,31,28,0.45)", display: "flex", alignItems: "center", justifyContent: "center",
     }}>
       <div style={{
         width: "min(640px, 100%)", maxHeight: "90vh", overflowY: "auto",
-        background: "#fff", borderRadius: 8, padding: "20px 24px",
-        boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+        background: C.paper, border: `1px solid ${C.panelBorder}`,
+        borderRadius: 10, padding: "20px 24px",
+        boxShadow: "0 20px 50px rgba(33,31,28,0.25)",
       }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{title}</h2>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.ink }}>{title}</h2>
           <span style={{ flex: 1 }}/>
-          <button onClick={onClose} style={{ all: "unset", cursor: "pointer", padding: 4, fontSize: 18, color: "#94a3b8" }}>×</button>
+          <button onClick={onClose} style={{ all: "unset", cursor: "pointer", padding: 4, fontSize: 18, color: C.faint }}>×</button>
         </div>
         {children}
       </div>
@@ -751,37 +821,27 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 10 }}>
-      <label style={{ display: "block", fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>{label}</label>
+      <label style={{
+        display: "block", font: `600 10px ${MONO}`, color: C.muted,
+        textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4,
+      }}>{label}</label>
       {children}
     </div>
   );
 }
 
-function Pill({ children, color, bg }: { children: React.ReactNode; color?: string; bg?: string }) {
-  return <span style={{
-    display: "inline-flex", padding: "1px 7px", borderRadius: 3,
-    fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em",
-    color: color ?? "#475569", background: bg ?? "#f1f5f9",
-    border: "1px solid #e2e8f0", textTransform: "uppercase", whiteSpace: "nowrap",
-  }}>{children}</span>;
-}
-
-function Empty({ message }: { message: string }) {
-  return <div style={{ padding: "60px 28px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>{message}</div>;
-}
-
-const muted = { color: "#94a3b8", fontSize: 13, padding: 24, textAlign: "center" as const };
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "6px 10px", fontSize: 13,
-  border: "1px solid #cbd5e1", borderRadius: 4, outline: "none", background: "#fff",
+  border: `1px solid ${C.inputBorder}`, borderRadius: 6, outline: "none", background: "#fff",
 };
-const th: React.CSSProperties = { padding: "8px 12px", textAlign: "left", fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 };
-const td: React.CSSProperties = { padding: "10px 12px" };
 
-function btnStyle(kind: "primary" | "secondary" | "secondary-disabled" | "danger"): React.CSSProperties {
-  const base: React.CSSProperties = { padding: "5px 11px", borderRadius: 4, fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1px solid transparent", marginLeft: 4 };
-  if (kind === "primary") return { ...base, background: "#2563eb", color: "#fff", borderColor: "#2563eb" };
-  if (kind === "danger") return { ...base, background: "#fef2f2", color: "#dc2626", borderColor: "#fecaca" };
-  if (kind === "secondary-disabled") return { ...base, background: "#f1f5f9", color: "#94a3b8", borderColor: "#e2e8f0", cursor: "not-allowed" };
-  return { ...base, background: "#fff", color: "#475569", borderColor: "#cbd5e1" };
+function btnStyle(kind: "primary" | "secondary" | "disabled" | "danger"): React.CSSProperties {
+  const base: React.CSSProperties = {
+    padding: "6px 14px", borderRadius: 6, fontSize: 11.5, fontWeight: 600,
+    cursor: "pointer", border: "1px solid transparent",
+  };
+  if (kind === "primary") return { ...base, background: C.ink, color: C.paper, fontWeight: 700 };
+  if (kind === "danger") return { ...base, background: "#fff", color: C.red, borderColor: C.redBorder };
+  if (kind === "disabled") return { ...base, background: C.headBg, color: C.ghost, borderColor: C.line, cursor: "not-allowed" };
+  return { ...base, background: "#fff", color: C.mutedStrong, borderColor: C.inputBorder };
 }

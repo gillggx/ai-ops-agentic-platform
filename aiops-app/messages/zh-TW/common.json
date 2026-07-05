@@ -7,5 +7,6 @@
   "accountSettings": "帳號設定",
   "changePassword": "變更密碼",
   "signInMethod": "登入方式：{provider}",
-  "language": "語言"
+  "language": "語言",
+  "myPreferences": "我的偏好"
 }

@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <style>
+    body{margin:0;background:#edeae2;}
+    *{box-sizing:border-box}
+  </style>
+</helmet>
+
+<section style="padding:56px 64px;font-family:-apple-system,'Segoe UI','Noto Sans TC',sans-serif;color:#211f1c">
+  <div style="max-width:1600px;margin-bottom:36px">
+    <div style="font:600 11px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:#8a857c;text-transform:uppercase;margin-bottom:6px">Turn 1 · Supervisor 工作台 + 知識工房 · 2026-07-05 brief</div>
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700">第 1 輪 — 四張稿共用「收件匣卡片」語彙</h1>
+    <p style="margin:0;font-size:13px;color:#6f6a61;max-width:900px;line-height:1.7">
+      Tokens 沿 Console 基準（#fbfbf9 底／墨 #211f1c／琥珀=風險／綠=通過／紫=記憶·知識／Planner 藍只留給 plan 語意／mono=代號數字；▣ 系統事實實線、△ 自述虛線、◆ 記憶）。
+      <a href="#1a" style="color:#1d4ed8">1a</a> 工作台可互動：右上切 IT_ADMIN / PE / DEV，側欄、收件匣過濾、簽核權跟著變；三個分頁（收件匣／定期報告／簽核紀錄）都能點。
+      <a href="#1b" style="color:#1d4ed8">1b</a> 是收件匣的卡片流變體；<a href="#1c" style="color:#1d4ed8">1c</a> 知識工房；<a href="#1d" style="color:#1d4ed8">1d</a> Console 記憶 chip 唯讀卡。
+      灰底 mono 小字＝i18n key 樣例（右側 Tweaks 可關；紅色場景也可切平日）。
+    </p>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:72px;align-items:flex-start">
+
+    <!-- ══════════════════════════════════ 1a Supervisor 工作台 -->
+    <div id="1a" style="width:1600px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:22px;border-radius:6px;background:#211f1c;color:#fbfbf9;font:700 11px ui-monospace,monospace">1a</span>
+        <span style="font-size:14px;font-weight:700">Supervisor 工作台 — master-detail 收件匣（建議方向）</span>
+        <span style="font-size:12px;color:#8a857c">互動：切角色／切分頁／點左側清單</span>
+      </div>
+
+      <div style="background:#fbfbf9;border:1px solid #dedacf;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(33,31,28,.07)">
+
+        <!-- app bar -->
+        <div style="display:flex;align-items:center;gap:14px;padding:10px 20px;border-bottom:1px solid #e7e3d9;background:#fff">
+          <span style="font:700 13px ui-monospace,monospace;letter-spacing:.06em">AIOPS</span>
+          <span style="font-size:12.5px;color:#8a857c">/ supervisor · Supervisor 工作台</span>
+          <span style="display:{{ keyDisp }};background:#efece3;color:#b6b0a4;border-radius:3px;padding:1px 5px;font:500 9.5px ui-monospace,monospace">sup.title</span>
+          <span style="flex:1"></span>
+          <span style="font-size:11px;color:#8a857c">demo 角色</span>
+          <div style="display:flex;gap:4px">
+            <sc-for list="{{ roleBtns }}" as="rb" hint-placeholder-count="3">
+              <button onClick="{{ rb.onClick }}" style="padding:5px 12px;border-radius:6px;font:600 12px ui-monospace,monospace;cursor:pointer;border:1px solid {{ rb.bd }};background:{{ rb.bg }};color:{{ rb.fg }}">{{ rb.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:210px 1fr;min-height:840px">
+
+          <!-- sidebar -->
+          <div style="border-right:1px solid #e7e3d9;background:#f7f5ef;padding:14px 10px;display:flex;flex-direction:column;gap:2px">
+            <div style="font:600 10px ui-monospace,monospace;letter-spacing:.1em;color:#a49e91;padding:4px 10px 8px;text-transform:uppercase">入口按角色顯示</div>
+            <sc-for list="{{ sidebarItems }}" as="nv" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;font-size:12.5px;background:{{ nv.bg }};color:{{ nv.fg }};font-weight:{{ nv.wt }}">
+                <span style="font-family:ui-monospace,monospace;font-size:11px;width:14px;color:{{ nv.glyphFg }}">{{ nv.glyph }}</span>
+                <span style="flex:1">{{ nv.label }}</span>
+                <span style="display:{{ nv.badgeDisp }};background:#9a6700;color:#fff;border-radius:999px;font:700 10px ui-monospace,monospace;padding:1px 7px">{{ nv.badge }}</span>
+              </div>
+            </sc-for>
+            <div style="margin:8px 10px 0;padding:8px 10px;border:1px dashed #ddd8cb;border-radius:7px;font-size:10.5px;color:#a49e91;line-height:1.6;display:{{ gateNoteDisp }}">{{ gateNote }}</div>
+            <div style="flex:1"></div>
+            <div style="font-size:10.5px;color:#a49e91;line-height:1.6;padding:10px;border-top:1px dashed #ddd8cb">
+              硬規則：Supervisor 只有提案權，落地一律經人簽核；危險動作僅限 authed UI。
+            </div>
+          </div>
+
+          <!-- main -->
+          <div style="padding:18px 24px 24px;min-width:0">
+
+            <!-- health strip -->
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+              <span style="font-size:13px;font-weight:700">健康總覽</span>
+              <span style="display:{{ keyDisp }};background:#efece3;color:#b6b0a4;border-radius:3px;padding:1px 5px;font:500 9.5px ui-monospace,monospace">sup.health.title</span>
+              <span style="flex:1"></span>
+              <span style="font:500 11px ui-monospace,monospace;color:#8a857c">2026-07-05 21:30 · 每 5 分鐘更新</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:12px;margin-bottom:20px">
+              <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;padding:12px 16px">
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+                  <span style="font:700 11px ui-monospace,monospace;color:#1d4ed8">S1</span>
+                  <span style="font-size:12px;font-weight:600">執行健康</span>
+                  <span style="flex:1"></span>
+                  <span style="font:600 11px ui-monospace,monospace;color:#9a6700;cursor:pointer" title="錨到週報 W27 退步偵測">▲ SLASH −4</span>
+                </div>
+                <div style="display:flex;gap:22px">
+                  <div><div style="font:700 20px ui-monospace,monospace">87%</div><div style="font-size:10.5px;color:#8a857c">近 50 次 build 成功率</div></div>
+                  <div><div style="font:700 20px ui-monospace,monospace">2.4</div><div style="font-size:10.5px;color:#8a857c">平均 rounds</div></div>
+                  <div><div style="font:600 12.5px ui-monospace,monospace;margin-top:4px">param-missing</div><div style="font-size:10.5px;color:#8a857c">拒因 top1 · 18%</div></div>
+                </div>
+              </div>
+              <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;padding:12px 16px">
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+                  <span style="font:700 11px ui-monospace,monospace;color:#6d28d9">S2</span>
+                  <span style="font-size:12px;font-weight:600">知識品質</span>
+                  <span style="flex:1"></span>
+                  <span style="font:600 11px ui-monospace,monospace;color:#9a6700">▲ 佇列偏高</span>
+                </div>
+                <div style="display:flex;gap:22px">
+                  <div><div style="font:700 20px ui-monospace,monospace">86</div><div style="font-size:10.5px;color:#8a857c">生效知識條目</div></div>
+                  <div><div style="font:700 20px ui-monospace,monospace">62%</div><div style="font-size:10.5px;color:#8a857c">本週召回命中率</div></div>
+                  <div><div style="font:700 20px ui-monospace,monospace;color:#9a6700">46</div><div style="font-size:10.5px;color:#8a857c">待審 W2 31 · W3 12 · 教 3</div></div>
+                </div>
+              </div>
+              <div style="background:{{ s3Bg }};border:1px solid {{ s3Bd }};border-radius:10px;padding:12px 16px">
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+                  <span style="font:700 11px ui-monospace,monospace;color:#0e7490">S3</span>
+                  <span style="font-size:12px;font-weight:600">成本與資源</span>
+                  <span style="flex:1"></span>
+                  <span style="font:700 11px ui-monospace,monospace;color:{{ s3AlertFg }}">{{ s3Alert }}</span>
+                </div>
+                <div style="display:flex;gap:22px;align-items:flex-start">
+                  <div><div style="font:700 20px ui-monospace,monospace">{{ s3Cost }}</div><div style="font-size:10.5px;color:#8a857c">今日花費 {{ s3CostNote }}</div></div>
+                  <div><div style="font:700 20px ui-monospace,monospace">{{ s3Cache }}</div><div style="font-size:10.5px;color:#8a857c">cache hit {{ s3CacheNote }}</div></div>
+                  <div><div style="font:800 20px ui-monospace,monospace;color:{{ s3EmptyFg }}">{{ s3Empty }}</div><div style="font-size:10.5px;color:#8a857c">GLM 空回應率</div></div>
+                  <div style="margin-left:auto;display:{{ s3AnchorDisp }}"><button onClick="{{ goProposal21 }}" style="border:1px solid #f0c1b8;background:#fff;color:#b42318;border-radius:6px;font:600 11px ui-monospace,monospace;padding:5px 10px;cursor:pointer">→ 提案 #21</button></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- tabs -->
+            <div style="display:flex;gap:2px;border-bottom:1px solid #e7e3d9;margin-bottom:14px;align-items:center">
+              <sc-for list="{{ tabBtns }}" as="tb" hint-placeholder-count="3">
+                <button onClick="{{ tb.onClick }}" style="display:flex;gap:7px;align-items:center;padding:9px 16px;border:none;background:none;cursor:pointer;font-size:13px;color:{{ tb.fg }};font-weight:{{ tb.wt }};border-bottom:2px solid {{ tb.bd }};margin-bottom:-1px">
+                  <span>{{ tb.label }}</span>
+                  <span style="display:{{ tb.badgeDisp }};background:#f4e8cf;color:#9a6700;border-radius:999px;font:700 10.5px ui-monospace,monospace;padding:1px 7px">{{ tb.badge }}</span>
+                </button>
+              </sc-for>
+              <span style="flex:1"></span>
+              <span style="font-size:11.5px;color:#8a857c;padding-right:4px">依角色過濾：{{ roleFilterNote }}</span>
+              <span style="display:{{ keyDisp }};background:#efece3;color:#b6b0a4;border-radius:3px;padding:1px 5px;font:500 9.5px ui-monospace,monospace">sup.inbox.roleFilter</span>
+            </div>
+
+            <!-- ═══ inbox tab -->
+            <sc-if value="{{ isInbox }}" hint-placeholder-val="{{ true }}">
+              <div style="display:grid;grid-template-columns:400px 1fr;gap:16px;align-items:start">
+
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <div style="display:flex;align-items:center;gap:8px;padding:0 2px 4px">
+                    <span style="font-size:11.5px;color:#8a857c">{{ listCountNote }}</span>
+                    <span style="flex:1"></span>
+                    <button style="display:{{ batchDisp }};border:1px solid #ddd8cb;background:#fff;color:#54504a;border-radius:6px;font-size:11px;padding:4px 10px;cursor:pointer">{{ batchLabel }}</button>
+                  </div>
+                  <sc-for list="{{ inboxList }}" as="p" hint-placeholder-count="6">
+                    <div onClick="{{ p.onClick }}" style="cursor:pointer;background:#fff;border:1.5px solid {{ p.rowBd }};border-radius:9px;padding:10px 12px;opacity:{{ p.dim }}">
+                      <div style="display:flex;gap:7px;align-items:center;margin-bottom:4px">
+                        <span style="font:700 10.5px ui-monospace,monospace;color:{{ p.typeFg }};background:{{ p.typeBg }};border:1px solid {{ p.typeBd }};border-radius:4px;padding:1px 6px">{{ p.typeLabel }}</span>
+                        <span style="font:600 11px ui-monospace,monospace;color:#a49e91">#{{ p.id }}</span>
+                        <span style="flex:1"></span>
+                        <span style="font:600 10.5px ui-monospace,monospace;color:{{ p.stFg }};background:{{ p.stBg }};border:1px solid {{ p.stBd }};border-radius:999px;padding:1px 8px">{{ p.stLabel }}</span>
+                      </div>
+                      <div style="font-size:12.5px;font-weight:600;line-height:1.45;margin-bottom:3px">{{ p.title }}</div>
+                      <div style="font:500 10px ui-monospace,monospace;color:#b6b0a4;margin-top:4px">{{ p.when }} · 簽核者 {{ p.signer }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+
+                <!-- detail -->
+                <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;min-width:0">
+                  <div style="padding:14px 18px;border-bottom:1px solid #efece3">
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+                      <span style="font:700 11px ui-monospace,monospace;color:{{ selTypeFg }};background:{{ selTypeBg }};border:1px solid {{ selTypeBd }};border-radius:4px;padding:2px 7px">{{ selTypeLabel }}</span>
+                      <span style="font:600 12px ui-monospace,monospace;color:#a49e91">#{{ selId }}</span>
+                      <span style="font:600 10.5px ui-monospace,monospace;color:{{ selStFg }};background:{{ selStBg }};border:1px solid {{ selStBd }};border-radius:999px;padding:1px 8px">{{ selStLabel }}</span>
+                      <span style="flex:1"></span>
+                      <span style="font:500 11px ui-monospace,monospace;color:#8a857c">{{ selWhen }} · 簽核者 {{ selSigner }}</span>
+                    </div>
+                    <div style="font-size:15px;font-weight:700;line-height:1.4">{{ selTitle }}</div>
+                  </div>
+
+                  <div style="padding:14px 18px;display:grid;grid-template-columns:64px 1fr;row-gap:14px;column-gap:14px">
+                    <div style="font:700 10.5px ui-monospace,monospace;color:#8a857c;padding-top:2px">提案<div style="display:{{ keyDisp }};color:#c6c0b3;font-weight:500;font-size:9px;margin-top:2px">sup.card.what</div></div>
+                    <div style="font-size:13px;line-height:1.7">
+                      <sc-for list="{{ selBody }}" as="ln" hint-placeholder-count="3">
+                        <div style="display:flex;gap:8px"><span style="color:#b6b0a4">·</span><span>{{ ln.t }}</span></div>
+                      </sc-for>
+                      <div style="display:{{ selTargetsDisp }};margin-top:9px;flex-wrap:wrap;gap:5px;align-items:center">
+                        <span style="font-size:11px;color:#8a857c;margin-right:2px">target_ids</span>
+                        <sc-for list="{{ selTargets }}" as="tg" hint-placeholder-count="3">
+                          <span title="{{ tg.tip }}" style="cursor:pointer;font:600 10.5px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:4px;padding:2px 7px">◆ #{{ tg.id }} {{ tg.short }}</span>
+                        </sc-for>
+                        <span style="font-size:10.5px;color:#a49e91">— hover 看摘要，點開進知識工房該筆</span>
+                      </div>
+                    </div>
+
+                    <div style="font:700 10.5px ui-monospace,monospace;color:#8a857c;padding-top:2px">為什麼<div style="display:{{ keyDisp }};color:#c6c0b3;font-weight:500;font-size:9px;margin-top:2px">sup.card.why</div></div>
+                    <div style="font-size:13px;line-height:1.7;color:#3d3a34">{{ selWhy }}</div>
+
+                    <div style="font:700 10.5px ui-monospace,monospace;color:#8a857c;padding-top:2px">依據<div style="display:{{ keyDisp }};color:#c6c0b3;font-weight:500;font-size:9px;margin-top:2px">sup.card.evidence</div></div>
+                    <div style="display:flex;flex-direction:column;gap:6px">
+                      <sc-for list="{{ selEvidence }}" as="ev" hint-placeholder-count="3">
+                        <div title="點開檢視來源 trace" style="display:flex;gap:10px;align-items:flex-start;border:1px {{ ev.line }} {{ ev.bd }};background:{{ ev.bg }};border-radius:7px;padding:7px 11px;cursor:pointer">
+                          <span style="font:700 12px ui-monospace,monospace;color:{{ ev.fg }};width:16px">{{ ev.sig }}</span>
+                          <span style="font:600 11.5px ui-monospace,monospace;color:#54504a;min-width:110px">{{ ev.label }}</span>
+                          <span style="font-size:12px;color:#3d3a34;line-height:1.55;flex:1">{{ ev.detail }}</span>
+                          <span style="font-size:11px;color:#b6b0a4">↗</span>
+                        </div>
+                      </sc-for>
+                      <div style="font-size:10.5px;color:#a49e91;margin-top:2px">▣ 系統事實（機器驗證，實線）· △ agent 自述（虛線）· ◆ 記憶</div>
+                    </div>
+                  </div>
+
+                  <!-- 設定調整生命週期 -->
+                  <div style="display:{{ selLifeDisp }};margin:0 18px 14px;background:#f0f6f8;border:1px solid #cbe2ea;border-radius:8px;padding:10px 16px;align-items:center">
+                    <sc-for list="{{ selLife }}" as="st" hint-placeholder-count="4">
+                      <div style="display:flex;align-items:center">
+                        <div style="text-align:center;min-width:110px">
+                          <div style="font:700 11.5px ui-monospace,monospace;color:{{ st.fg }}">{{ st.mark }} {{ st.label }}</div>
+                          <div style="font-size:10px;color:#8a857c;margin-top:2px">{{ st.note }}</div>
+                        </div>
+                        <div style="width:36px;border-top:1.5px {{ st.connStyle }} #9cc2cf;display:{{ st.connDisp }}"></div>
+                      </div>
+                    </sc-for>
+                    <span style="flex:1"></span>
+                    <span style="font-size:10.5px;color:#8a857c;max-width:220px;line-height:1.5">核准後為「待人執行」中間態；Supervisor 驗證結果回寫此列</span>
+                  </div>
+
+                  <div style="display:{{ selSupersedeDisp }};margin:0 18px 14px;background:#f4f2ec;border:1px dashed #ccc5b5;border-radius:8px;padding:9px 14px;font-size:12px;color:#6f6a61;gap:6px;align-items:center">
+                    <span>此提案已過期 — 新證據出現時自動 supersede，被</span>
+                    <span onClick="{{ goProposal21 }}" style="cursor:pointer;color:#1d4ed8;font:600 11.5px ui-monospace,monospace;border-bottom:1px solid #bcd0f5">#21</span>
+                    <span>取代（同主題、證據較新）。不留殭屍提案。</span>
+                  </div>
+
+                  <div style="display:{{ selActionsDisp }};gap:8px;align-items:center;padding:12px 18px;border-top:1px solid #efece3;background:#fcfbf7;border-radius:0 0 10px 10px">
+                    <button style="background:#211f1c;color:#fbfbf9;border:none;border-radius:7px;padding:8px 20px;font-size:12.5px;font-weight:700;cursor:pointer">核准</button>
+                    <input placeholder="駁回理由（必填一句）" style="border:1px solid #ddd8cb;border-radius:7px;padding:7px 12px;font-size:12px;width:220px;background:#fff;color:#211f1c;font-family:inherit">
+                    <button style="background:#fff;color:#b42318;border:1px solid #f0c1b8;border-radius:7px;padding:8px 16px;font-size:12.5px;font-weight:600;cursor:pointer">駁回</button>
+                    <button style="background:none;color:#8a857c;border:none;font-size:12.5px;cursor:pointer;padding:8px 10px">擱置</button>
+                    <span style="flex:1"></span>
+                    <span style="font-size:11px;color:#a49e91">{{ selActionNote }}</span>
+                  </div>
+                  <div style="display:{{ selNoActionDisp }};padding:12px 18px;border-top:1px solid #efece3;background:#fcfbf7;border-radius:0 0 10px 10px;font-size:12px;color:#8a857c">{{ selNoActionNote }}</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- ═══ digest tab -->
+            <sc-if value="{{ isDigest }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:1120px">
+                <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;padding:16px 18px">
+                  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                    <span style="font:700 10.5px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:4px;padding:1px 6px">週報 W27</span>
+                    <span style="font-size:12.5px;font-weight:700">退步偵測：SLASH 92 → 88</span>
+                  </div>
+                  <div style="font-size:12.5px;color:#3d3a34;line-height:1.7;margin-bottom:10px">退步集中在 fanout 類任務（−4pt）；同期 verifier「三擇一」拒因 +11 次。疑與 07-02 上線的 flat-mode steer 有交互作用。</div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <button style="border:1px solid #ddd8cb;background:#fbfbf9;border-radius:6px;font-size:11.5px;padding:5px 12px;cursor:pointer;color:#54504a">展開證據 ▣ ×6</button>
+                    <button style="border:1px solid #d9cdf5;background:#f3effc;color:#6d28d9;border-radius:6px;font-size:11.5px;font-weight:600;padding:5px 12px;cursor:pointer">一鍵轉成提案 →</button>
+                  </div>
+                </div>
+                <div style="background:#fff;border:1px solid #f0c1b8;border-radius:10px;padding:16px 18px">
+                  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                    <span style="font:700 10.5px ui-monospace,monospace;color:#b42318;background:#fdf0ee;border:1px solid #f3c6bf;border-radius:4px;padding:1px 6px">日報 07-05</span>
+                    <span style="font-size:12.5px;font-weight:700">成本異常：GLM 空回應重試放大 +38%</span>
+                  </div>
+                  <div style="display:flex;align-items:flex-end;gap:3px;height:44px;margin:6px 0 10px">
+                    <div style="width:24px;height:18px;background:#e2ded5;border-radius:2px 2px 0 0"></div>
+                    <div style="width:24px;height:16px;background:#e2ded5;border-radius:2px 2px 0 0"></div>
+                    <div style="width:24px;height:20px;background:#e2ded5;border-radius:2px 2px 0 0"></div>
+                    <div style="width:24px;height:17px;background:#e2ded5;border-radius:2px 2px 0 0"></div>
+                    <div style="width:24px;height:19px;background:#e2ded5;border-radius:2px 2px 0 0"></div>
+                    <div style="width:24px;height:22px;background:#e2ded5;border-radius:2px 2px 0 0"></div>
+                    <div style="width:24px;height:44px;background:#d47b6a;border-radius:2px 2px 0 0"></div>
+                    <span style="font:600 10.5px ui-monospace,monospace;color:#b42318;margin-left:6px">$41.20 今日</span>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <button style="border:1px solid #ddd8cb;background:#fbfbf9;border-radius:6px;font-size:11.5px;padding:5px 12px;cursor:pointer;color:#54504a">展開證據 ▣ ×3</button>
+                    <button onClick="{{ goProposal21 }}" style="border:1px solid #f0c1b8;background:#fdf0ee;color:#b42318;border-radius:6px;font-size:11.5px;font-weight:600;padding:5px 12px;cursor:pointer">→ 已生成提案 #21</button>
+                  </div>
+                </div>
+                <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;padding:16px 18px">
+                  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                    <span style="font:700 10.5px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:4px;padding:1px 6px">週報 W27</span>
+                    <span style="font-size:12.5px;font-weight:700">divergence：自評 PASS 但 user 打「不準確」×3</span>
+                  </div>
+                  <div style="font-size:12.5px;color:#3d3a34;line-height:1.7;margin-bottom:10px">三件都落在 SPC 面板規則 2 的例外情境 — 該步驟知識庫零召回。建議走「教它」補一條 domain 知識。</div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <button style="border:1px solid #ddd8cb;background:#fbfbf9;border-radius:6px;font-size:11.5px;padding:5px 12px;cursor:pointer;color:#54504a">展開證據 ▣ ×3 △ ×3</button>
+                    <button style="border:1px solid #d9cdf5;background:#f3effc;color:#6d28d9;border-radius:6px;font-size:11.5px;font-weight:600;padding:5px 12px;cursor:pointer">→ 對應 W3 draft #d-207</button>
+                  </div>
+                </div>
+                <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;padding:16px 18px">
+                  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                    <span style="font:700 10.5px ui-monospace,monospace;color:#1a7f4e;background:#eaf5ee;border:1px solid #bfe0cd;border-radius:4px;padding:1px 6px">週報 W27</span>
+                    <span style="font-size:12.5px;font-weight:700">知識庫體檢：PRUNE 候選 3 · MERGE 候選 1</span>
+                  </div>
+                  <div style="font-size:12.5px;color:#3d3a34;line-height:1.7;margin-bottom:10px">90 天零召回 3 條（其中 #41 與新條目 #82 矛盾）；#77 / #82 語意重複度 0.93。皆已生成提案。</div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <button style="border:1px solid #ddd8cb;background:#fbfbf9;border-radius:6px;font-size:11.5px;padding:5px 12px;cursor:pointer;color:#54504a">展開證據 ▣ ×5</button>
+                    <span style="font-size:11px;color:#8a857c">→ 提案 #19 · #17（PE 收件匣）</span>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- ═══ audit tab -->
+            <sc-if value="{{ isAudit }}" hint-placeholder-val="{{ false }}">
+              <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;overflow:hidden;max-width:1200px">
+                <div style="display:grid;grid-template-columns:300px 150px 190px 190px 1fr;gap:0;background:#f7f5ef;border-bottom:1px solid #e7e3d9;padding:8px 16px;font:600 10.5px ui-monospace,monospace;color:#a49e91;letter-spacing:.06em">
+                  <span>案件</span><span>提案</span><span>簽核</span><span>落地</span><span>Supervisor 驗證</span>
+                </div>
+                <sc-for list="{{ auditRows }}" as="ar" hint-placeholder-count="5">
+                  <div style="display:grid;grid-template-columns:300px 150px 190px 190px 1fr;gap:0;padding:10px 16px;border-bottom:1px solid #f2efe7;align-items:start">
+                    <div style="padding-right:14px"><span style="font:600 11px ui-monospace,monospace;color:#a49e91">#{{ ar.id }}</span> <span style="font-size:12px;font-weight:600">{{ ar.title }}</span></div>
+                    <div style="font-size:11.5px;color:#54504a">{{ ar.proposed }}</div>
+                    <div style="font-size:11.5px;color:{{ ar.signFg }}">{{ ar.sign }}</div>
+                    <div style="font-size:11.5px;color:{{ ar.landFg }}">{{ ar.land }}</div>
+                    <div style="font-size:11.5px;color:{{ ar.verifyFg }}">{{ ar.verify }}</div>
+                  </div>
+                </sc-for>
+                <div style="padding:9px 16px;font-size:10.5px;color:#a49e91">一列一案 · 提案 → 簽核 → 落地 → 驗證 四段生命週期 <span style="display:{{ keyDisp }};background:#efece3;color:#b6b0a4;border-radius:3px;padding:1px 5px;font:500 9.5px ui-monospace,monospace">sup.audit.lifecycle</span></div>
+              </div>
+            </sc-if>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════ 1b 卡片流變體 -->
+    <div id="1b" style="width:780px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:22px;border-radius:6px;background:#211f1c;color:#fbfbf9;font:700 11px ui-monospace,monospace">1b</span>
+        <span style="font-size:14px;font-weight:700">收件匣變體 — 單欄卡片流</span>
+        <span style="font-size:12px;color:#8a857c">動作直接在卡上；掃讀快、但依據展開後卡會很長</span>
+      </div>
+
+      <div style="background:#fbfbf9;border:1px solid #dedacf;border-radius:12px;padding:18px 20px;box-shadow:0 2px 10px rgba(33,31,28,.07);display:flex;flex-direction:column;gap:10px">
+
+        <!-- expanded card -->
+        <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px">
+          <div style="padding:12px 16px 10px;border-bottom:1px solid #efece3">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">
+              <span style="font:700 10.5px ui-monospace,monospace;color:#0e7490;background:#e9f5f8;border:1px solid #bfe0e9;border-radius:4px;padding:1px 6px">設定調整</span>
+              <span style="font:600 11px ui-monospace,monospace;color:#a49e91">#21</span>
+              <span style="font:600 10.5px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:999px;padding:1px 8px">待審</span>
+              <span style="flex:1"></span>
+              <span style="font:500 11px ui-monospace,monospace;color:#8a857c">今天 09:12 · IT_ADMIN</span>
+            </div>
+            <div style="font-size:14px;font-weight:700">provider pin：GLM 空回應 45% — 建議暫改 pin Qwen-plus</div>
+          </div>
+          <div style="padding:11px 16px;display:grid;grid-template-columns:56px 1fr;row-gap:10px;column-gap:12px;font-size:12.5px;line-height:1.65">
+            <div style="font:700 10.5px ui-monospace,monospace;color:#8a857c">提案</div>
+            <div>planner/builder pin 暫改 Qwen-plus；GLM 進觀察名單；重試上限 3→2</div>
+            <div style="font:700 10.5px ui-monospace,monospace;color:#8a857c">為什麼</div>
+            <div style="color:#3d3a34">GLM 空回應 33–45% 持續整天；重試放大成本 +38%，cache hit 54%→31%</div>
+            <div style="font:700 10.5px ui-monospace,monospace;color:#8a857c">依據</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px">
+              <span style="font:600 10.5px ui-monospace,monospace;color:#475569;border:1px solid #d7dee7;border-radius:4px;padding:2px 7px;cursor:pointer">▣ llm_usage 空回應 45% ↗</span>
+              <span style="font:600 10.5px ui-monospace,monospace;color:#475569;border:1px solid #d7dee7;border-radius:4px;padding:2px 7px;cursor:pointer">▣ 今日 $41.20（+38%）↗</span>
+              <span style="font:600 10.5px ui-monospace,monospace;color:#9a6700;border:1px dashed #ecd9a8;border-radius:4px;padding:2px 7px;cursor:pointer">△ Builder 自述「已重試」×37 ↗</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid #efece3;background:#fcfbf7;border-radius:0 0 10px 10px">
+            <button style="background:#211f1c;color:#fbfbf9;border:none;border-radius:7px;padding:7px 18px;font-size:12px;font-weight:700;cursor:pointer">核准</button>
+            <button style="background:#fff;color:#b42318;border:1px solid #f0c1b8;border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer">駁回…</button>
+            <button style="background:none;color:#8a857c;border:none;font-size:12px;cursor:pointer">擱置</button>
+            <span style="flex:1"></span>
+            <span style="font-size:11px;color:#a49e91">收合依據 ▲</span>
+          </div>
+        </div>
+
+        <!-- collapsed cards -->
+        <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;padding:11px 16px">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font:700 10.5px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:4px;padding:1px 6px">PRUNE</span>
+            <span style="font:600 11px ui-monospace,monospace;color:#a49e91">#19</span>
+            <span style="font-size:12.5px;font-weight:600;flex:1">3 條知識 90 天零召回且與新條目矛盾</span>
+            <span style="font:600 10.5px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:999px;padding:1px 8px">待審</span>
+            <span style="font-size:11px;color:#8a857c;cursor:pointer">展開 ▾</span>
+          </div>
+          <div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:10.5px;color:#8a857c">target_ids</span>
+            <span style="font:600 10px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:4px;padding:1px 6px">◆ #41 預設時間窗 12 小時</span>
+            <span style="font:600 10px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:4px;padding:1px 6px">◆ #58 舊 unnest 寫法</span>
+            <span style="font:600 10px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:4px;padding:1px 6px">◆ #63 CSV 匯出註記</span>
+          </div>
+        </div>
+
+        <div style="background:#fff;border:1px dashed #ddd8cb;border-radius:10px;padding:11px 16px;opacity:.72">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font:700 10.5px ui-monospace,monospace;color:#0e7490;background:#e9f5f8;border:1px solid #bfe0e9;border-radius:4px;padding:1px 6px">設定調整</span>
+            <span style="font:600 11px ui-monospace,monospace;color:#a49e91">#12</span>
+            <span style="font-size:12.5px;font-weight:600;flex:1">provider pin：GLM 週末降速（舊）</span>
+            <span style="font:600 10.5px ui-monospace,monospace;color:#8a857c;background:#f4f2ec;border:1px solid #ddd8cb;border-radius:999px;padding:1px 8px">已過期 → #21</span>
+          </div>
+        </div>
+
+        <div style="font-size:11px;color:#8a857c;line-height:1.7;padding:2px 4px 0">
+          取捨：卡片流少一次點擊、批次掃讀順；master-detail（<a href="#1a" style="color:#1d4ed8">1a</a>）依據不擠壓清單、適合證據多的設定類提案。建議 1a 為主、卡片收合模式作清單密度切換。
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════ 1d Console 記憶 chip 唯讀卡 -->
+    <div id="1d" style="width:460px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:22px;border-radius:6px;background:#211f1c;color:#fbfbf9;font:700 11px ui-monospace,monospace">1d</span>
+        <span style="font-size:14px;font-weight:700">Console 記憶 chip → 唯讀卡（非 PE）</span>
+      </div>
+
+      <div style="background:#fbfbf9;border:1px solid #dedacf;border-radius:12px;padding:18px;box-shadow:0 2px 10px rgba(33,31,28,.07)">
+        <div style="font-size:11px;color:#8a857c;margin-bottom:10px">Console「記憶效應」區 — ON_DUTY 角色點了 <span style="font:600 10.5px ui-monospace,monospace;color:#6d28d9">◆ #82</span>：</div>
+
+        <!-- mem box context -->
+        <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:9px 11px;margin-bottom:12px">
+          <div style="font-size:10.5px;font-weight:800;color:#6d28d9;margin-bottom:4px">引用（memory_recall · 13 筆，示 2）</div>
+          <div style="display:flex;gap:6px;align-items:baseline;font-size:11px;padding:2px 0">
+            <span style="font:700 10px ui-monospace,monospace;color:#6d28d9;width:32px">#9</span>
+            <span style="font-size:9px;font-weight:700;padding:0 5px;border-radius:3px;border:1px solid #c4b5fd;color:#6d28d9">domain</span>
+            <span>SPC 連續 N 點 OOC 觸發告警慣例</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:baseline;font-size:11px;padding:2px 0;background:#ede9fe;border-radius:5px;margin:0 -5px;padding-left:5px;padding-right:5px">
+            <span style="font:700 10px ui-monospace,monospace;color:#6d28d9;width:32px">#82</span>
+            <span style="font-size:9px;font-weight:700;padding:0 5px;border-radius:3px;border:1px solid #c4b5fd;color:#6d28d9">domain</span>
+            <span style="flex:1">process_history 必須提供 tool_id/lot_id/step 三擇一</span>
+            <span style="font-size:9px;color:#6d28d9">← 點擊</span>
+          </div>
+        </div>
+
+        <!-- readonly card -->
+        <div style="background:#fff;border:1px solid #ddd6fe;border-radius:10px;box-shadow:0 8px 26px rgba(109,40,217,.13);overflow:hidden;margin-left:26px;position:relative">
+          <div style="position:absolute;top:-1px;left:34px;width:10px;height:10px;background:#fff;border-left:1px solid #ddd6fe;border-top:1px solid #ddd6fe;transform:rotate(45deg) translateY(-6px)"></div>
+          <div style="display:flex;gap:8px;align-items:center;padding:11px 14px;border-bottom:1px solid #f0edfb">
+            <span style="font:700 12px ui-monospace,monospace;color:#6d28d9">◆ #82</span>
+            <span style="font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid #c4b5fd;color:#6d28d9">domain</span>
+            <span style="font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:3px;background:#ede9fe;color:#6d28d9">新蒸餾 · W27</span>
+            <span style="flex:1"></span>
+            <span style="font-size:10px;color:#8a857c;border:1px solid #e7e3d9;border-radius:4px;padding:1px 6px">唯讀 <span style="display:{{ keyDisp }};color:#c6c0b3;font-family:ui-monospace,monospace;font-size:8.5px">mem.card.readonly</span></span>
+          </div>
+          <div style="padding:12px 14px;display:flex;flex-direction:column;gap:9px">
+            <div style="font-size:12.5px;font-weight:600;line-height:1.55">process_history 必須提供 tool_id / lot_id / step 三擇一</div>
+            <div style="font-size:11.5px;color:#3d3a34;line-height:1.65;background:#faf9f6;border-radius:6px;padding:8px 10px"><b style="font-size:10px;color:#8a857c">How to apply</b><br>查歷史資料時先確認任務裡有哪個 id；只有設備代號就帶 tool_id，缺參數會被 verifier 以 param-missing 拒絕。</div>
+            <div style="display:flex;gap:14px;font-size:10.5px;color:#8a857c">
+              <span>uses <b style="font-family:ui-monospace,monospace;color:#211f1c">13</b>（90d）</span>
+              <span>最近召回 <b style="font-family:ui-monospace,monospace;color:#211f1c">07-04</b></span>
+              <span>來源 Supervisor 蒸餾 · pe.chen 核准</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #f0edfb;background:#fcfbf7">
+            <span style="font-size:10.5px;color:#8a857c;flex:1">你的角色（ON_DUTY）為唯讀 — 條目由 PE 在知識工房維護</span>
+            <button style="border:1px solid #ddd8cb;background:#fff;color:#54504a;border-radius:6px;font-size:11px;padding:4px 10px;cursor:pointer">回報問題 → PE 收件匣</button>
+          </div>
+        </div>
+
+        <div style="font-size:11px;color:#8a857c;line-height:1.7;margin-top:12px">改動點：原本 chip 一律跳 /agent-knowledge 編輯器；改為非 PE 開此唯讀卡（不離開 Console），PE 點擊才進工房該筆。</div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════ 1c 知識工房 -->
+    <div id="1c" style="width:1380px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:22px;border-radius:6px;background:#211f1c;color:#fbfbf9;font:700 11px ui-monospace,monospace">1c</span>
+        <span style="font-size:14px;font-weight:700">知識工房 /agent-knowledge 改版 — 上手冊（真理）、下收件匣（待審）</span>
+        <span style="font-size:12px;color:#8a857c">PE 視角 · 收件匣卡片與 <a href="#1a" style="color:#1d4ed8">1a</a> 完全同構</span>
+      </div>
+
+      <div style="background:#fbfbf9;border:1px solid #dedacf;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(33,31,28,.07)">
+        <div style="display:flex;align-items:center;gap:14px;padding:10px 20px;border-bottom:1px solid #e7e3d9;background:#fff">
+          <span style="font:700 13px ui-monospace,monospace;letter-spacing:.06em">AIOPS</span>
+          <span style="font-size:12.5px;color:#8a857c">/ agent-knowledge · 知識工房</span>
+          <span style="display:{{ keyDisp }};background:#efece3;color:#b6b0a4;border-radius:3px;padding:1px 5px;font:500 9.5px ui-monospace,monospace">kb.title</span>
+          <span style="flex:1"></span>
+          <span style="font:600 11px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:6px;padding:3px 10px">PE · pe.chen</span>
+        </div>
+
+        <div style="padding:18px 24px 24px">
+
+          <!-- 手冊區 -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:13px;font-weight:700">手冊 · 已生效的真理</span>
+            <span style="display:{{ keyDisp }};background:#efece3;color:#b6b0a4;border-radius:3px;padding:1px 5px;font:500 9.5px ui-monospace,monospace">kb.manual.title</span>
+            <div style="display:flex;gap:2px;background:#efece3;border-radius:7px;padding:2px;margin-left:6px">
+              <span style="background:#fff;border-radius:5px;padding:4px 12px;font-size:11.5px;font-weight:700;box-shadow:0 1px 2px rgba(33,31,28,.1)">Knowledge 86</span>
+              <span style="padding:4px 12px;font-size:11.5px;color:#8a857c">Lexicon 24</span>
+              <span style="padding:4px 12px;font-size:11.5px;color:#8a857c">Examples 12</span>
+            </div>
+            <span style="flex:1"></span>
+            <input placeholder="搜尋條目 / How-to-apply…" style="border:1px solid #ddd8cb;border-radius:7px;padding:6px 12px;font-size:11.5px;width:220px;background:#fff;font-family:inherit">
+            <button style="background:#211f1c;color:#fbfbf9;border:none;border-radius:7px;padding:6px 14px;font-size:11.5px;font-weight:600;cursor:pointer">+ 新增條目</button>
+          </div>
+
+          <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;overflow:hidden;margin-bottom:24px">
+            <div style="display:grid;grid-template-columns:64px 92px 1fr 110px 90px 130px 96px;padding:8px 16px;background:#f7f5ef;border-bottom:1px solid #e7e3d9;font:600 10.5px ui-monospace,monospace;color:#a49e91;letter-spacing:.06em">
+              <span>ID</span><span>類別</span><span>條目（How-to-apply 首句）</span><span>uses 90d</span><span>最近召回</span><span>來源</span><span></span>
+            </div>
+            <sc-for list="{{ kbRows }}" as="kr" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:64px 92px 1fr 110px 90px 130px 96px;padding:9px 16px;border-bottom:1px solid #f2efe7;align-items:center;background:{{ kr.bg }}">
+                <span style="font:700 11px ui-monospace,monospace;color:#6d28d9">◆ #{{ kr.id }}</span>
+                <span><span style="font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:3px;border:1px solid #c4b5fd;color:#6d28d9">{{ kr.cls }}</span></span>
+                <span style="font-size:12px;padding-right:16px">{{ kr.text }} <span style="display:{{ kr.newDisp }};font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:3px;background:#ede9fe;color:#6d28d9">新蒸餾</span></span>
+                <span style="font:600 12px ui-monospace,monospace;color:{{ kr.usesFg }}">{{ kr.uses }}</span>
+                <span style="font:500 11px ui-monospace,monospace;color:#8a857c">{{ kr.last }}</span>
+                <span style="font-size:11px;color:#8a857c">{{ kr.src }}</span>
+                <span style="font-size:11px;text-align:right;color:{{ kr.flagFg }};font-weight:{{ kr.flagWt }}">{{ kr.flag }}</span>
+              </div>
+            </sc-for>
+            <div style="padding:8px 16px;font-size:10.5px;color:#a49e91">Directives 已移出 → Supervisor 工作台治理區（admin-only）· ON_DUTY 不可見此頁，僅能從 Console「教它」提草稿</div>
+          </div>
+
+          <!-- 收件匣 -->
+          <div style="background:#f6f2e8;border:1px solid #e8dfc8;border-radius:12px;padding:16px 18px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+              <span style="font-size:13px;font-weight:700">收件匣 · 待你審核</span>
+              <span style="display:{{ keyDisp }};background:#efe9d9;color:#b3a985;border-radius:3px;padding:1px 5px;font:500 9.5px ui-monospace,monospace">kb.inbox.title</span>
+              <span style="font:700 11px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:999px;padding:1px 9px">46</span>
+              <span style="font-size:11px;color:#8a857c">W2 doc memo 31 · W3 draft 12 · 教它草稿 3</span>
+              <span style="flex:1"></span>
+              <button style="border:1px solid #d8cfb8;background:#fff;color:#54504a;border-radius:6px;font-size:11px;padding:4px 10px;cursor:pointer">批次核准 W2 同 block ×8</button>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+              <!-- W2 -->
+              <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;display:flex;flex-direction:column">
+                <div style="padding:11px 14px 9px;border-bottom:1px solid #efece3">
+                  <div style="display:flex;gap:7px;align-items:center;margin-bottom:5px">
+                    <span style="font:700 10.5px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:4px;padding:1px 6px">W2 memo</span>
+                    <span style="font:600 11px ui-monospace,monospace;color:#a49e91">#m-341</span>
+                    <span style="flex:1"></span>
+                    <span style="font:600 10.5px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:999px;padding:1px 8px">待審</span>
+                  </div>
+                  <div style="font-size:12.5px;font-weight:700;line-height:1.45">block_unnest 便利貼 ×4 併入 block docs</div>
+                </div>
+                <div style="padding:10px 14px;display:grid;grid-template-columns:48px 1fr;row-gap:8px;column-gap:10px;font-size:11.5px;line-height:1.6;flex:1">
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">提案</div><div>將 4 則同主題 memo 合併為 block docs「陣列欄位先 unnest 再聚合」段落</div>
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">為什麼</div><div style="color:#3d3a34">p2 被拒後修正通過的模式重複出現 4 次，已是穩定經驗</div>
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">依據</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:4px"><span style="font:600 10px ui-monospace,monospace;color:#475569;border:1px solid #d7dee7;border-radius:4px;padding:1px 6px;cursor:pointer">▣ episodes ×4 ↗</span><span style="font:600 10px ui-monospace,monospace;color:#475569;border:1px solid #d7dee7;border-radius:4px;padding:1px 6px;cursor:pointer">▣ 拒→過 diff ↗</span></div>
+                </div>
+                <div style="display:flex;gap:6px;padding:9px 14px;border-top:1px solid #efece3;background:#fcfbf7;border-radius:0 0 10px 10px">
+                  <button style="background:#211f1c;color:#fbfbf9;border:none;border-radius:6px;padding:6px 14px;font-size:11.5px;font-weight:700;cursor:pointer">核准併入</button>
+                  <button style="background:#fff;color:#b42318;border:1px solid #f0c1b8;border-radius:6px;padding:6px 12px;font-size:11.5px;cursor:pointer">駁回…</button>
+                  <span style="flex:1"></span>
+                  <span style="font-size:10px;color:#a49e91;align-self:center">簽核即落地（DB）</span>
+                </div>
+              </div>
+
+              <!-- W3 -->
+              <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;display:flex;flex-direction:column">
+                <div style="padding:11px 14px 9px;border-bottom:1px solid #efece3">
+                  <div style="display:flex;gap:7px;align-items:center;margin-bottom:5px">
+                    <span style="font:700 10.5px ui-monospace,monospace;color:#6d28d9;background:#f3effc;border:1px solid #ded2f3;border-radius:4px;padding:1px 6px">W3 draft</span>
+                    <span style="font:600 11px ui-monospace,monospace;color:#a49e91">#d-207</span>
+                    <span style="flex:1"></span>
+                    <span style="font:600 10.5px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:999px;padding:1px 8px">待審</span>
+                  </div>
+                  <div style="font-size:12.5px;font-weight:700;line-height:1.45">PROMOTE：SPC 面板規則 2 例外情境 → domain 知識</div>
+                </div>
+                <div style="padding:10px 14px;display:grid;grid-template-columns:48px 1fr;row-gap:8px;column-gap:10px;font-size:11.5px;line-height:1.6;flex:1">
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">提案</div><div>晉升為正式條目；How-to-apply 已由 Supervisor 起草，PE 可改寫</div>
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">為什麼</div><div style="color:#3d3a34">divergence ×3 全落在此情境且該步召回 0 筆 — 知識缺口明確</div>
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">依據</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:4px"><span style="font:600 10px ui-monospace,monospace;color:#475569;border:1px solid #d7dee7;border-radius:4px;padding:1px 6px;cursor:pointer">▣ 召回 0 筆 ×3 ↗</span><span style="font:600 10px ui-monospace,monospace;color:#9a6700;border:1px dashed #ecd9a8;border-radius:4px;padding:1px 6px;cursor:pointer">△ user 評「不準確」×3 ↗</span></div>
+                </div>
+                <div style="display:flex;gap:6px;padding:9px 14px;border-top:1px solid #efece3;background:#fcfbf7;border-radius:0 0 10px 10px">
+                  <button style="background:#211f1c;color:#fbfbf9;border:none;border-radius:6px;padding:6px 14px;font-size:11.5px;font-weight:700;cursor:pointer">核准晉升</button>
+                  <button style="background:#fff;color:#54504a;border:1px solid #ddd8cb;border-radius:6px;padding:6px 12px;font-size:11.5px;cursor:pointer">改寫後核准</button>
+                  <span style="flex:1"></span>
+                  <span style="font-size:10px;color:#a49e91;align-self:center">30 秒 embed 生效</span>
+                </div>
+              </div>
+
+              <!-- 教它 -->
+              <div style="background:#fff;border:1px solid #e7e3d9;border-radius:10px;display:flex;flex-direction:column">
+                <div style="padding:11px 14px 9px;border-bottom:1px solid #efece3">
+                  <div style="display:flex;gap:7px;align-items:center;margin-bottom:5px">
+                    <span style="font:700 10.5px ui-monospace,monospace;color:#1a7f4e;background:#eaf5ee;border:1px solid #bfe0cd;border-radius:4px;padding:1px 6px">教它草稿</span>
+                    <span style="font:600 11px ui-monospace,monospace;color:#a49e91">#t-58</span>
+                    <span style="flex:1"></span>
+                    <span style="font:600 10.5px ui-monospace,monospace;color:#9a6700;background:#faf3e2;border:1px solid #ecd9a8;border-radius:999px;padding:1px 8px">待審</span>
+                  </div>
+                  <div style="font-size:12.5px;font-weight:700;line-height:1.45">「每日均值趨勢要先 groupby day 再取 mean」</div>
+                </div>
+                <div style="padding:10px 14px;display:grid;grid-template-columns:48px 1fr;row-gap:8px;column-gap:10px;font-size:11.5px;line-height:1.6;flex:1">
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">提案</div><div>on_duty.wu 從 Console「教它」入口提交（ON_DUTY 只能提草稿，不直寫手冊）</div>
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">情境</div><div style="color:#3d3a34">block_groupby_agg · phase「按日聚合」· 該步召回 0 筆時提交</div>
+                  <div style="font:700 10px ui-monospace,monospace;color:#8a857c">依據</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:4px"><span style="font:600 10px ui-monospace,monospace;color:#475569;border:1px solid #d7dee7;border-radius:4px;padding:1px 6px;cursor:pointer">▣ 觸發步驟 trace ↗</span><span style="font:600 10px ui-monospace,monospace;color:#6d28d9;border:1px solid #ded2f3;border-radius:4px;padding:1px 6px;cursor:pointer">◆ 相近條目 0 筆</span></div>
+                </div>
+                <div style="display:flex;gap:6px;padding:9px 14px;border-top:1px solid #efece3;background:#fcfbf7;border-radius:0 0 10px 10px">
+                  <button style="background:#211f1c;color:#fbfbf9;border:none;border-radius:6px;padding:6px 14px;font-size:11.5px;font-weight:700;cursor:pointer">核准入庫</button>
+                  <button style="background:#fff;color:#b42318;border:1px solid #f0c1b8;border-radius:6px;padding:6px 12px;font-size:11.5px;cursor:pointer">退回附註…</button>
+                </div>
+              </div>
+            </div>
+
+            <div style="font-size:11px;color:#8a857c;margin-top:12px;line-height:1.7">手冊＝白色表格（紫 ◆，真理感）；收件匣＝米色紙面上的卡片（琥珀待審 chip）— 一眼是兩種東西。卡片解剖（三段式＋狀態 chip＋批次）與 <a href="#1a" style="color:#1d4ed8">1a</a> 治理收件匣同構：PE 審 W2 和 ADMIN 審設定是同一種互動。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 56"><rect width="80" height="56" fill="#211f1c"/><text x="40" y="34" text-anchor="middle" font-family="monospace" font-size="14" font-weight="700" fill="#fbfbf9">SUP</text></svg></template></x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;showKeys&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;標註&quot; },
+  &quot;redDay&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;場景&quot; }
+}">
+class Component extends DCLogic {
+  state = { role: 'IT_ADMIN', tab: 'inbox', selId: 21 };
+
+  data() {
+    return [
+      {
+        id: 21, kind: 'cfg', signer: 'IT_ADMIN', status: 'pending', when: '今天 09:12',
+        title: 'provider pin：GLM 空回應 45% — 建議 planner/builder 暫改 pin Qwen-plus',
+        body: [
+          '將 planner / builder 的 provider pin 由 GLM-4.7 暫改為 Qwen-plus（config/models.yaml → env）',
+          'GLM 轉入觀察名單；空回應 <2% 連續 24h 後自動生成回切提案',
+          '空回應重試上限 3 → 2，止住重試放大的成本',
+        ],
+        why: '07-05 00:00 起 GLM finish_reason=empty 比率 33–45% 持續整天；重試把今日花費放大 +38%，cache hit 由 54% 掉到 31%。非我方 prompt 變更造成 — 同 prompt 在 Qwen 空回應僅 0.4%。',
+        evidence: [
+          { k: 'sys', label: 'llm_usage 今日', detail: 'GLM finish_reason=empty 45%（1,204 / 2,676 calls），00:00 起持續' },
+          { k: 'sys', label: '成本統計', detail: '今日 $41.20，7 日均 $29.8（+38%）；重試 tokens 佔增量 82%' },
+          { k: 'sys', label: '對照實驗', detail: '同 prompt 抽測 Qwen-plus 120 calls，空回應 0.4%' },
+          { k: 'self', label: 'Builder 自述', detail: '「回應為空，已重試」×37 — 佐證用，不作為主依據' },
+        ],
+        life: [
+          { label: '提案', st: 'done', note: '今天 09:12' },
+          { label: '簽核', st: 'current', note: '待 IT_ADMIN' },
+          { label: '落地', st: 'todo', note: '人執行 env/restart' },
+          { label: '驗證', st: 'todo', note: 'Supervisor 回寫' },
+        ],
+        actionNote: '核准後進入「待人執行」— 落地由人操作，Supervisor 追蹤並回寫驗證',
+      },
+      {
+        id: 20, kind: 'cfg', signer: 'IT_ADMIN', status: 'waiting', when: '07-04 20:41',
+        title: 'budget：fanout 類任務 react_rounds 32 → 40',
+        body: ['fanout 類（≥3 平行 phase）的 react_rounds 上限 32 → 40', '其他任務類型維持不變'],
+        why: 'fanout 類 build 的 rounds 用滿率 31%（其他類 4%）；用滿的案 71% 最終失敗 — 預算不足而非能力不足。',
+        evidence: [
+          { k: 'sys', label: 'episodes 統計', detail: 'fanout 類 near-limit（>90% 用量）佔 31%，n=54' },
+          { k: 'sys', label: '失敗相關', detail: 'rounds 用滿 × build 失敗相關 0.71' },
+        ],
+        life: [
+          { label: '提案', st: 'done', note: '07-04 20:41' },
+          { label: '簽核', st: 'done', note: 'admin.lin 07-04 21:02' },
+          { label: '落地', st: 'current', note: 'env 已改，待重啟' },
+          { label: '驗證', st: 'todo', note: '重啟後 24h 觀察' },
+        ],
+        actionNote: '',
+      },
+      {
+        id: 19, kind: 'prune', signer: 'PE', status: 'pending', when: '今天 06:00',
+        title: 'PRUNE：3 條知識 90 天零召回，其中 1 條與新條目矛盾',
+        body: ['刪除（軟刪，30 天可復原）右列 3 條 — hover 可看各條摘要與最後使用紀錄'],
+        targets: [
+          { id: 41, short: '預設時間窗 12 小時', tip: 'preference · uses 0/90d · 與 #82 的參數條件重疊且矛盾' },
+          { id: 58, short: '舊 unnest 寫法', tip: 'procedure · uses 0/90d · block docs 已涵蓋（W2 併入）' },
+          { id: 63, short: 'CSV 匯出註記', tip: 'domain · uses 0/90d · 對應功能已下線' },
+        ],
+        why: '零召回代表 embedding 空間已無任務會撈到它們；#41 更會與 #82 同時召回時給出矛盾指示，污染 plan。',
+        evidence: [
+          { k: 'sys', label: 'uses 統計', detail: '#41 / #58 / #63 均 90 天 0 召回（全庫 P5 以下）' },
+          { k: 'sys', label: '矛盾偵測', detail: '#41「預設 12h」 vs #82「必須明確 tool_id/lot_id/step」語意衝突 0.87' },
+          { k: 'mem', label: '取代條目', detail: '◆ #82 新蒸餾（W27）已覆蓋 #41 的使用情境' },
+        ],
+        actionNote: '低風險：軟刪 30 天可復原 — 適合批次核准',
+      },
+      {
+        id: 18, kind: 'promote', signer: 'PE', status: 'pending', when: '昨天 22:10',
+        title: 'PROMOTE：W3 draft #d-207「SPC 例外情境」→ 正式 domain 知識',
+        body: ['晉升 #d-207 為正式條目；How-to-apply 草稿已備好，可改寫後核准'],
+        why: '本週 3 件 divergence（自評 PASS、user 打不準確）全落在此情境，且該步召回 0 筆 — 是明確的知識缺口。',
+        evidence: [
+          { k: 'sys', label: '召回紀錄', detail: '3 個 episode 的關鍵步驟 memory_recall 均為空' },
+          { k: 'self', label: 'user 回饋', detail: '「不準確」評分 ×3（主觀回饋，虛線級）' },
+        ],
+        actionNote: '核准後 30 秒 embed，下次 build 生效',
+      },
+      {
+        id: 17, kind: 'merge', signer: 'PE', status: 'pending', when: '昨天 22:10',
+        title: 'MERGE：#77 與 #82 重複（process_history 參數規則）',
+        body: ['保留 #82（新蒸餾、How-to-apply 較完整），#77 併入後軟刪', '合併 uses 計數（9 + 13）'],
+        targets: [
+          { id: 77, short: '舊參數規則', tip: 'domain · uses 9/90d · 語意與 #82 重複度 0.93' },
+          { id: 82, short: '三擇一（保留）', tip: 'domain · uses 13/90d · W27 新蒸餾' },
+        ],
+        why: '兩條同時被召回時佔掉 2 個 recall 名額，擠掉其他相關知識；語意重複度 0.93。',
+        evidence: [
+          { k: 'sys', label: '重複偵測', detail: 'embedding 相似 0.93；近 30 天同時召回 11 次' },
+        ],
+        actionNote: '',
+      },
+      {
+        id: 16, kind: 'issue', signer: '開發者', status: 'pending', when: '昨天 18:03',
+        title: 'issue：verifier「三擇一」規則疑似誤殺 fanout 案（11 次）',
+        body: ['轉為 git issue（附 11 個 trace）：param-missing 規則在 fanout 子 phase 繼承父 phase 參數時誤判', '這屬 code 職掌 — Supervisor 只指出，不修'],
+        why: 'W27 該拒因 +11 次全部集中在 fanout 子 phase；人工抽 3 件複核，參數實際上由父 phase 傳遞、並未缺失。',
+        evidence: [
+          { k: 'sys', label: 'traces ×11', detail: '拒因 param-missing、皆為 fanout 子 phase、參數繼承鏈完整' },
+          { k: 'sys', label: '人工複核', detail: '抽 3 件確認誤殺（pe.chen 07-04）' },
+        ],
+        actionNote: '核准＝建立 issue 並指派 — 修 code 走 git 流程',
+      },
+      {
+        id: 12, kind: 'cfg', signer: 'IT_ADMIN', status: 'expired', when: '07-03 09:00',
+        title: 'provider pin：GLM 週末降速，建議僅離峰使用（舊）',
+        body: ['（舊提案內容保留供追溯）週末時段 GLM 延遲 p95 上升，建議僅離峰批次任務使用'],
+        why: '當時僅觀察到延遲退化；07-05 的空回應事件是更強的新證據，範圍也更大。',
+        evidence: [
+          { k: 'sys', label: '延遲統計（舊）', detail: '週末 p95 12.4s vs 平日 6.1s' },
+        ],
+        actionNote: '',
+      },
+    ];
+  }
+
+  renderVals() {
+    const { role, tab, selId } = this.state;
+    const showKeys = this.props.showKeys ?? true;
+    const redDay = this.props.redDay ?? true;
+    const proposals = this.data();
+
+    const ROLES = ['IT_ADMIN', 'PE', 'DEV'];
+    const roleBtns = ROLES.map((r) => ({
+      label: r,
+      onClick: () => this.setState({ role: r }),
+      bg: r === role ? '#211f1c' : '#fff',
+      fg: r === role ? '#fbfbf9' : '#54504a',
+      bd: r === role ? '#211f1c' : '#ddd8cb',
+    }));
+
+    const signerOf = { cfg: 'IT_ADMIN', prune: 'PE', promote: 'PE', merge: 'PE', issue: 'DEV' };
+    const canSign = (p) => signerOf[p.kind] === role;
+
+    // sidebar
+    const mk = (glyph, label, opts = {}) => ({
+      glyph, label,
+      glyphFg: opts.active ? '#fbfbf9' : '#a49e91',
+      bg: opts.active ? '#211f1c' : 'transparent',
+      fg: opts.active ? '#fbfbf9' : '#54504a',
+      wt: opts.active ? 700 : 500,
+      badge: opts.badge ?? '',
+      badgeDisp: opts.badge ? 'inline-block' : 'none',
+    });
+    let sidebarItems, gateNote;
+    if (role === 'IT_ADMIN') {
+      sidebarItems = [mk('▸','對話工作區'), mk('◧','Agent Console'), mk('◆','知識工房',{badge:'46'}), mk('◎','Supervisor 工作台',{active:true,badge:'5'}), mk('○','/me 我的偏好')];
+      gateNote = 'IT_ADMIN：全部入口可見（含治理面 Directives）';
+    } else if (role === 'PE') {
+      sidebarItems = [mk('▸','對話工作區'), mk('◧','Agent Console'), mk('◆','知識工房',{badge:'46'}), mk('○','/me 我的偏好')];
+      gateNote = 'PE 看不到治理面 — Supervisor 工作台入口消失；PE 簽核件同構出現在知識工房收件匣（見 1c）。此畫面保留為 demo 視角。';
+    } else {
+      sidebarItems = [mk('▸','對話工作區'), mk('◧','Agent Console'), mk('◆','知識工房',{badge:'46'}), mk('◎','Supervisor 工作台',{active:true,badge:'1'}), mk('○','/me 我的偏好')];
+      gateNote = 'DEV：收到 issue 型提案（附 trace 證據），核准＝建 issue 走 git 流程';
+    }
+
+    // tabs
+    const pendingForRole = proposals.filter((p) => p.status === 'pending' && canSign(p)).length;
+    const TABS = [
+      { key: 'inbox', label: '提案收件匣', badge: pendingForRole ? String(pendingForRole) : '' },
+      { key: 'digest', label: '定期報告', badge: '' },
+      { key: 'audit', label: '簽核紀錄', badge: '' },
+    ];
+    const tabBtns = TABS.map((t) => ({
+      label: t.label,
+      badge: t.badge,
+      badgeDisp: t.badge ? 'inline-block' : 'none',
+      onClick: () => this.setState({ tab: t.key }),
+      fg: tab === t.key ? '#211f1c' : '#8a857c',
+      wt: tab === t.key ? 700 : 500,
+      bd: tab === t.key ? '#211f1c' : 'transparent',
+    }));
+
+    const roleFilterNote = role === 'IT_ADMIN' ? '設定調整＋治理（你可簽）' : role === 'PE' ? '知識／文件策展（你可簽）' : 'issue 型提案（你可簽）';
+
+    // chips
+    const typeChip = {
+      cfg:     { label: '設定調整', fg: '#0e7490', bg: '#e9f5f8', bd: '#bfe0e9' },
+      prune:   { label: 'PRUNE',   fg: '#6d28d9', bg: '#f3effc', bd: '#ded2f3' },
+      promote: { label: 'PROMOTE', fg: '#6d28d9', bg: '#f3effc', bd: '#ded2f3' },
+      merge:   { label: 'MERGE',   fg: '#6d28d9', bg: '#f3effc', bd: '#ded2f3' },
+      issue:   { label: 'issue',   fg: '#475569', bg: '#f1f5f9', bd: '#d7dee7' },
+    };
+    const stChip = {
+      pending: { label: '待審',    fg: '#9a6700', bg: '#faf3e2', bd: '#ecd9a8' },
+      waiting: { label: '待人執行', fg: '#0e7490', bg: '#e9f5f8', bd: '#bfe0e9' },
+      expired: { label: '已過期',  fg: '#8a857c', bg: '#f4f2ec', bd: '#ddd8cb' },
+    };
+
+    const sorted = [...proposals].sort((a, b) => {
+      const av = canSign(a) ? 0 : 1, bv = canSign(b) ? 0 : 1;
+      return av - bv || b.id - a.id;
+    });
+    const inboxList = sorted.map((p) => ({
+      id: p.id,
+      title: p.title,
+      when: p.when,
+      signer: p.signer,
+      typeLabel: typeChip[p.kind].label, typeFg: typeChip[p.kind].fg, typeBg: typeChip[p.kind].bg, typeBd: typeChip[p.kind].bd,
+      stLabel: stChip[p.status].label, stFg: stChip[p.status].fg, stBg: stChip[p.status].bg, stBd: stChip[p.status].bd,
+      rowBd: p.id === selId ? '#211f1c' : '#e7e3d9',
+      dim: canSign(p) ? 1 : 0.48,
+      onClick: () => this.setState({ selId: p.id }),
+    }));
+
+    const mine = proposals.filter((p) => canSign(p));
+    const others = proposals.length - mine.length;
+    const listCountNote = `你可簽 ${mine.filter((p) => p.status === 'pending').length} 件待審 · 其他角色 ${others} 件（淡化）`;
+    const batchVisible = role === 'PE';
+
+    // selection
+    const sel = proposals.find((p) => p.id === selId) || proposals[0];
+    const evStyle = {
+      sys:  { sig: '▣', fg: '#475569', bd: '#d7dee7', bg: '#fff',   line: 'solid' },
+      self: { sig: '△', fg: '#9a6700', bd: '#ecd9a8', bg: '#fffdf6', line: 'dashed' },
+      mem:  { sig: '◆', fg: '#6d28d9', bd: '#ded2f3', bg: '#faf8ff', line: 'solid' },
+    };
+    const lifeStyle = { done: { mark: '✓', fg: '#1a7f4e' }, current: { mark: '●', fg: '#0e7490' }, todo: { mark: '○', fg: '#8a857c' } };
+    const selLife = (sel.life || []).map((s, i, arr) => ({
+      label: s.label, note: s.note,
+      mark: lifeStyle[s.st].mark, fg: lifeStyle[s.st].fg,
+      connStyle: s.st === 'done' ? 'solid' : 'dashed',
+      connDisp: i < arr.length - 1 ? 'block' : 'none',
+    }));
+
+    const selCanSign = canSign(sel) && sel.status === 'pending';
+    let selNoActionNote = '';
+    if (sel.status === 'expired') selNoActionNote = '已過期提案不可簽核 — 僅供追溯';
+    else if (sel.status === 'waiting') selNoActionNote = '已核准，等待人執行落地（env/restart）— Supervisor 驗證後回寫';
+    else if (!canSign(sel)) selNoActionNote = `此案由 ${sel.signer} 簽核 — 你目前的角色（${role}）為唯讀`;
+
+    // S3 red day
+    const s3 = redDay
+      ? { bg: '#fdf1ef', bd: '#f0c1b8', alert: '● 異常', alertFg: '#b42318', empty: '45%', emptyFg: '#b42318', anchor: 'block', cost: '$41.20', costNote: '+38%', cache: '31%', cacheNote: '前日 54%' }
+      : { bg: '#fff', bd: '#e7e3d9', alert: '✓ 正常', alertFg: '#1a7f4e', empty: '0.8%', emptyFg: '#211f1c', anchor: 'none', cost: '$28.40', costNote: '7 日均 $29.8', cache: '55%', cacheNote: '穩定', };
+
+    // audit
+    const auditRows = [
+      { id: 20, title: 'budget react_rounds 32→40', proposed: '07-04 20:41', sign: '✓ admin.lin 07-04 21:02', signFg: '#1a7f4e', land: '● 待人執行（env 未重啟）', landFg: '#0e7490', verify: '— 落地後 24h 觀察', verifyFg: '#8a857c' },
+      { id: 15, title: 'PRUNE ×5（W26 體檢）', proposed: '07-03 06:00', sign: '✓ pe.chen 07-03 10:15', signFg: '#1a7f4e', land: '✓ 簽核即落地（DB 軟刪）', landFg: '#1a7f4e', verify: '✓ 召回污染 0 · 命中率 +3pt', verifyFg: '#1a7f4e' },
+      { id: 13, title: 'W2 memo 併入 block docs ×6', proposed: '07-02 06:00', sign: '✓ pe.chen 07-02 09:40', signFg: '#1a7f4e', land: '✓ DB', landFg: '#1a7f4e', verify: '✓ 後續 build 拒因 unnest 類 −60%', verifyFg: '#1a7f4e' },
+      { id: 11, title: 'flag flat-mode steer 灰度 25%→50%', proposed: '07-01 18:00', sign: '✕ admin.lin「等 W27 SLASH 回穩」', signFg: '#b42318', land: '—', landFg: '#b6b0a4', verify: '—', verifyFg: '#b6b0a4' },
+      { id: 12, title: 'provider pin GLM 週末降速（舊）', proposed: '07-03 09:00', sign: '⊘ 未簽 — 已被 #21 supersede', signFg: '#8a857c', land: '—', landFg: '#b6b0a4', verify: '—', verifyFg: '#b6b0a4' },
+    ];
+
+    // knowledge workshop rows
+    const kbRows = [
+      { id: 82, cls: 'domain', text: 'process_history 必須提供 tool_id / lot_id / step 三擇一', isNew: true, uses: '13', usesHot: true, last: '07-04', src: 'Supervisor 蒸餾', flag: '' },
+      { id: 9,  cls: 'domain', text: 'SPC 連續 N 點 OOC 觸發告警慣例', isNew: false, uses: '27', usesHot: true, last: '07-05', src: '人工', flag: '' },
+      { id: 83, cls: 'procedure', text: '避免 orphan leaf：資料節點必須接下游', isNew: false, uses: '19', usesHot: true, last: '07-05', src: '人工', flag: '' },
+      { id: 77, cls: 'domain', text: 'process_history 參數規則（舊版）', isNew: false, uses: '9', usesHot: false, last: '06-28', src: '教它', flag: '擬 MERGE #17', warn: true },
+      { id: 41, cls: 'preference', text: '預設時間窗 12 小時', isNew: false, uses: '0', usesHot: false, last: '04-02', src: '教它', flag: '擬 PRUNE #19', warn: true },
+      { id: 58, cls: 'procedure', text: '陣列欄位舊 unnest 寫法', isNew: false, uses: '0', usesHot: false, last: '03-19', src: '人工', flag: '擬 PRUNE #19', warn: true },
+    ].map((r) => ({
+      ...r,
+      newDisp: r.isNew ? 'inline-block' : 'none',
+      usesFg: r.usesHot ? '#211f1c' : '#b6b0a4',
+      bg: r.warn ? '#fcfaf4' : '#fff',
+      flagFg: r.warn ? '#9a6700' : '#b6b0a4',
+      flagWt: r.warn ? 600 : 400,
+    }));
+
+    return {
+      keyDisp: showKeys ? 'inline-block' : 'none',
+      roleBtns, sidebarItems, gateNote, gateNoteDisp: 'block',
+      tabBtns, roleFilterNote,
+      isInbox: tab === 'inbox', isDigest: tab === 'digest', isAudit: tab === 'audit',
+      listCountNote,
+      batchDisp: batchVisible ? 'inline-block' : 'none',
+      batchLabel: '批次核准低風險 PRUNE',
+      inboxList,
+      selId: sel.id, selTitle: sel.title, selWhen: sel.when, selSigner: sel.signer,
+      selTypeLabel: typeChip[sel.kind].label, selTypeFg: typeChip[sel.kind].fg, selTypeBg: typeChip[sel.kind].bg, selTypeBd: typeChip[sel.kind].bd,
+      selStLabel: stChip[sel.status].label, selStFg: stChip[sel.status].fg, selStBg: stChip[sel.status].bg, selStBd: stChip[sel.status].bd,
+      selBody: sel.body.map((t) => ({ t })),
+      selWhy: sel.why,
+      selEvidence: sel.evidence.map((e) => ({ ...evStyle[e.k], label: e.label, detail: e.detail })),
+      selTargets: sel.targets || [],
+      selTargetsDisp: sel.targets ? 'flex' : 'none',
+      selLife, selLifeDisp: sel.life ? 'flex' : 'none',
+      selSupersedeDisp: sel.status === 'expired' ? 'flex' : 'none',
+      selActionsDisp: selCanSign ? 'flex' : 'none',
+      selActionNote: sel.actionNote || '',
+      selNoActionDisp: selCanSign ? 'none' : 'block',
+      selNoActionNote,
+      s3Bg: s3.bg, s3Bd: s3.bd, s3Alert: s3.alert, s3AlertFg: s3.alertFg,
+      s3Empty: s3.empty, s3EmptyFg: s3.emptyFg, s3AnchorDisp: s3.anchor,
+      s3Cost: s3.cost, s3CostNote: s3.costNote, s3Cache: s3.cache, s3CacheNote: s3.cacheNote,
+      goProposal21: () => this.setState({ tab: 'inbox', selId: 21 }),
+      auditRows, kbRows,
+    };
+  }
+}
+</script>
+</body>
+</html>

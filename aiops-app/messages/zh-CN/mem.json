@@ -1,0 +1,12 @@
+{
+  "readonly": "只读",
+  "howApply": "How to apply",
+  "source": "来源",
+  "sourceHuman": "人工",
+  "sourceTeach": "教它",
+  "sourceAgent": "Supervisor 蒸馏",
+  "footerNote": "你的角色为只读 — 条目由 PE 在知识工房维护",
+  "reportIssue": "反馈问题 → PE 收件箱",
+  "removed": "条目已移除",
+  "close": "关闭"
+}

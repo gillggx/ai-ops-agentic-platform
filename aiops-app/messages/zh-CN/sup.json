@@ -1,0 +1,112 @@
+{
+  "title": "Supervisor 工作台",
+  "subtitle": "Supervisor 只有提案权，落地一律经人签核；危险动作仅限 authed UI",
+  "loading": "加载中…",
+  "loadError": "加载失败：{msg}",
+  "roleNote": "你的角色：{roles}",
+  "health": {
+    "title": "健康总览",
+    "updatedAt": "最后更新 {time}",
+    "s1Title": "执行健康",
+    "s1SuccessRate": "近 {n} 次 build 成功率",
+    "s1AvgRounds": "平均 LLM calls",
+    "s1Divergence": "divergence 件数",
+    "s2Title": "知识质量",
+    "s2Pending": "待审提案",
+    "s2DocMemos": "Builder doc memo",
+    "s2RecallRate": "本周召回命中率",
+    "s3Title": "成本与资源",
+    "s3Cost": "今日花费",
+    "s3Cache": "cache hit",
+    "s3Empty": "LLM 空响应率",
+    "s3Note": "待 W2 后端 — 显示占位"
+  },
+  "tabs": {
+    "inbox": "提案收件箱",
+    "digest": "定期报告",
+    "audit": "签核记录"
+  },
+  "inbox": {
+    "countNote": "你可签 {mine} 件待审 · 其他角色 {others} 件（淡化）",
+    "empty": "目前没有待审提案",
+    "signerLabel": "签核者 {signer}"
+  },
+  "status": {
+    "pending": "待审",
+    "approved": "已核准",
+    "rejected": "已驳回",
+    "expired": "已过期"
+  },
+  "detail": {
+    "none": "从左侧选择一条提案",
+    "what": "提案",
+    "why": "为什么",
+    "evidence": "依据",
+    "targetHint": "— 点开进知识工房该条",
+    "legendSys": "系统事实（机器验证，实线）",
+    "legendSelf": "agent 自述（虚线）",
+    "legendMem": "记忆",
+    "readOnly": "此案由 {signer} 签核 — 你当前的角色（{role}）为只读",
+    "reviewedNote": "{status} · 签核人 #{reviewer} · {time}",
+    "expiredNote": "已过期提案不可签核 — 仅供追溯",
+    "supersedePre": "此提案已过期 — 新证据出现时自动 supersede，被",
+    "supersedePost": "取代（同主题、证据较新）。不留僵尸提案。",
+    "supersedeNoRef": "此提案已过期 — 已被更新的提案取代，仅供追溯",
+    "lifecycleNote": "核准后为“待人执行”中间态；Supervisor 验证结果回写此行"
+  },
+  "life": {
+    "propose": "提案",
+    "sign": "签核",
+    "land": "落地",
+    "verify": "验证",
+    "waitSigner": "待 {signer}"
+  },
+  "actions": {
+    "approve": "核准",
+    "reject": "驳回",
+    "shelve": "搁置",
+    "rejectPlaceholder": "驳回理由（必填一句）",
+    "rejectReasonRequired": "请先填驳回理由",
+    "commitNote": "核准即套用变更（写入 DB）",
+    "working": "处理中…",
+    "actionError": "操作失败：{msg}"
+  },
+  "typeDesc": {
+    "MERGE": "合并语义重复的记忆",
+    "CORRECT": "改写 draft correction 成干净教训",
+    "PRUNE": "停用过时 / 无再用价值的记忆（软删）",
+    "PROMOTE": "蒸馏成 domain / procedure 长期知识",
+    "DOC_REVISE": "block 文档修订草案（不直接改 doc）"
+  },
+  "what": {
+    "mergeKeep": "保留 #{id}",
+    "mergeRemove": "停用 {ids}",
+    "mergeBody": "更新合并后内文",
+    "correctRewrite": "改写 #{id} 为干净教训",
+    "correctTitle": "新标题：{title}",
+    "correctPromote": "核准即转正（active）",
+    "correctDraft": "维持 draft",
+    "pruneTargets": "停用 {ids}（软删）",
+    "promoteNew": "新增 {cls} 条目：“{title}”",
+    "promoteApplies": "applies_to：{applies}",
+    "docBlock": "{block} 的文档修订草案",
+    "docMemos": "{count} 条 doc memo 标记为 promoted",
+    "docDraft": "修订草案保留于提案行 — 不直接改 block docs"
+  },
+  "evidence": {
+    "raw": "proposal 原文"
+  },
+  "digest": {
+    "empty": "Supervisor 报告尚未生成",
+    "hint": "定期报告（周报 / 日报）由 W2 排程产生，上线后会出现在这里"
+  },
+  "audit": {
+    "colCase": "案件",
+    "colProposed": "提案",
+    "colSign": "签核",
+    "colLand": "落地",
+    "colVerify": "Supervisor 验证",
+    "lifecycle": "一行一案 · 提案 → 签核 → 落地 → 验证 四段生命周期",
+    "empty": "尚无签核记录"
+  }
+}

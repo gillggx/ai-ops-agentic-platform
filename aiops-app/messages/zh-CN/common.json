@@ -7,5 +7,6 @@
   "accountSettings": "账号设置",
   "changePassword": "修改密码",
   "signInMethod": "登录方式：{provider}",
-  "language": "语言"
+  "language": "语言",
+  "myPreferences": "我的偏好"
 }

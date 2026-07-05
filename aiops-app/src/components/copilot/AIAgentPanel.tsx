@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import type { AIOpsReportContract, SuggestedAction } from "aiops-contract";
 import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
+import { useSession } from "next-auth/react";
 import { activeLocale } from "@/i18n/format";
 import { ContractCard } from "./ContractCard";
 import { type PlanItem } from "./PlanRenderer";
@@ -699,6 +700,10 @@ export function AIAgentPanel({
   // the plan card. {turn_used, turn_budget, percent, warning}.
   const [glassProgress, setGlassProgress] = useState<{ turn_used: number; turn_budget: number; percent: number; warning: boolean } | null>(null);
   const [activeTab, setActiveTab]   = useState<"chat" | "console">("chat");
+  // 稿 1d — 記憶 chip 行為按角色：PE/IT_ADMIN 進工房，其餘開唯讀浮卡
+  const { data: _session } = useSession();
+  const _roles: string[] = ((_session as unknown as { roles?: string[] })?.roles) ?? [];
+  const memoryEditable = _roles.includes("PE") || _roles.includes("IT_ADMIN");
   const [reflection, setReflection] = useState<ReflectionState>({ status: null, amendment: "" });
 
   const sessionIdRef = useRef<string | null>(externalSessionId ?? null);
@@ -2367,6 +2372,7 @@ export function AIAgentPanel({
       {activeTab === "console" && (
         <AgentConsole
           state={consoleState}
+          memoryEditable={memoryEditable}
           onTeach={({ blockId, phaseId }) => {
             const qs = new URLSearchParams();
             if (blockId) qs.set("prefill_block", blockId);

@@ -1,0 +1,314 @@
+"use client";
+
+/**
+ * Detail pane (right side of the master-detail inbox, design 1a).
+ *
+ * 三段式 body: 提案 (what) / 為什麼 (why) / 依據 (evidence), parsed
+ * defensively from the proposal JSON — missing fields render "—".
+ * target_ids show as purple ◆ chips linking into the knowledge workshop.
+ * Approve = black button; reject requires a non-empty reason; 擱置 just
+ * deselects. Geometric marks (✓ ● ○ ▣ △ ◆ ↗ ·) stay in JSX, not i18n.
+ */
+
+import { useState } from "react";
+import { useTranslations } from "next-intl";
+import {
+  TOK, EV_STYLE, LIFE_STYLE, LifeState, Proposal,
+  typeChip, statusChip, signerOf, canSign as canSignFn,
+  proposalTitle, proposalWhy, whatLines, targetChips, evidenceRows,
+  isSuperseded, supersededBy, fmtWhen,
+} from "./model";
+import { statusLabelKey } from "./ProposalList";
+
+const labelCell: React.CSSProperties = {
+  font: `700 10.5px ${TOK.mono}`, color: TOK.muted, paddingTop: 2,
+};
+
+/** Types with a typeDesc.* i18n entry — unknown types skip the desc line. */
+const DESCRIBED_TYPES = new Set(["MERGE", "CORRECT", "PRUNE", "PROMOTE", "DOC_REVISE"]);
+
+export function ProposalDetail({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: {
+  p: Proposal | null;
+  roles: string[];
+  busy: boolean;
+  onApprove: (id: number) => void;
+  onReject: (id: number, reason: string) => void;
+  onShelve: () => void;
+  onGoto: (id: number) => void;
+}) {
+  const t = useTranslations("sup");
+
+  if (!p) {
+    return (
+      <div style={{
+        background: TOK.card, border: `1px solid ${TOK.border}`, borderRadius: 10,
+        padding: "60px 24px", textAlign: "center", color: TOK.faint, fontSize: 13,
+      }}>
+        {t("detail.none")}
+      </div>
+    );
+  }
+  return <DetailInner key={p.id} p={p} roles={roles} busy={busy}
+    onApprove={onApprove} onReject={onReject} onShelve={onShelve} onGoto={onGoto} />;
+}
+
+function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: {
+  p: Proposal; roles: string[]; busy: boolean;
+  onApprove: (id: number) => void;
+  onReject: (id: number, reason: string) => void;
+  onShelve: () => void;
+  onGoto: (id: number) => void;
+}) {
+  const t = useTranslations("sup");
+  const [reason, setReason] = useState("");
+  const [reasonErr, setReasonErr] = useState(false);
+
+  const tc = typeChip(p.action_type);
+  const sc = statusChip(p.status);
+  const signer = signerOf(p);
+  const superseded = isSuperseded(p);
+  const supersederId = supersededBy(p);
+  const signable = canSignFn(p, roles) && p.status === "proposed" && !superseded;
+  const why = proposalWhy(p);
+  const targets = targetChips(p);
+
+  const lifeStages: { labelKey: string; st: LifeState; note: string }[] = [
+    { labelKey: "life.propose", st: "done", note: fmtWhen(p.created_at) },
+    p.status === "proposed"
+      ? { labelKey: "life.sign", st: "current", note: t("life.waitSigner", { signer }) }
+      : { labelKey: "life.sign", st: "done", note: `#${p.reviewed_by ?? "?"} ${fmtWhen(p.reviewed_at)}` },
+    { labelKey: "life.land", st: "todo", note: "—" },   // W2 — lifecycle beyond 簽核 not tracked yet
+    { labelKey: "life.verify", st: "todo", note: "—" },
+  ];
+
+  const submitReject = () => {
+    if (reason.trim() === "") { setReasonErr(true); return; }
+    setReasonErr(false);
+    onReject(p.id, reason.trim());
+  };
+
+  let noActionNote: string | null = null;
+  if (superseded) noActionNote = t("detail.expiredNote");
+  else if (p.status !== "proposed") {
+    noActionNote = t("detail.reviewedNote", {
+      status: t(statusLabelKey(p.status)),
+      reviewer: p.reviewed_by ?? "?",
+      time: fmtWhen(p.reviewed_at),
+    });
+  } else if (!canSignFn(p, roles)) {
+    noActionNote = t("detail.readOnly", { signer, role: roles.join(" / ") || "—" });
+  }
+
+  return (
+    <div style={{ background: TOK.card, border: `1px solid ${TOK.border}`, borderRadius: 10, minWidth: 0 }}>
+      {/* header */}
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${TOK.borderSub}` }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+          <span style={{
+            font: `700 11px ${TOK.mono}`, color: tc.fg, background: tc.bg,
+            border: `1px solid ${tc.bd}`, borderRadius: 4, padding: "2px 7px",
+          }}>{p.action_type}</span>
+          <span style={{ font: `600 12px ${TOK.mono}`, color: TOK.faint }}>#{p.id}</span>
+          <span style={{
+            font: `600 10.5px ${TOK.mono}`, color: sc.fg, background: sc.bg,
+            border: `1px solid ${sc.bd}`, borderRadius: 999, padding: "1px 8px",
+          }}>{t(statusLabelKey(superseded ? "expired" : p.status))}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ font: `500 11px ${TOK.mono}`, color: TOK.muted }}>
+            {fmtWhen(p.created_at)} · {t("inbox.signerLabel", { signer })}
+          </span>
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4 }}>{proposalTitle(p)}</div>
+        {DESCRIBED_TYPES.has(p.action_type) && (
+          <div style={{ fontSize: 11, color: TOK.faint, marginTop: 3 }}>
+            {t(`typeDesc.${p.action_type}` as Parameters<typeof t>[0])}
+          </div>
+        )}
+      </div>
+
+      {/* 三段式 body */}
+      <div style={{
+        padding: "14px 18px", display: "grid", gridTemplateColumns: "64px 1fr",
+        rowGap: 14, columnGap: 14,
+      }}>
+        <div style={labelCell}>{t("detail.what")}</div>
+        <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+          {whatLines(p).map((ln, i) => (
+            <div key={i} style={{ display: "flex", gap: 8 }}>
+              <span style={{ color: TOK.fainter }}>·</span>
+              <span style={"text" in ln
+                ? { fontFamily: TOK.mono, fontSize: 12, wordBreak: "break-all" } : undefined}>
+                {"text" in ln
+                  ? ln.text
+                  : t(ln.key as Parameters<typeof t>[0], ln.params)}
+              </span>
+            </div>
+          ))}
+          {targets.length > 0 && (
+            <div style={{ display: "flex", marginTop: 9, flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: TOK.muted, marginRight: 2 }}>target_ids</span>
+              {targets.map((tg) => (
+                <span
+                  key={tg.id}
+                  title={tg.short ?? undefined}
+                  onClick={() => {
+                    if (tg.numeric) window.open(`/agent-knowledge?id=${tg.id}`, "_blank");
+                  }}
+                  style={{
+                    cursor: tg.numeric ? "pointer" : "default",
+                    font: `600 10.5px ${TOK.mono}`, color: TOK.purple,
+                    background: TOK.purpleBg, border: `1px solid ${TOK.purpleBd}`,
+                    borderRadius: 4, padding: "2px 7px",
+                  }}
+                >◆ #{tg.id}{tg.short ? ` ${tg.short}` : ""}</span>
+              ))}
+              <span style={{ fontSize: 10.5, color: TOK.faint }}>{t("detail.targetHint")}</span>
+            </div>
+          )}
+        </div>
+
+        <div style={labelCell}>{t("detail.why")}</div>
+        <div style={{ fontSize: 13, lineHeight: 1.7, color: TOK.body }}>{why ?? "—"}</div>
+
+        <div style={labelCell}>{t("detail.evidence")}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {evidenceRows(p).map((ev, i) => {
+            const st = EV_STYLE[ev.kind];
+            return (
+              <div key={i} style={{
+                display: "flex", gap: 10, alignItems: "flex-start",
+                border: `1px ${st.line} ${st.bd}`, background: st.bg,
+                borderRadius: 7, padding: "7px 11px",
+              }}>
+                <span style={{ font: `700 12px ${TOK.mono}`, color: st.fg, width: 16 }}>{st.sig}</span>
+                <span style={{ font: `600 11.5px ${TOK.mono}`, color: TOK.secondary, minWidth: 110 }}>
+                  {ev.label ?? (ev.labelKey ? t(ev.labelKey as Parameters<typeof t>[0]) : "—")}
+                </span>
+                <span style={{
+                  fontSize: 12, color: TOK.body, lineHeight: 1.55, flex: 1,
+                  wordBreak: "break-word",
+                }}>{ev.detail}</span>
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 10.5, color: TOK.faint, marginTop: 2 }}>
+            ▣ {t("detail.legendSys")} · △ {t("detail.legendSelf")} · ◆ {t("detail.legendMem")}
+          </div>
+        </div>
+      </div>
+
+      {/* lifecycle strip (提案 → 簽核 → 落地 → 驗證) */}
+      <div style={{
+        display: "flex", margin: "0 18px 14px", background: TOK.lifeBg,
+        border: `1px solid ${TOK.lifeBd}`, borderRadius: 8, padding: "10px 16px",
+        alignItems: "center",
+      }}>
+        {lifeStages.map((st, i) => {
+          const ls = LIFE_STYLE[st.st];
+          return (
+            <div key={st.labelKey} style={{ display: "flex", alignItems: "center" }}>
+              <div style={{ textAlign: "center", minWidth: 110 }}>
+                <div style={{ font: `700 11.5px ${TOK.mono}`, color: ls.fg }}>
+                  {ls.mark} {t(st.labelKey as Parameters<typeof t>[0])}
+                </div>
+                <div style={{ fontSize: 10, color: TOK.muted, marginTop: 2 }}>{st.note}</div>
+              </div>
+              {i < lifeStages.length - 1 && (
+                <div style={{
+                  width: 36,
+                  borderTop: `1.5px ${st.st === "done" ? "solid" : "dashed"} ${TOK.lifeConn}`,
+                }} />
+              )}
+            </div>
+          );
+        })}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 10.5, color: TOK.muted, maxWidth: 220, lineHeight: 1.5 }}>
+          {t("detail.lifecycleNote")}
+        </span>
+      </div>
+
+      {/* supersede banner (dashed, design lines ~225-229) */}
+      {superseded && (
+        <div style={{
+          display: "flex", margin: "0 18px 14px", background: "#f4f2ec",
+          border: `1px dashed #ccc5b5`, borderRadius: 8, padding: "9px 14px",
+          fontSize: 12, color: "#6f6a61", gap: 6, alignItems: "center", flexWrap: "wrap",
+        }}>
+          {supersederId != null ? (
+            <>
+              <span>{t("detail.supersedePre")}</span>
+              <span
+                onClick={() => onGoto(supersederId)}
+                style={{
+                  cursor: "pointer", color: TOK.blue, font: `600 11.5px ${TOK.mono}`,
+                  borderBottom: "1px solid #bcd0f5",
+                }}
+              >#{supersederId}</span>
+              <span>{t("detail.supersedePost")}</span>
+            </>
+          ) : (
+            <span>{t("detail.supersedeNoRef")}</span>
+          )}
+        </div>
+      )}
+
+      {/* action bar / read-only note */}
+      {signable ? (
+        <div style={{
+          display: "flex", gap: 8, alignItems: "center", padding: "12px 18px",
+          borderTop: `1px solid ${TOK.borderSub}`, background: TOK.cardFoot,
+          borderRadius: "0 0 10px 10px", flexWrap: "wrap",
+        }}>
+          <button
+            disabled={busy}
+            onClick={() => onApprove(p.id)}
+            style={{
+              background: TOK.ink, color: TOK.paper, border: "none", borderRadius: 7,
+              padding: "8px 20px", fontSize: 12.5, fontWeight: 700,
+              cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+            }}
+          >{busy ? t("actions.working") : t("actions.approve")}</button>
+          <input
+            value={reason}
+            onChange={(e) => { setReason(e.target.value); if (reasonErr) setReasonErr(false); }}
+            placeholder={t("actions.rejectPlaceholder")}
+            style={{
+              border: `1px solid ${reasonErr ? TOK.redBtnBd : TOK.btnBorder}`,
+              borderRadius: 7, padding: "7px 12px", fontSize: 12, width: 220,
+              background: "#fff", color: TOK.ink, fontFamily: "inherit",
+            }}
+          />
+          <button
+            disabled={busy}
+            onClick={submitReject}
+            style={{
+              background: "#fff", color: TOK.red, border: `1px solid ${TOK.redBtnBd}`,
+              borderRadius: 7, padding: "8px 16px", fontSize: 12.5, fontWeight: 600,
+              cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+            }}
+          >{t("actions.reject")}</button>
+          <button
+            onClick={onShelve}
+            style={{
+              background: "none", color: TOK.muted, border: "none",
+              fontSize: 12.5, cursor: "pointer", padding: "8px 10px",
+            }}
+          >{t("actions.shelve")}</button>
+          <span style={{ flex: 1 }} />
+          <span style={{ fontSize: 11, color: TOK.faint }}>
+            {reasonErr ? (
+              <span style={{ color: TOK.red }}>{t("actions.rejectReasonRequired")}</span>
+            ) : t("actions.commitNote")}
+          </span>
+        </div>
+      ) : (
+        <div style={{
+          padding: "12px 18px", borderTop: `1px solid ${TOK.borderSub}`,
+          background: TOK.cardFoot, borderRadius: "0 0 10px 10px",
+          fontSize: 12, color: TOK.muted,
+        }}>{noActionNote}</div>
+      )}
+    </div>
+  );
+}

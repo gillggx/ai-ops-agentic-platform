@@ -7,5 +7,6 @@
   "accountSettings": "Account settings",
   "changePassword": "Change password",
   "signInMethod": "Signed in via {provider}",
-  "language": "Language"
+  "language": "Language",
+  "myPreferences": "My preferences"
 }

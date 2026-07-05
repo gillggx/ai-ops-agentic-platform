@@ -1,0 +1,12 @@
+{
+  "readonly": "読み取り専用",
+  "howApply": "How to apply",
+  "source": "ソース",
+  "sourceHuman": "手動",
+  "sourceTeach": "教える",
+  "sourceAgent": "Supervisor 蒸留",
+  "footerNote": "あなたのロールは読み取り専用です — エントリは PE がナレッジ工房で管理します",
+  "reportIssue": "問題を報告 → PE 受信箱",
+  "removed": "エントリは削除されました",
+  "close": "閉じる"
+}

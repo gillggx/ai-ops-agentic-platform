@@ -1,0 +1,82 @@
+{
+  "header": {
+    "path": "/ agent-knowledge · 知识工房"
+  },
+  "loading": "加载中…",
+  "manual": {
+    "title": "手册 · 已生效的真理",
+    "tabKnowledge": "Knowledge {count}",
+    "tabLexicon": "Lexicon {count}",
+    "tabExamples": "Examples {count}",
+    "searchPlaceholder": "搜索条目 / How-to-apply…",
+    "add": "+ 新增条目",
+    "colId": "ID",
+    "colClass": "类别",
+    "colText": "条目（How-to-apply 首句）",
+    "colUses": "uses 90d",
+    "colLast": "最近召回",
+    "colSrc": "来源",
+    "colUsesShort": "uses",
+    "exColTitle": "标题",
+    "newDistilled": "新蒸馏",
+    "disabled": "停用",
+    "empty": "尚无条目 — 点「+ 新增条目」创建第一条",
+    "directivesMoved": "Directives 已移出 → Supervisor 工作台治理区（admin-only）· ON_DUTY 不可见此页，仅能从 Console「教它」提交草稿",
+    "lexColTerm": "你的行话",
+    "lexColStandard": "标准词",
+    "lexColNote": "备注"
+  },
+  "src": {
+    "human": "人工",
+    "distilled": "Supervisor 蒸馏",
+    "teach": "教它"
+  },
+  "inbox": {
+    "title": "收件箱 · 待你审核",
+    "breakdown": "W2 doc memo {count}",
+    "chipW2": "W2 memo",
+    "pending": "待审",
+    "proposal": "提案",
+    "why": "为什么",
+    "evidence": "依据",
+    "episode": "▣ episode {id}",
+    "approve": "核准并入",
+    "reject": "驳回…",
+    "disabledTip": "W2 波后端接入",
+    "signNote": "签核即落地（DB）",
+    "empty": "收件箱当前没有待审项目"
+  },
+  "editor": {
+    "newEntry": "新增条目",
+    "editEntry": "编辑条目",
+    "fieldTitle": "标题",
+    "fieldBody": "内容（实际规则）",
+    "fieldScope": "Scope",
+    "fieldScopeValue": "Scope 值",
+    "fieldScopeNone": "（无值）",
+    "fieldPriority": "优先级",
+    "save": "保存",
+    "saving": "保存中…",
+    "cancel": "取消",
+    "delete": "删除",
+    "deleteConfirm": "确定要删除这条条目？",
+    "enable": "启用",
+    "disable": "停用",
+    "lexNew": "新增 Lexicon 条目",
+    "lexEdit": "编辑 Lexicon 条目",
+    "fieldTerm": "你的行话（jargon）",
+    "fieldStandard": "标准词",
+    "fieldNote": "备注（选填）",
+    "exNew": "新增 Example",
+    "exEdit": "编辑 Example",
+    "fieldUser": "USER（触发此风格的输入）",
+    "fieldIdeal": "IDEAL（理想回复）"
+  },
+  "teach": {
+    "titlePrefix": "[教它] {name}",
+    "block": "工具/block：{value}",
+    "phase": "phase：{value}",
+    "instruction": "原始指令：{value}",
+    "bodyHint": "（描述正确做法）"
+  }
+}
