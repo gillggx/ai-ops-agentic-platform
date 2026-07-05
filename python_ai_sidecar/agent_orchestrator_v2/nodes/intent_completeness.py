@@ -146,10 +146,10 @@ Rules:
   - Output JSON only. No prose. No code fences."""
 
 
-_FORCE_SYNTH_REPLY = (
-    "我先跟你確認要建什麼 ↑\n"
-    "點 ✅ 開始建、✏️ 想修改、❌ 取消。"
-)
+# 2026-07-05 對話重整 §2：敘事泡不重述卡片操作 — design_intent 卡自身已說明
+# 怎麼操作（點選即送出並鎖定），這句旁白（含 emoji）從訊息流移除。空字串
+# 讓 synthesis 事件帶空 text，前端 displayText 為空時不會貼訊息。
+_FORCE_SYNTH_REPLY = ""
 
 
 # Canonical input names — must match the keys Glass Box's HOT blocks accept

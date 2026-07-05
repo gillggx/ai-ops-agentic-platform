@@ -5,7 +5,7 @@ import type { AIOpsReportContract, SuggestedAction } from "aiops-contract";
 import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
 import { ContractCard } from "./ContractCard";
-import { PlanRenderer, type PlanItem } from "./PlanRenderer";
+import { type PlanItem } from "./PlanRenderer";
 import SlashCommandMenu from "./SlashCommandMenu";
 import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
@@ -584,11 +584,9 @@ export function AIAgentPanel({
   const synthesisIdxRef = useRef(0);
   // Phase v1.3 P0: 👎 modal state — null when closed.
   const [feedbackModal, setFeedbackModal] = useState<{ messageId: number; messageIdx: number } | null>(null);
-  // v1.4 Plan Panel — agent-emitted todo list, refreshed each turn.
+  // v1.4 Plan Panel — agent-emitted todo list; 2026-07-05 起僅作
+  // LiteCanvas relay state（訊息流的 todo 卡已移除）。
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
-  // v1.7 — id of the inline plan chat-card so plan_update events know which
-  // message to mutate. Reset at every pb_glass_start.
-  const currentPlanMsgIdRef = useRef<number | null>(null);
   // 2026-07-05 對話重整 — 單卡生命週期：一次 build 只有一張 BUILD PLAN 卡
   // （同 message id 原地變身 草案 → 建構中 → 完成）。pb_plan_confirm /
   // pb_glass_chat(plan) / phase_update / pb_glass_op / pb_glass_done 全部
@@ -789,7 +787,11 @@ export function AIAgentPanel({
     const messageToSend = focusPrefix + message;
     // Track the latest user prompt so design_intent_confirm cards can attach
     // it to themselves; the follow-up "confirm" reply needs the original.
-    lastUserPromptRef.current = message;
+    // 2026-07-05 §2 — 卡片確認後的 re-POST（[intent_confirmed:] / [intent=]
+    // prefix）是內部 follow-up：照送後端，但不進訊息流（不重複 user 泡）、
+    // 不覆蓋 lastUserPromptRef（原句才是 prompt）。
+    const isInternalFollowUp = /^\s*\[(intent_confirmed:|intent=)/.test(message);
+    if (!isInternalFollowUp) lastUserPromptRef.current = message;
 
     setLoading(true);
     setStages([]);
@@ -802,14 +804,15 @@ export function AIAgentPanel({
     setGlassProgress(null);
     setReflection({ status: null, amendment: "" });
     setPlanItems([]);
-    currentPlanMsgIdRef.current = null;
     currentBuildCardIdRef.current = null;
     currentBuildDoneIdRef.current = null;
     setAutoRun({ status: "idle" });
     setInput("");
     setActiveTab("chat");
 
-    setChatHistory((prev) => [...prev, { id: nextId(), role: "user", content: message }]);
+    if (!isInternalFollowUp) {
+      setChatHistory((prev) => [...prev, { id: nextId(), role: "user", content: message }]);
+    }
     onUserMessageSent?.(message);
 
     try {
@@ -1040,29 +1043,12 @@ export function AIAgentPanel({
           }
 
           case "plan": {
-            // v1.7 — plan now lives inline in the chat thread, right after
-            // the user's request, so each new build gets its own plan card.
-            // If the agent re-emits create within the same build, replace the
-            // existing card in place instead of stacking a duplicate.
+            // 2026-07-05 §2 — 計畫 todo 卡自訊息流移除（與 BUILD PLAN 卡
+            // 合併為單卡生命週期）。planItems state 仍更新：LiteCanvas
+            // overlay 透過 onPlanItemsChange 繼續收到 relay。
             const items = ev.items as PlanItem[] | undefined;
             if (Array.isArray(items)) {
-              const cloned = items.map((it) => ({ ...it }));
-              const existingId = currentPlanMsgIdRef.current;
-              setPlanItems(cloned);
-              if (existingId != null) {
-                setChatHistory((prev) => prev.map((m) =>
-                  m.id === existingId && m.role === "plan"
-                    ? { ...m, planItems: cloned }
-                    : m,
-                ));
-              } else {
-                const planMsgId = nextId();
-                currentPlanMsgIdRef.current = planMsgId;
-                setChatHistory((prev) => [...prev, {
-                  id: planMsgId, role: "plan", content: "",
-                  planItems: cloned,
-                }]);
-              }
+              setPlanItems(items.map((it) => ({ ...it })));
               break;
             }
             // Legacy — free-text plan from LLM <plan>...</plan> reasoning
@@ -1076,22 +1062,9 @@ export function AIAgentPanel({
             const id = ev.id as string;
             const status = ev.status as PlanItem["status"];
             const note = ev.note as string | undefined;
-            const planMsgId = currentPlanMsgIdRef.current;
-            // Update both the standalone planItems mirror (kept for overlay
-            // relay) and the inline plan chat card so users see status flip
-            // to ✓ in place.
             setPlanItems((prev) => prev.map((it) =>
               it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
             ));
-            if (planMsgId != null) {
-              setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== planMsgId || m.role !== "plan") return m;
-                const items = (m.planItems ?? []).map((it) =>
-                  it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
-                );
-                return { ...m, planItems: items };
-              }));
-            }
             break;
           }
 
@@ -1228,7 +1201,6 @@ export function AIAgentPanel({
             // BUILD PLAN 卡 id 不清：resume（plan confirm）會再收到一次
             // pb_glass_start，此時卡已存在且必須原地變身而非另開新卡。
             // 敘事泡（「正在建立 pipeline…」）已移除 — 卡片 chip 表達狀態。
-            currentPlanMsgIdRef.current = null;
             currentBuildDoneIdRef.current = null;
             setAutoRun({ status: "idle" });
             break;
@@ -1470,22 +1442,32 @@ export function AIAgentPanel({
                 expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
                   .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
               }));
-              const newId = nextId();
-              currentBuildCardIdRef.current = newId;
-              setChatHistory((prev) => [...prev, {
-                id: newId,
-                role: "build_plan",
-                content: "",
-                buildPlan: {
-                  sessionId: chatSid,
-                  buildSessionId: String((ev.build_session_id as string) || ""),
-                  summary: (ev.plan_summary as string) || undefined,
-                  phases: gp,
-                  removals: (ev.removals as PlanRemoval[]) || [],
-                  status: "draft",
-                  runtime: {},
-                },
-              }]);
+              const draftPlan: BuildPlanState = {
+                sessionId: chatSid,
+                buildSessionId: String((ev.build_session_id as string) || ""),
+                summary: (ev.plan_summary as string) || undefined,
+                phases: gp,
+                removals: (ev.removals as PlanRemoval[]) || [],
+                status: "draft",
+                runtime: {},
+              };
+              // 單卡生命週期：goal_plan_proposed 的 plan payload 常比這個
+              // pause 事件先到、已建了卡 — 復用同一張原地轉草案，否則會出現
+              // 兩張 BUILD PLAN（一張永遠卡在建構中 0/n）。
+              const existing = currentBuildCardIdRef.current;
+              if (existing != null) {
+                setChatHistory((prev) => prev.map((m) =>
+                  m.id === existing && m.buildPlan
+                    ? { ...m, buildPlan: draftPlan }
+                    : m,
+                ));
+              } else {
+                const newId = nextId();
+                currentBuildCardIdRef.current = newId;
+                setChatHistory((prev) => [...prev, {
+                  id: newId, role: "build_plan", content: "", buildPlan: draftPlan,
+                }]);
+              }
             }
             break;
           }
@@ -2070,10 +2052,6 @@ export function AIAgentPanel({
                       }, rating);
                     }}
                   />
-                </div>
-              ) : msg.role === "plan" && msg.planItems ? (
-                <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <PlanRenderer items={msg.planItems} />
                 </div>
               ) : msg.role === "clarify" && msg.clarify ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
