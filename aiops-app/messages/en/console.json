@@ -1,0 +1,57 @@
+{
+  "agents": {
+    "memory": "Memory"
+  },
+  "status": {
+    "idle": "Idle — no build in progress",
+    "buildFailed": "build failed · {n} rejected",
+    "buildDone": "build done · {phases} phases · {rejects} rejected",
+    "planning": "Planning",
+    "finalizing": "Finalize",
+    "rejectCount": "{n} rejected",
+    "inProgress": "In progress"
+  },
+  "mode": {
+    "phase_start": "Starting",
+    "tool": "Acting",
+    "submit": "Awaiting verdict",
+    "verdict_pass": "Verdict: pass",
+    "verdict_reject": "Verdict: rejected",
+    "escalate": "Escalating to Repair",
+    "repair_start": "Diagnosing",
+    "repair_out": "Repair done",
+    "recall": "Reading memory",
+    "write": "Writing memory",
+    "phase_done": "phase done",
+    "confirm": "Confirming plan",
+    "final": "Done"
+  },
+  "group": {
+    "plan": "Plan",
+    "fin": "Finalize"
+  },
+  "stream": {
+    "idle": "Idle",
+    "idleHint": "Events appear here one by one once the build starts — every internal agent step: decision, reason, evidence",
+    "reason": "Reason \"{reason}\"",
+    "selfReported": "self-reported",
+    "noRecall": "0 related memories recalled for this step"
+  },
+  "teach": {
+    "title": "The agent is exploring without knowledge support",
+    "question": "Do you know the right way?",
+    "button": "Teach it",
+    "autofill": "Will prefill: {code} · phase \"{phaseId}\" · original instruction"
+  },
+  "memory": {
+    "title": "Memory effect",
+    "counts": "{recalls} recalled · {writes} written",
+    "recall": "Recall",
+    "write": "Write",
+    "new": "new"
+  },
+  "cost": {
+    "title": "Cost",
+    "note": "Verifier deterministic · Monitor zero LLM — $0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "cancel": "キャンセル",
+  "confirm": "確認",
+  "send": "送信",
+  "signIn": "ログイン",
+  "signOut": "ログアウト",
+  "accountSettings": "アカウント設定",
+  "changePassword": "パスワード変更",
+  "signInMethod": "ログイン方法：{provider}",
+  "language": "言語"
+}

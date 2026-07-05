@@ -1,0 +1,57 @@
+{
+  "agents": {
+    "memory": "记忆"
+  },
+  "status": {
+    "idle": "闲置 — 尚无进行中的 build",
+    "buildFailed": "build 失败 · 拒 {n}",
+    "buildDone": "build 完成 · {phases} phases · 拒 {rejects}",
+    "planning": "规划中",
+    "finalizing": "收尾",
+    "rejectCount": "拒 {n}",
+    "inProgress": "进行中"
+  },
+  "mode": {
+    "phase_start": "启动",
+    "tool": "行动中",
+    "submit": "等待裁决",
+    "verdict_pass": "裁决：通过",
+    "verdict_reject": "裁决：拒绝",
+    "escalate": "升级 Repair",
+    "repair_start": "诊断中",
+    "repair_out": "修复完成",
+    "recall": "读取记忆",
+    "write": "写入记忆",
+    "phase_done": "phase 完成",
+    "confirm": "确认计划",
+    "final": "完成"
+  },
+  "group": {
+    "plan": "规划",
+    "fin": "收尾"
+  },
+  "stream": {
+    "idle": "闲置",
+    "idleHint": "build 开始后事件会逐条浮现 — 这里显示 agent 内部的每一步：决定、理由、依据",
+    "reason": "理由「{reason}」",
+    "selfReported": "自述",
+    "noRecall": "这一步召回 0 条相关记忆"
+  },
+  "teach": {
+    "title": "agent 在没有知识支持下摸索中",
+    "question": "你知道怎么做对吗？",
+    "button": "教它",
+    "autofill": "将自动带入：{code} · phase「{phaseId}」· 原始指令"
+  },
+  "memory": {
+    "title": "记忆效应",
+    "counts": "{recalls} 条召回 · {writes} 条写入",
+    "recall": "召回",
+    "write": "写入",
+    "new": "新"
+  },
+  "cost": {
+    "title": "成本",
+    "note": "Verifier deterministic · Monitor 零 LLM — $0"
+  }
+}

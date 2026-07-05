@@ -1,0 +1,15 @@
+{
+  "progress": "Phase 進捗（{done}/{total} 完了）",
+  "status": {
+    "pending": "待機",
+    "in_progress": "進行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "paused": "一時停止"
+  },
+  "round": "round {round}/{max}",
+  "autoTooltip": "server の verifier が完了を自動検出しました（LLM による declare ではありません）",
+  "ffTooltip": "{node} [{block}] の 1 つの block が複数の phase をカバーしました",
+  "consoleHint": "内部の逐次動作と「なぜ」",
+  "consoleTab": "Console タブ"
+}

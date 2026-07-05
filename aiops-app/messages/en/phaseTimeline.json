@@ -1,0 +1,15 @@
+{
+  "progress": "Phase progress ({done}/{total} done)",
+  "status": {
+    "pending": "Pending",
+    "in_progress": "In progress",
+    "completed": "Done",
+    "failed": "Failed",
+    "paused": "Paused"
+  },
+  "round": "round {round}/{max}",
+  "autoTooltip": "Auto-detected as completed by the server verifier (not an LLM declare)",
+  "ffTooltip": "One block covered multiple phases: {node} [{block}]",
+  "consoleHint": "Step-by-step internals and the \"why\"",
+  "consoleTab": "Console tab"
+}

@@ -1,0 +1,54 @@
+{
+  "intent": {
+    "headerPending": "INTENT · 目的の確認",
+    "headerConfirmed": "INTENT · 確認済み {time}",
+    "headerCancelled": "INTENT · キャンセル済み",
+    "chipPending": "回答待ち",
+    "chipSending": "送信中",
+    "chipLocked": "送信済み · 選択肢ロック済み",
+    "chipCancelled": "キャンセル済み",
+    "tooVague": "前回の指示が曖昧でした：{reason}",
+    "hintOptions": "選択肢をクリックすると即送信・ロックされます",
+    "hintPlain": "確認後にビルドを開始します",
+    "edited": "編集済み",
+    "clickToEdit": "クリックして書き換え",
+    "locked": "ロック済み",
+    "cancel": "キャンセル",
+    "confirmStart": "確認してビルド開始"
+  },
+  "plan": {
+    "chipDraft": "下書き · 編集可",
+    "chipBuilding": "ビルド中",
+    "chipDone": "完了",
+    "chipCancelled": "キャンセル済み",
+    "chipAborted": "中断",
+    "confirmedLine": "確認済み {time} · plan はロック済み — 変更は追加メッセージで",
+    "phaseDone": "完了",
+    "phaseInProgress": "進行中",
+    "phaseFailed": "未完了",
+    "phaseRepaired": "修復後に合格",
+    "phaseRejected": "却下 {n}",
+    "editedW1": "この行を編集しました → W1 設定として保存されます",
+    "footnotePre": "phase の文字をクリックで編集できます — 変更は",
+    "footnotePost": "設定として保存；確認後はロックされます",
+    "consoleLinkPre": "内部の逐次動作と「なぜ」 →",
+    "consoleLinkLabel": "Console タブ",
+    "sending": "送信中…",
+    "cancel": "キャンセル",
+    "confirmStart": "確認してビルド開始"
+  },
+  "expected": {
+    "raw_data": "生データ",
+    "transform": "中間データ",
+    "chart": "チャート",
+    "table": "テーブル",
+    "scalar": "数値",
+    "verdict": "判定",
+    "alarm": "アラーム"
+  },
+  "done": {
+    "learned": "今回学んだ内容 {n} 件：",
+    "helpful": "役に立った",
+    "inaccurate": "不正確"
+  }
+}

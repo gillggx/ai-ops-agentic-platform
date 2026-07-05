@@ -18,6 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useReducer, useRef } from "react";
+import { useTranslations } from "next-intl";
 
 // ── design tokens (README "Design Tokens" — canonical values) ─────────────
 const M = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
@@ -26,7 +27,9 @@ const AGD: Record<string, { name: string; c: string; bg: string; br: string }> =
   builder:  { name: "Builder",  c: "#059669", bg: "#eafaf3", br: "#bfe8d6" },
   repair:   { name: "Repair",   c: "#d97706", bg: "#fdf5e7", br: "#f0dcb4" },
   verifier: { name: "Verifier", c: "#6b7280", bg: "#f3f4f5", br: "#dcdee2" },
-  memory:   { name: "記憶",     c: "#7c3aed", bg: "#f6f2fe", br: "#ddd0f7" },
+  // NOTE: memory's display name is localised in the component via
+  // t("console.agents.memory") — `name` here is a non-rendered fallback.
+  memory:   { name: "記憶", c: "#7c3aed", bg: "#f6f2fe", br: "#ddd0f7" }, // i18n-exempt: 顯示層走 agentName()
 };
 const AMB = "#b45309";
 const AMB_TXT = "#8a5a06";
@@ -120,7 +123,15 @@ export function useConsoleStore(): [ConsoleState, React.Dispatch<ConsoleAction>]
 // ── SSE → ConsoleEvent/action normalisation (shared by both surfaces) ─────
 /** Map one SSE payload (chat pb_glass_* shape OR builder raw shape) to
  *  console actions. Returns [] when the event carries no console signal. */
+// i18n-TODO-START — normalizeConsoleEvent 的組合字串（title/evidences/
+// write-status）仍為 zh-TW：它們在 normalisation 時燒進 ConsoleEvent，被
+// 多個檔案消費；改法是 emit 結構化欄位、render 端再翻（P2 收尾項）。
 export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleAction[] {
+  // i18n-TODO: the composed `title` / `evidences` / write-status strings below
+  // are still zh-TW. They are baked into ConsoleEvent at normalisation time
+  // (module scope, no hook access) and consumed by both surfaces. Proper fix:
+  // emit raw structured parts and compose at render — deferred to keep this
+  // exported API stable in this pass.
   const t = String(ev.type ?? "");
   const out: ConsoleAction[] = [];
 
@@ -328,11 +339,16 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
   }
   return out;
 }
+// i18n-TODO-END
 
 // ── derived helpers ─────────────────────────────────────────────────────────
-const PHASE_LABEL = (pid: string, phases: { id: string; goal: string }[]): string => {
-  if (pid === "plan") return "規劃";
-  if (pid === "fin") return "收尾";
+const PHASE_LABEL = (
+  pid: string,
+  phases: { id: string; goal: string }[],
+  labels: { plan: string; fin: string },
+): string => {
+  if (pid === "plan") return labels.plan;
+  if (pid === "fin") return labels.fin;
   const p = phases.find((x) => x.id === pid);
   return p ? `${pid} ${p.goal.slice(0, 24)}` : pid;
 };
@@ -350,13 +366,14 @@ interface Group {
 
 function buildGroups(
   events: ConsoleEvent[], phases: { id: string; goal: string }[], finished: boolean,
+  labels: { plan: string; fin: string },
 ): Group[] {
   const by = new Map<string, Group>();
   const gs: Group[] = [];
   events.forEach((e, idx) => {
     let g = by.get(e.phaseId);
     if (!g) {
-      g = { id: e.phaseId, label: PHASE_LABEL(e.phaseId, phases), rows: [],
+      g = { id: e.phaseId, label: PHASE_LABEL(e.phaseId, phases, labels), rows: [],
             rejects: 0, repair: false, rounds: 0, done: false, active: false };
       by.set(e.phaseId, g); gs.push(g);
     }
@@ -409,13 +426,21 @@ export function AgentConsole({
   /** jump to /agent-knowledge?id=… */
   onOpenMemory?: (id: string | number) => void;
 }) {
+  const t = useTranslations("console");
   const { events, usage, phases, building, done, doneStatus } = state;
   const [expanded, setExpanded] = React.useState<Record<number, boolean>>({});
   const [costOpen, setCostOpen] = React.useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const followRef = useRef(true);
 
-  const gs = useMemo(() => buildGroups(events, phases, done), [events, phases, done]);
+  /** AGD keeps visual tokens; the memory agent's display name is localised. */
+  const agentName = (k: string) => (k === "memory" ? t("agents.memory") : AGD[k].name);
+  const groupLabels = useMemo(
+    () => ({ plan: t("group.plan"), fin: t("group.fin") }), [t]);
+
+  const gs = useMemo(
+    () => buildGroups(events, phases, done, groupLabels),
+    [events, phases, done, groupLabels]);
   const isIdle = events.length === 0 && !building;
   const last = events[events.length - 1];
   const totalRejects = events.filter((e) => e.kind === "verdict_reject").length;
@@ -437,13 +462,16 @@ export function AgentConsole({
   }, [events]);
 
   // ── status line ──
-  let statusLine = "閒置 — 尚無進行中的 build";
+  let statusLine = t("status.idle");
   let statusColor = "#a09d95";
   let phaseRound = "";
   if (done && last) {
     statusLine = doneStatus === "failed"
-      ? `build 失敗 · 拒 ${totalRejects}`
-      : `build 完成 · ${phases.length || gs.filter(g => g.id !== "plan" && g.id !== "fin").length} phases · 拒 ${totalRejects}${repairUsed ? " · Repair ×1" : ""}`;
+      ? t("status.buildFailed", { n: totalRejects })
+      : t("status.buildDone", {
+          phases: phases.length || gs.filter(g => g.id !== "plan" && g.id !== "fin").length,
+          rejects: totalRejects,
+        }) + (repairUsed ? " · Repair ×1" : "");
     statusColor = doneStatus === "failed" ? AMB : GREEN;
     phaseRound = "session done";
   } else if (last) {
@@ -454,20 +482,22 @@ export function AgentConsole({
       }
     }
     const modeMap: Record<ConsoleEventKind, string> = {
-      phase_start: "啟動", tool: "行動中", submit: "等待裁決",
-      verdict_pass: "裁決：通過", verdict_reject: "裁決：拒絕",
-      escalate: "升級 Repair", repair_start: "診斷中", repair_out: "修復完成",
-      recall: "讀取記憶", write: "寫入記憶", phase_done: "phase 完成",
-      confirm: "確認計畫", final: "完成", info: "",
+      phase_start: t("mode.phase_start"), tool: t("mode.tool"), submit: t("mode.submit"),
+      verdict_pass: t("mode.verdict_pass"), verdict_reject: t("mode.verdict_reject"),
+      escalate: t("mode.escalate"), repair_start: t("mode.repair_start"),
+      repair_out: t("mode.repair_out"),
+      recall: t("mode.recall"), write: t("mode.write"), phase_done: t("mode.phase_done"),
+      confirm: t("mode.confirm"), final: t("mode.final"), info: "",
     };
-    statusLine = `${AGD[activeAgent].name} ${last.agent === "memory" ? modeMap[last.kind] : (modeMap[last.kind] || "行動中")}`;
+    statusLine = `${agentName(activeAgent)} ${last.agent === "memory" ? modeMap[last.kind] : (modeMap[last.kind] || t("mode.tool"))}`;
     statusColor = AGD[activeAgent].c;
     const g = gs[gs.length - 1];
     if (g && g.id !== "plan" && g.id !== "fin") {
-      phaseRound = [g.id, g.rounds ? `r${g.rounds}/32` : null, g.rejects ? `拒 ${g.rejects}` : null]
+      phaseRound = [g.id, g.rounds ? `r${g.rounds}/32` : null,
+                    g.rejects ? t("status.rejectCount", { n: g.rejects }) : null]
         .filter(Boolean).join(" · ");
     } else if (g) {
-      phaseRound = g.id === "plan" ? "規劃中" : "收尾";
+      phaseRound = g.id === "plan" ? t("status.planning") : t("status.finalizing");
     }
   }
   const memActive = last?.agent === "memory";
@@ -534,9 +564,10 @@ export function AgentConsole({
   };
 
   const gMeta = (g: Group) =>
-    [g.rounds ? `r${g.rounds}/32` : null, g.rejects ? `拒 ${g.rejects}` : null,
+    [g.rounds ? `r${g.rounds}/32` : null,
+     g.rejects ? t("status.rejectCount", { n: g.rejects }) : null,
      g.repair ? "REP" : null, `${g.rows.length}ev`].filter(Boolean).join(" · ")
-    + (g.done ? " · ✓" : g.active ? " · 進行中" : "");
+    + (g.done ? " · ✓" : g.active ? ` · ${t("status.inProgress")}` : "");
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
@@ -569,7 +600,7 @@ export function AgentConsole({
                   background: act ? a.c : "#d6d4cf",
                   animation: act && building ? "acPulse 1.2s ease-in-out infinite" : "none",
                 }} />
-                <span>{a.name}</span>
+                <span>{agentName(k)}</span>
               </div>
             );
           })}
@@ -616,7 +647,7 @@ export function AgentConsole({
         <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", gap: 4,
                       padding: "6px 10px", background: "rgba(251,251,249,.96)",
                       borderBottom: "1px solid #efede8" }}>
-          {isIdle && <span style={{ fontSize: 10, color: "#a09d95" }}>閒置</span>}
+          {isIdle && <span style={{ fontSize: 10, color: "#a09d95" }}>{t("stream.idle")}</span>}
           {gs.map((g) => (
             <span key={g.id} onClick={() => anchorTo(`acg-${g.id}`)} style={{
               padding: "1px 8px", borderRadius: 10, fontSize: 9.5, fontFamily: M,
@@ -625,15 +656,14 @@ export function AgentConsole({
               color: g.active ? "#fff" : (g.rejects || g.repair ? "#a5680a" : "#6d6a62"),
               border: g.repair && !g.active ? "1px solid #f0dcb4" : "1px solid transparent",
             }}>
-              {g.id === "plan" ? "規劃" : g.id === "fin" ? "收尾" : g.id}
+              {g.id === "plan" ? t("group.plan") : g.id === "fin" ? t("group.fin") : g.id}
             </span>
           ))}
         </div>
         {isIdle && (
           <div style={{ padding: "24px 14px", fontSize: 11, color: "#a09d95",
                         textAlign: "center" }}>
-            build 開始後事件會逐條浮現 — 這裡顯示 agent 內部的每一步：
-            決定、理由、依據
+            {t("stream.idleHint")}
           </div>
         )}
         {gs.map((g) => (
@@ -660,8 +690,8 @@ export function AgentConsole({
               const parts: React.ReactNode[] = [];
               if (ev.reason) {
                 parts.push(
-                  <span key="why">理由「{ev.reason}」
-                    <span style={chipS("#fdf9ee", AMB_TXT, "#d3ab5e", true)}>△ 自述</span>
+                  <span key="why">{t("stream.reason", { reason: ev.reason })}
+                    <span style={chipS("#fdf9ee", AMB_TXT, "#d3ab5e", true)}>△ {t("stream.selfReported")}</span>
                   </span>);
               }
               (ev.evidences ?? []).forEach((e2, i2) => {
@@ -670,7 +700,7 @@ export function AgentConsole({
                   : <span key={`ev${i2}`}><span style={chipS("#efe8fc", "#6d28d9", "#ddd0f7")}>◈ {e2.id ?? ""}</span> {e2.text}</span>);
               });
               if (ev.kind === "tool" && !(ev.evidences ?? []).length && isTeach) {
-                parts.push(<span key="no-recall" style={{ color: "#7c3aed" }}>✕ 這一步召回 0 筆相關記憶</span>);
+                parts.push(<span key="no-recall" style={{ color: "#7c3aed" }}>✕ {t("stream.noRecall")}</span>);
               }
               if (ev.result) {
                 parts.push(<span key="res"><span style={chipS("#fff", "#3d3b36", "#b3b0a8")}>▣</span> {ev.result}</span>);
@@ -727,11 +757,11 @@ export function AgentConsole({
                     <div style={{ margin: "0 12px 6px 36px", border: "1px dashed #c9b3f2",
                                   borderRadius: 7, background: "#fbfaff", padding: "7px 9px" }}>
                       <div style={{ fontSize: 10.5, color: "#5b21b6", fontWeight: 600 }}>
-                        agent 在沒有知識支援下摸索中
+                        {t("teach.title")}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                         <span style={{ fontSize: 10, color: "#8a877e", flex: 1 }}>
-                          你知道怎麼做對嗎？
+                          {t("teach.question")}
                         </span>
                         <button
                           onClick={(e) => { e.stopPropagation();
@@ -739,12 +769,12 @@ export function AgentConsole({
                           style={{ border: "1px solid #7c3aed", background: "#7c3aed",
                                    color: "#fff", fontSize: 10, fontWeight: 600,
                                    padding: "3px 10px", borderRadius: 5, cursor: "pointer" }}>
-                          教它 →
+                          {t("teach.button")} →
                         </button>
                       </div>
                       <div style={{ marginTop: 5, fontSize: 9.5, lineHeight: 1.6,
                                     color: "#8b7bb8" }}>
-                        將自動帶入：{ev.code} · phase「{ev.phaseId}」· 原始指令
+                        {t("teach.autofill", { code: ev.code, phaseId: ev.phaseId })}
                       </div>
                     </div>
                   )}
@@ -763,14 +793,14 @@ export function AgentConsole({
         transition: "all .4s ease", flex: "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em",
-                         color: "#7c3aed" }}>記憶效應</span>
+                         color: "#7c3aed" }}>{t("memory.title")}</span>
           <span style={{ fontSize: 10, color: "#8a877e" }}>
-            {recAgg.length} 筆召回 · {writes.length} 筆寫入
+            {t("memory.counts", { recalls: recAgg.length, writes: writes.length })}
           </span>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6,
                       alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: "#8a877e", width: 26, flex: "none" }}>召回</span>
+          <span style={{ fontSize: 10, color: "#8a877e", width: 26, flex: "none" }}>{t("memory.recall")}</span>
           {recAgg.length === 0 && <span style={{ fontSize: 10, color: "#c9c6bf" }}>—</span>}
           {recAgg.map(([key, { mem, n }]) => {
             const isNew = mem.written_by === "supervisor";
@@ -781,14 +811,14 @@ export function AgentConsole({
                     style={{ ...(isNew ? chipS("#7c3aed", "#fff")
                              : chipS("#efe8fc", "#6d28d9", "#ddd0f7")),
                              cursor: onOpenMemory ? "pointer" : "default" }}>
-                #{String(mem.id ?? "?")}{n > 1 ? ` ×${n}` : ""}{isNew ? " 新" : ""}
+                #{String(mem.id ?? "?")}{n > 1 ? ` ×${n}` : ""}{isNew ? ` ${t("memory.new")}` : ""}
               </span>
             );
           })}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4,
                       alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: "#8a877e", width: 26, flex: "none" }}>寫入</span>
+          <span style={{ fontSize: 10, color: "#8a877e", width: 26, flex: "none" }}>{t("memory.write")}</span>
           {writes.length === 0 && <span style={{ fontSize: 10, color: "#c9c6bf" }}>—</span>}
           {writes.map((w, i) => (
             <span key={i} title={`${w.title}（${w.status}）`}
@@ -807,7 +837,7 @@ export function AgentConsole({
              style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px",
                       cursor: "pointer" }}>
           <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em",
-                         color: "#8a877e", flex: "none" }}>成本</span>
+                         color: "#8a877e", flex: "none" }}>{t("cost.title")}</span>
           <div style={{ flex: 1, height: 5, borderRadius: 3, background: "#efede8",
                         overflow: "hidden", display: "flex" }}>
             {(["planner", "builder", "repair"] as const).map((k) => (
@@ -841,7 +871,7 @@ export function AgentConsole({
               </div>
             ))}
             <div style={{ fontSize: 9.5, color: "#a09d95", marginTop: 2 }}>
-              Verifier deterministic · Monitor 零 LLM — $0
+              {t("cost.note")}
             </div>
           </div>
         )}

@@ -1,0 +1,15 @@
+{
+  "progress": "Phase 進度（{done}/{total} 完成）",
+  "status": {
+    "pending": "等待",
+    "in_progress": "進行中",
+    "completed": "完成",
+    "failed": "失敗",
+    "paused": "暫停"
+  },
+  "round": "round {round}/{max}",
+  "autoTooltip": "由 server verifier 自動偵測完成（非 LLM 主動 declare）",
+  "ffTooltip": "由 {node} [{block}] 一個 block 涵蓋多 phase",
+  "consoleHint": "內部逐步運作與「為什麼」",
+  "consoleTab": "Console 分頁"
+}

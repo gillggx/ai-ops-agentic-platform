@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import type { AIOpsReportContract, SuggestedAction } from "aiops-contract";
 import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
@@ -397,6 +398,7 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
   onRate: (rating: 1) => void;          // 👍 fires inline
   onOpenReasonModal: () => void;         // 👎 opens reason modal
 }) {
+  const t = useTranslations("agentPanel");
   const submitting = message.feedbackSubmitting;
   const rated = message.feedbackRating;
 
@@ -407,7 +409,7 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
         padding: "2px 8px", marginTop: 4, borderRadius: 10,
         fontSize: 10, color: "#718096", background: "#f7f8fc",
       }}>
-        <span>{rated === 1 ? "已回饋：有幫助" : "已回饋：不準確"}</span>
+        <span>{rated === 1 ? t("feedbackDoneHelpful") : t("feedbackDoneInaccurate")}</span>
       </div>
     );
   }
@@ -423,20 +425,20 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
       <button
         type="button"
         disabled={submitting}
-        title="這個回答有幫助"
+        title={t("feedbackHelpfulTitle")}
         style={baseStyle}
         onClick={() => onRate(1)}
       >
-        有幫助
+        {t("helpful")}
       </button>
       <button
         type="button"
         disabled={submitting}
-        title="這個回答有問題"
+        title={t("feedbackInaccurateTitle")}
         style={baseStyle}
         onClick={onOpenReasonModal}
       >
-        不準確
+        {t("inaccurate")}
       </button>
     </div>
   );
@@ -448,15 +450,16 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
 // ---------------------------------------------------------------------------
 
 const FEEDBACK_REASONS = [
-  { code: "data_wrong",    label: "資料錯" },
-  { code: "logic_wrong",   label: "邏輯錯" },
-  { code: "chart_unclear", label: "圖表看不懂" },
+  { code: "data_wrong",    labelKey: "reasonDataWrong" },
+  { code: "logic_wrong",   labelKey: "reasonLogicWrong" },
+  { code: "chart_unclear", labelKey: "reasonChartUnclear" },
 ] as const;
 
 function FeedbackReasonModal({ onConfirm, onCancel }: {
   onConfirm: (reason: string, freeText: string) => void;
   onCancel: () => void;
 }) {
+  const t = useTranslations("agentPanel");
   const [reason, setReason] = useState<string | null>(null);
   const [text, setText] = useState("");
   return (
@@ -476,7 +479,7 @@ function FeedbackReasonModal({ onConfirm, onCancel }: {
         }}
       >
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: "#1a202c" }}>
-          這個回答有什麼問題？
+          {t("feedbackReasonTitle")}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
           {FEEDBACK_REASONS.map((r) => (
@@ -493,14 +496,14 @@ function FeedbackReasonModal({ onConfirm, onCancel }: {
                 fontWeight: reason === r.code ? 600 : 400,
               }}
             >
-              {r.label}
+              {t(r.labelKey)}
             </button>
           ))}
         </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="（選填）可以多說一點嗎？"
+          placeholder={t("feedbackFreeTextPlaceholder")}
           rows={3}
           maxLength={500}
           style={{
@@ -514,7 +517,7 @@ function FeedbackReasonModal({ onConfirm, onCancel }: {
             type="button" onClick={onCancel}
             style={{ padding: "6px 14px", fontSize: 12, border: "1px solid #cbd5e0",
                      background: "#fff", borderRadius: 4, cursor: "pointer" }}
-          >取消</button>
+          >{t("cancel")}</button>
           <button
             type="button"
             disabled={!reason}
@@ -522,7 +525,7 @@ function FeedbackReasonModal({ onConfirm, onCancel }: {
             style={{ padding: "6px 14px", fontSize: 12, border: "none",
                      background: reason ? "#2b6cb0" : "#a0aec0", color: "#fff",
                      borderRadius: 4, cursor: reason ? "pointer" : "not-allowed" }}
-          >送出</button>
+          >{t("send")}</button>
         </div>
       </div>
     </div>
@@ -570,6 +573,9 @@ export function AIAgentPanel({
   // Part B (SPEC_context_engineering): pull selected equipment from AppContext
   // so chat requests can carry user focus to the agent's load_context_node.
   const { selectedEquipment } = useAppContext();
+  // i18n (2026-07-05) — captured in component scope so stream-event handlers
+  // (useCallback closures) can compose translated agent messages.
+  const t = useTranslations("agentPanel");
   const [input, setInput]           = useState("");
   const [loading, setLoading]       = useState(false);
   const [stages, setStages]         = useState<StageState[]>([]);
@@ -665,7 +671,7 @@ export function AIAgentPanel({
       } else if (!res.ok && confirmed) {
         setChatHistory((prev) => prev.map((m) =>
           m.id === msgId && m.buildPlan
-            ? { ...m, buildPlan: { ...m.buildPlan, status: "error" as const, errorReason: `送出失敗（HTTP ${res.status}）` } }
+            ? { ...m, buildPlan: { ...m.buildPlan, status: "error" as const, errorReason: t("planSubmitFailed", { status: res.status }) } }
             : m,
         ));
       }
@@ -980,12 +986,12 @@ export function AIAgentPanel({
             // with the conversation; the kindLabel prefix tells the user
             // it's a structured Q&A response, not a generic chat.
             const kindLabels: Record<string, string> = {
-              explain: "Block 說明",
-              compare: "Block 對比",
-              recommend: "Block 推薦",
-              ambiguous: "請再說明",
-              compare_failed: "[失敗] 對比失敗",
-              error: "[錯誤]",
+              explain: t("advisorExplain"),
+              compare: t("advisorCompare"),
+              recommend: t("advisorRecommend"),
+              ambiguous: t("advisorAmbiguous"),
+              compare_failed: t("advisorCompareFailed"),
+              error: t("advisorError"),
             };
             const kind = (ev.kind as string) || "answer";
             const md = (ev.markdown as string) || "";
@@ -1023,11 +1029,11 @@ export function AIAgentPanel({
           case "clarify": {
             // Part A: agent-side intent classifier flagged the query as vague.
             // Render a quick-pick card; user click re-submits with [intent=<id>] prefix.
-            const question = (ev.question as string) ?? "你想看哪一面？";
+            const question = (ev.question as string) ?? t("clarifyQuestionFallback");
             const options = (ev.options as ClarifyOption[]) ?? [];
             const fallbackLabel = (ev.fallback_label as string | undefined)
                 || (ev.fallbackLabel as string | undefined)
-                || "全部都要（建完整 pipeline）";
+                || t("clarifyFallbackAll");
             // Find most recent user message in this turn for re-submit.
             let originalMessage = "";
             setChatHistory((prev) => {
@@ -1134,10 +1140,10 @@ export function AIAgentPanel({
                 const edgeCount = pbCard.type === "pb_pipeline"
                   ? (pbCard.pipeline_json?.edges?.length ?? 0)
                   : 0;
-                const where = sessionMode ? "已套用至畫布" : "↗ 已顯示於左側 Lite Canvas";
+                const where = sessionMode ? t("appliedToCanvas") : t("shownInLiteCanvas");
                 const chipText = pbCard.type === "pb_pipeline"
-                  ? `🛠️ Pipeline 已完成 · ${nodeCount} nodes / ${edgeCount} edges · ${where}`
-                  : `已執行已發佈 Skill: ${pbCard.skill_name ?? pbCard.slug ?? ""}`;
+                  ? t("pipelineDoneChip", { nodes: nodeCount, edges: edgeCount, where })
+                  : t("skillExecuted", { name: pbCard.skill_name ?? pbCard.slug ?? "" });
                 setChatHistory((prev) => [...prev, {
                   id: nextId(),
                   role: "agent",
@@ -1355,10 +1361,10 @@ export function AIAgentPanel({
                   note = phaseUpdate.reason || undefined;
                   break;
                 case "revising":
-                  note = phaseUpdate.reason ? `反思中：${phaseUpdate.reason}` : "反思中";
+                  note = phaseUpdate.reason ? t("revisingWithReason", { reason: phaseUpdate.reason }) : t("revising");
                   break;
                 case "revising_retry":
-                  note = phaseUpdate.alternative ? `換策略：${phaseUpdate.alternative}` : "換策略再試";
+                  note = phaseUpdate.alternative ? t("retryStrategyWith", { alternative: phaseUpdate.alternative }) : t("retryStrategy");
                   break;
                 default:
                   mapped = "in_progress";
@@ -1518,13 +1524,13 @@ export function AIAgentPanel({
                 m.id === cardId && m.buildPlan
                   ? { ...m, buildPlan: {
                       ...m.buildPlan, status: "error" as const,
-                      errorReason: opName ? `${opName}：${msg}` : msg,
+                      errorReason: opName ? t("errorWithOp", { op: opName, msg }) : msg,
                     }}
                   : m,
               ));
             } else {
               setChatHistory((prev) => [...prev, {
-                id: nextId(), role: "agent", content: `發生錯誤：${msg}`,
+                id: nextId(), role: "agent", content: t("errorOccurred", { msg }),
               }]);
             }
             break;
@@ -1560,7 +1566,7 @@ export function AIAgentPanel({
             if (cardStatus === "done") {
               const pj = ev.pipeline_json as { nodes?: unknown[]; edges?: unknown[] } | undefined;
               const counts = pj
-                ? `${(pj.nodes ?? []).length} nodes / ${(pj.edges ?? []).length} edges — `
+                ? t("buildDoneCounts", { nodes: (pj.nodes ?? []).length, edges: (pj.edges ?? []).length })
                 : "";
               const learned = memoryWritesRef.current;
               const doneId = nextId();
@@ -1568,7 +1574,7 @@ export function AIAgentPanel({
               setChatHistory((prev) => [...prev, {
                 id: doneId, role: "build_done", content: "",
                 buildDone: {
-                  text: `建構完成 — ${counts}${summary || "pipeline 已在畫布上"}`,
+                  text: t("buildDone", { counts, summary: summary || t("buildDoneDefaultSummary") }),
                   learned: [...learned],
                   rating: null,
                 },
@@ -1711,7 +1717,7 @@ export function AIAgentPanel({
             if (doneId != null) {
               setChatHistory((prev) => prev.map((m) =>
                 m.id === doneId && m.buildDone
-                  ? { ...m, buildDone: { ...m.buildDone, verified: "數值已驗證（Self-Critique 通過）" } }
+                  ? { ...m, buildDone: { ...m.buildDone, verified: t("valuesVerified") } }
                   : m,
               ));
               setReflection({ status: null, amendment: "" });
@@ -1728,7 +1734,7 @@ export function AIAgentPanel({
             if (amendment) {
               setChatHistory((prev) => [
                 ...prev,
-                { id: nextId(), role: "agent", content: `**[自動修正]** ${amendment}` },
+                { id: nextId(), role: "agent", content: t("autoAmendment", { amendment }) },
               ]);
             }
             addLog(makeLog("⚠️", `Self-Critique 修正: ${amendment.slice(0, 100)}`, "info"));
@@ -1771,13 +1777,13 @@ export function AIAgentPanel({
           }
 
           case "error": {
-            const errMsg = (ev.message as string) ?? "Agent 發生錯誤";
+            const errMsg = (ev.message as string) ?? t("agentErrorGeneric");
             addLog(makeLog("❌", errMsg, "error"));
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
-              content: `${errMsg.includes("authentication") || errMsg.includes("api_key") || errMsg.includes("auth_token")
-                ? "Agent 無法連線 LLM — 請確認 ANTHROPIC_API_KEY 已設定並重啟 Agent。"
-                : `Agent 錯誤：${errMsg}`}`,
+              content: errMsg.includes("authentication") || errMsg.includes("api_key") || errMsg.includes("auth_token")
+                ? t("llmConnectError")
+                : t("agentError", { msg: errMsg }),
             }]);
             break;
           }
@@ -1790,7 +1796,7 @@ export function AIAgentPanel({
     } finally {
       setLoading(false);
     }
-  }, [loading, onContract, addLog, focusedNodeId, focusedNodeLabel]);
+  }, [loading, onContract, addLog, focusedNodeId, focusedNodeLabel, t]);
 
   // Phase v1.3 P0 — submit a 👍 / 👎 rating.
   // 👍 fires immediately; 👎 opens reason modal which calls back through here.
@@ -1847,9 +1853,9 @@ export function AIAgentPanel({
       onHandoff?.(action.mcp, action.params);
     } else if ((action as Record<string, unknown>).trigger === "promote_analysis") {
       const payload = (action as Record<string, unknown>).payload as Record<string, unknown> | undefined;
-      if (!payload) { alert("無法儲存：缺少分析步驟資料"); return; }
-      const title = (payload.title as string) || "Ad-hoc 分析";
-      const name = prompt("儲存為 My Skill\n\n名稱：", title);
+      if (!payload) { alert(t("promoteMissingData")); return; }
+      const title = (payload.title as string) || t("promoteDefaultTitle");
+      const name = prompt(t("promoteNamePrompt"), title);
       if (!name) return;
       try {
         const res = await fetch("/api/admin/analysis/promote", {
@@ -1857,7 +1863,7 @@ export function AIAgentPanel({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name,
-            description: `從 Agent chat promote：${title}`,
+            description: `從 Agent chat promote：${title}`, // i18n-exempt: 存 DB 的 description，非 locale UI
             auto_check_description: title,
             steps_mapping: payload.steps_mapping,
             input_schema: payload.input_schema,
@@ -1865,13 +1871,13 @@ export function AIAgentPanel({
           }),
         });
         if (res.ok) {
-          alert(`已儲存為 Skill: ${name}\n\n前往 Knowledge Studio → My Skills 查看`);
+          alert(t("promoteSaved", { name }));
         } else {
           const err = await res.json().catch(() => ({}));
-          alert(`儲存失敗: ${(err as Record<string, string>).message || res.statusText}`);
+          alert(t("promoteSaveFailed", { msg: (err as Record<string, string>).message || res.statusText }));
         }
       } catch (e) {
-        alert(`儲存失敗: ${e instanceof Error ? e.message : "未知錯誤"}`);
+        alert(t("promoteSaveFailed", { msg: e instanceof Error ? e.message : t("unknownError") }));
       }
     }
   }
@@ -1937,7 +1943,7 @@ export function AIAgentPanel({
               {glassProgress.turn_used}/{glassProgress.turn_budget} turns ({glassProgress.percent}%)
             </span>
             {glassProgress.warning && (
-              <span style={{ fontWeight: 600 }}>· 接近上限</span>
+              <span style={{ fontWeight: 600 }}>· {t("glassNearLimit")}</span>
             )}
           </div>
         )}
@@ -1960,8 +1966,8 @@ export function AIAgentPanel({
             display: "flex", alignItems: "center", gap: 6,
           }}>
             <span>
-              {autoRun.status === "done" && `✓ Auto-Run 完成${autoRun.durationMs ? ` (${autoRun.durationMs} ms)` : ""}`}
-              {autoRun.status === "error" && `✕ Auto-Run 失敗：${autoRun.error}`}
+              {autoRun.status === "done" && `✓ ${t("autoRunDone")}${autoRun.durationMs ? ` (${autoRun.durationMs} ms)` : ""}`}
+              {autoRun.status === "error" && `✕ ${t("autoRunFailed", { error: autoRun.error ?? "" })}`}
             </span>
           </div>
         )}
@@ -1986,7 +1992,7 @@ export function AIAgentPanel({
                 gap: 4,
               }}
             >
-              {tab === "chat" ? "對話" : "Console"}
+              {tab === "chat" ? t("tabChat") : t("tabConsole")}
               {tab === "console" && loading && (
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#d69e2e", flexShrink: 0 }} />
               )}
@@ -1998,11 +2004,11 @@ export function AIAgentPanel({
       {/* HITL */}
       {hitl && (
         <div style={{ margin: "8px 12px", background: "#fffaf0", border: "1px solid #fbd38d", borderRadius: 8, padding: "10px 12px", flexShrink: 0 }}>
-          <div style={{ fontSize: 12, color: "#c05621", fontWeight: 600, marginBottom: 4 }}>需要確認</div>
-          <div style={{ fontSize: 12, color: "#744210", marginBottom: 8 }}>工具：<code>{hitl.tool}</code></div>
+          <div style={{ fontSize: 12, color: "#c05621", fontWeight: 600, marginBottom: 4 }}>{t("hitlTitle")}</div>
+          <div style={{ fontSize: 12, color: "#744210", marginBottom: 8 }}>{t("hitlTool")}<code>{hitl.tool}</code></div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => resolveHitl(hitl.approval_token, true)} style={{ padding: "5px 12px", background: "#c6f6d5", color: "#276749", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>批准</button>
-            <button onClick={() => resolveHitl(hitl.approval_token, false)} style={{ padding: "5px 12px", background: "#fed7d7", color: "#9b2c2c", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>拒絕</button>
+            <button onClick={() => resolveHitl(hitl.approval_token, true)} style={{ padding: "5px 12px", background: "#c6f6d5", color: "#276749", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>{t("approve")}</button>
+            <button onClick={() => resolveHitl(hitl.approval_token, false)} style={{ padding: "5px 12px", background: "#fed7d7", color: "#9b2c2c", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>{t("reject")}</button>
           </div>
         </div>
       )}
@@ -2014,7 +2020,7 @@ export function AIAgentPanel({
               cards so each build's progress appears under its request. */}
           {chatHistory.length === 0 && (
             <div style={{ color: "#a0aec0", fontSize: 13, textAlign: "center", paddingTop: 24 }}>
-              輸入訊息開始對話
+              {t("emptyState")}
             </div>
           )}
           {chatHistory.map((msg) => (
@@ -2085,7 +2091,7 @@ export function AIAgentPanel({
                         // No follow-up — just acknowledge in chat.
                         setChatHistory((prev) => [...prev, {
                           id: nextId(), role: "agent",
-                          content: "已取消這次設計。需要的話請重新描述。",
+                          content: t("designCancelled"),
                         }]);
                         return;
                       }
@@ -2217,7 +2223,7 @@ export function AIAgentPanel({
                           // crashing on the error SSE shape.
                           setChatHistory((prev) => [...prev, {
                             id: nextId(), role: "agent",
-                            content: `判決送出失敗 (HTTP ${res.status}) — 可能已被其他卡片消費或 session 過期`,
+                            content: t("judgeSubmitFailed", { status: res.status }),
                           }]);
                           try { await res.body?.cancel(); } catch { /* ignore */ }
                           return;
@@ -2240,7 +2246,7 @@ export function AIAgentPanel({
                         console.error("judge_clarify resume failed", e);
                         setChatHistory((prev) => [...prev, {
                           id: nextId(), role: "agent",
-                          content: `判決執行錯誤：${e instanceof Error ? e.message : String(e)}`,
+                          content: t("judgeExecFailed", { msg: e instanceof Error ? e.message : String(e) }),
                         }]);
                       }
                     }}
@@ -2279,7 +2285,7 @@ export function AIAgentPanel({
                   fontSize: 11, color: "#718096",
                 }}>
                                     <span style={{ fontFamily: "monospace", color: "#2b6cb0" }}>{msg.mcpResult.mcp_name}</span>
-                  <span>· 結果已載入分析面板</span>
+                  <span>· {t("mcpResultLoaded")}</span>
                 </div>
               ) : (
                 <>
@@ -2344,9 +2350,9 @@ export function AIAgentPanel({
                   ? { background: "#fffff0", color: "#744210", borderColor: "#f6e05e" }
                   : { background: "#ebf4ff", color: "#2b6cb0", borderColor: "#bee3f8" }),
               }}>
-                {reflection.status === "running" && "驗證數值來源…"}
-                {reflection.status === "pass"    && "✓ 數值已驗證"}
-                {reflection.status === "amendment" && "已自動修正"}
+                {reflection.status === "running" && t("reflectionRunning")}
+                {reflection.status === "pass"    && t("reflectionVerified")}
+                {reflection.status === "amendment" && t("reflectionAmended")}
               </span>
             </div>
           )}
@@ -2388,7 +2394,7 @@ export function AIAgentPanel({
               fontWeight: 500,
             }}
           >
-                        <span>Focused on {focusedNodeLabel ?? focusedNodeId}</span>
+                        <span>{t("focusedOn", { label: focusedNodeLabel ?? focusedNodeId })}</span>
             <button
               onClick={() => onClearFocus?.()}
               style={{
@@ -2400,7 +2406,7 @@ export function AIAgentPanel({
                 padding: "0 4px",
                 lineHeight: 1,
               }}
-              title="清除 focus"
+              title={t("clearFocus")}
             >
               ×
             </button>
@@ -2454,7 +2460,7 @@ export function AIAgentPanel({
               }
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
             }}
-            placeholder="輸入訊息… 或打 / 開啟常用指令選單"
+            placeholder={t("inputPlaceholder")}
             disabled={loading}
             rows={3}
             style={{
@@ -2488,7 +2494,7 @@ export function AIAgentPanel({
               height: 58,
             }}
           >
-            {loading ? "…" : "送出"}
+            {loading ? "…" : t("send")}
           </button>
         </div>
       </div>

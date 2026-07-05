@@ -1,0 +1,54 @@
+{
+  "intent": {
+    "headerPending": "INTENT · 确认目的",
+    "headerConfirmed": "INTENT · 已确认 {time}",
+    "headerCancelled": "INTENT · 已取消",
+    "chipPending": "待回答",
+    "chipSending": "发送中",
+    "chipLocked": "已发送 · 选项已锁定",
+    "chipCancelled": "已取消",
+    "tooVague": "上次尝试太模糊：{reason}",
+    "hintOptions": "点选任一选项即发送并锁定",
+    "hintPlain": "确认后即开始构建",
+    "edited": "已改写",
+    "clickToEdit": "点击改写",
+    "locked": "已锁定",
+    "cancel": "取消",
+    "confirmStart": "确认，开始构建"
+  },
+  "plan": {
+    "chipDraft": "草案 · 可编辑",
+    "chipBuilding": "构建中",
+    "chipDone": "完成",
+    "chipCancelled": "已取消",
+    "chipAborted": "中止",
+    "confirmedLine": "已确认 {time} · plan 已锁定，后续修改请用追问",
+    "phaseDone": "完成",
+    "phaseInProgress": "进行中",
+    "phaseFailed": "未完成",
+    "phaseRepaired": "修复后通过",
+    "phaseRejected": "拒 {n}",
+    "editedW1": "你编辑了这行 → 会写入 W1 偏好",
+    "footnotePre": "phase 文字可直接点击编辑 — 你的修改会写入",
+    "footnotePost": "偏好；确认后即锁定",
+    "consoleLinkPre": "内部逐步运作与「为什么」 →",
+    "consoleLinkLabel": "Console 标签页",
+    "sending": "发送中…",
+    "cancel": "取消",
+    "confirmStart": "确认，开始构建"
+  },
+  "expected": {
+    "raw_data": "原始数据",
+    "transform": "中间数据",
+    "chart": "图表",
+    "table": "表格",
+    "scalar": "数值",
+    "verdict": "判定",
+    "alarm": "告警"
+  },
+  "done": {
+    "learned": "这次学到 {n} 条：",
+    "helpful": "有帮助",
+    "inaccurate": "不准确"
+  }
+}

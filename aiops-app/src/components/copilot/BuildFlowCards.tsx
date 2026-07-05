@@ -13,6 +13,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import type { GoalPhase, PlanRemoval } from "@/components/pipeline-builder/v30/GoalPlanCard";
 import type { IntentBullet } from "@/components/chat/BulletConfirmCard";
 
@@ -105,6 +106,7 @@ export function IntentCard({
     confirmations: Record<string, { action: IntentAction; edit_text?: string }>,
   ) => void;
 }) {
+  const t = useTranslations("buildFlow.intent");
   const [picked, setPicked] = React.useState<Record<string, string>>({});
   const [edits, setEdits] = React.useState<Record<string, string>>({});
   const [editing, setEditing] = React.useState<Record<string, boolean>>({});
@@ -170,7 +172,7 @@ export function IntentCard({
         <span style={{ fontSize: 10.5, color: CHAT_T.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           <span style={{ color: CHAT_T.greenMark }}>✓ </span>{answers}
         </span>
-        <span style={{ fontSize: 9.5, color: CHAT_T.faint, fontFamily: CHAT_T.mono, flex: "none" }}>已鎖定</span>
+        <span style={{ fontSize: 9.5, color: CHAT_T.faint, fontFamily: CHAT_T.mono, flex: "none" }}>{t("locked")}</span>
       </div>
     );
   }
@@ -182,14 +184,14 @@ export function IntentCard({
     <div style={cardStyle(locked)}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <span style={{ ...headStyle, color: locked ? CHAT_T.faint : CHAT_T.weak }}>
-          {answered ? `INTENT · 已確認 ${confirmedAt || ""}` : refusedOrErr ? "INTENT · 已取消" : "INTENT · 確認目的"}
+          {answered ? t("headerConfirmed", { time: confirmedAt || "" }) : refusedOrErr ? t("headerCancelled") : t("headerPending")}
         </span>
         {!resolved && !busy && !submitted && (
-          <span style={chipS(CHAT_T.amberBg, CHAT_T.amberDeep, CHAT_T.amberBorder)}>待回答</span>
+          <span style={chipS(CHAT_T.amberBg, CHAT_T.amberDeep, CHAT_T.amberBorder)}>{t("chipPending")}</span>
         )}
-        {(busy || submitted) && !resolved && <span style={chipS(CHAT_T.ink, "#fff")}>送出中</span>}
-        {answered && <span style={chipS(CHAT_T.greenBg, CHAT_T.green)}>已送出 · 選項已鎖定</span>}
-        {refusedOrErr && <span style={chipS("#f1efe9", CHAT_T.weak)}>已取消</span>}
+        {(busy || submitted) && !resolved && <span style={chipS(CHAT_T.ink, "#fff")}>{t("chipSending")}</span>}
+        {answered && <span style={chipS(CHAT_T.greenBg, CHAT_T.green)}>{t("chipLocked")}</span>}
+        {refusedOrErr && <span style={chipS("#f1efe9", CHAT_T.weak)}>{t("chipCancelled")}</span>}
       </div>
 
       {tooVagueReason && !resolved && (
@@ -198,7 +200,7 @@ export function IntentCard({
           padding: "6px 8px", background: CHAT_T.amberBg,
           border: `1px solid ${CHAT_T.amberBorder}`, borderRadius: 7,
         }}>
-          上次嘗試太模糊：{tooVagueReason.slice(0, 200)}
+          {t("tooVague", { reason: tooVagueReason.slice(0, 200) })}
         </div>
       )}
 
@@ -266,11 +268,11 @@ export function IntentCard({
                 <span
                   onClick={() => { if (!locked) setEditing((p) => ({ ...p, [b.id]: true })); }}
                   style={{ fontSize: 11, lineHeight: 1.55, color: CHAT_T.ink, cursor: locked ? "default" : "text", flex: 1 }}
-                  title={locked ? undefined : "點擊改寫"}
+                  title={locked ? undefined : t("clickToEdit")}
                 >
                   {edits[b.id]?.trim() ? edits[b.id] : b.text}
                   {edits[b.id]?.trim() && (
-                    <span style={{ fontSize: 9.5, color: CHAT_T.purple, fontFamily: CHAT_T.mono }}> · 已改寫</span>
+                    <span style={{ fontSize: 9.5, color: CHAT_T.purple, fontFamily: CHAT_T.mono }}> · {t("edited")}</span>
                   )}
                 </span>
               )}
@@ -286,19 +288,19 @@ export function IntentCard({
           ...(busy ? DISABLED : {}),
         }}>
           <span style={{ fontSize: 10, color: CHAT_T.faint }}>
-            {optionBullets.length > 0 ? "點選任一選項即送出並鎖定" : "確認後即開始建構"}
+            {optionBullets.length > 0 ? t("hintOptions") : t("hintPlain")}
           </span>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={cancel} style={{
               border: `1px solid ${CHAT_T.chipBorder}`, background: "#fff", color: CHAT_T.sub,
               fontSize: 11, padding: "4px 12px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
-            }}>取消</button>
+            }}>{t("cancel")}</button>
             {optionBullets.length === 0 && (
               <button onClick={submitPlain} style={{
                 border: `1px solid ${CHAT_T.ink}`, background: CHAT_T.ink, color: "#fff",
                 fontSize: 11, fontWeight: 600, padding: "4px 14px", borderRadius: 7,
                 cursor: "pointer", fontFamily: "inherit",
-              }}>確認，開始建構</button>
+              }}>{t("confirmStart")}</button>
             )}
           </div>
         </div>
@@ -337,10 +339,9 @@ export interface BuildPlanState {
   errorReason?: string;
 }
 
-const EXPECTED_LABEL: Record<string, string> = {
-  raw_data: "原始資料", transform: "中繼資料", chart: "圖表",
-  table: "表格", scalar: "數值", verdict: "判定", alarm: "告警",
-};
+const EXPECTED_KEYS = new Set(
+  ["raw_data", "transform", "chart", "table", "scalar", "verdict", "alarm"],
+);
 
 export function BuildPlanCard({
   state, busy, onConfirm, onCancel, onConsoleLink,
@@ -352,6 +353,8 @@ export function BuildPlanCard({
   onConsoleLink?: () => void;
 }) {
   const { phases, runtime, status } = state;
+  const t = useTranslations("buildFlow.plan");
+  const te = useTranslations("buildFlow.expected");
   const [edits, setEdits] = React.useState<Record<string, string>>({});
   const [editing, setEditing] = React.useState<string | null>(null);
   const draft = status === "draft" && !busy;
@@ -370,11 +373,11 @@ export function BuildPlanCard({
     status === "draft" ? `BUILD PLAN · ${total} PHASES` : `BUILD PLAN · ${doneCount}/${total} DONE`;
 
   const chip =
-    status === "draft" ? <span style={chipS("#f1efe9", CHAT_T.weak)}>草案 · 可編輯</span>
-    : status === "building" ? <span style={chipS(CHAT_T.ink, "#fff")}>建構中</span>
-    : status === "done" ? <span style={chipS(CHAT_T.greenBg, CHAT_T.green)}>完成</span>
-    : status === "cancelled" ? <span style={chipS("#f1efe9", CHAT_T.weak)}>已取消</span>
-    : <span style={chipS(CHAT_T.amberChip, CHAT_T.amberDeep)}>中止</span>;
+    status === "draft" ? <span style={chipS("#f1efe9", CHAT_T.weak)}>{t("chipDraft")}</span>
+    : status === "building" ? <span style={chipS(CHAT_T.ink, "#fff")}>{t("chipBuilding")}</span>
+    : status === "done" ? <span style={chipS(CHAT_T.greenBg, CHAT_T.green)}>{t("chipDone")}</span>
+    : status === "cancelled" ? <span style={chipS("#f1efe9", CHAT_T.weak)}>{t("chipCancelled")}</span>
+    : <span style={chipS(CHAT_T.amberChip, CHAT_T.amberDeep)}>{t("chipAborted")}</span>;
 
   const locked = status !== "draft";
 
@@ -393,7 +396,7 @@ export function BuildPlanCard({
       )}
       {locked && state.confirmedAt && (
         <div style={{ fontSize: 10, color: CHAT_T.faint, marginTop: 3 }}>
-          <span style={{ color: CHAT_T.greenMark }}>✓</span> 已確認 {state.confirmedAt} · plan 已鎖定，後續修改請用追問
+          <span style={{ color: CHAT_T.greenMark }}>✓</span> {t("confirmedLine", { time: state.confirmedAt })}
         </div>
       )}
       {status === "error" && state.errorReason && (
@@ -422,15 +425,15 @@ export function BuildPlanCard({
           if (locked) {
             if (st === "completed") {
               chips.push(rt?.repair
-                ? <span key="s" style={chipS(CHAT_T.repairBg, CHAT_T.repairText, "#f0dcb4")}>修復後通過</span>
-                : <span key="s" style={chipS(CHAT_T.greenBg, CHAT_T.green)}>完成</span>);
+                ? <span key="s" style={chipS(CHAT_T.repairBg, CHAT_T.repairText, "#f0dcb4")}>{t("phaseRepaired")}</span>
+                : <span key="s" style={chipS(CHAT_T.greenBg, CHAT_T.green)}>{t("phaseDone")}</span>);
             } else if (st === "in_progress") {
-              chips.push(<span key="s" style={chipS(CHAT_T.ink, "#fff")}>進行中</span>);
+              chips.push(<span key="s" style={chipS(CHAT_T.ink, "#fff")}>{t("phaseInProgress")}</span>);
             } else if (st === "failed") {
-              chips.push(<span key="s" style={chipS(CHAT_T.amberChip, CHAT_T.amberDeep)}>未完成</span>);
+              chips.push(<span key="s" style={chipS(CHAT_T.amberChip, CHAT_T.amberDeep)}>{t("phaseFailed")}</span>);
             }
             if (rt?.rejects) {
-              chips.push(<span key="r" style={chipS(CHAT_T.amberChip, CHAT_T.amberDeep)}>拒 {rt.rejects}</span>);
+              chips.push(<span key="r" style={chipS(CHAT_T.amberChip, CHAT_T.amberDeep)}>{t("phaseRejected", { n: rt.rejects })}</span>);
             }
           }
           const meta: string[] = [];
@@ -470,7 +473,7 @@ export function BuildPlanCard({
                       {edits[p.id]?.trim() && status === "draft" ? edits[p.id] : p.goal}
                     </span>
                   )}
-                  <span style={chipS("#f1efe9", CHAT_T.weak)}>{EXPECTED_LABEL[p.expected] ?? p.expected}</span>
+                  <span style={chipS("#f1efe9", CHAT_T.weak)}>{EXPECTED_KEYS.has(p.expected) ? te(p.expected) : p.expected}</span>
                   {chips}
                   {meta.length > 0 && (
                     <span style={{ fontFamily: CHAT_T.mono, fontSize: 9, color: CHAT_T.faint }}>{meta.join(" · ")}</span>
@@ -478,7 +481,7 @@ export function BuildPlanCard({
                 </div>
                 {edited && (
                   <div style={{ fontSize: 10, color: CHAT_T.purple, lineHeight: 1.5 }}>
-                    ◆ 你編輯了這行 → 會寫入 W1 偏好
+                    ◆ {t("editedW1")}
                   </div>
                 )}
                 {locked && st === "completed" && rt?.result && (
@@ -500,7 +503,7 @@ export function BuildPlanCard({
             <button onClick={onCancel} style={{
               border: `1px solid ${CHAT_T.chipBorder}`, background: "#fff", color: CHAT_T.sub,
               fontSize: 11, padding: "6px 14px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
-            }}>取消</button>
+            }}>{t("cancel")}</button>
             <button
               onClick={() => onConfirm(effectivePhases(), state.removals)}
               style={{
@@ -508,12 +511,12 @@ export function BuildPlanCard({
                 fontSize: 11, fontWeight: 600, padding: "6px 14px", borderRadius: 7,
                 cursor: "pointer", fontFamily: "inherit",
               }}
-            >{busy ? "送出中…" : "確認，開始建構"}</button>
+            >{busy ? t("sending") : t("confirmStart")}</button>
           </div>
           <div style={{ fontSize: 10, color: CHAT_T.faint, marginTop: 7 }}>
-            phase 文字可直接點擊編輯 — 你的修改會寫入{" "}
+            {t("footnotePre")}{" "}
             <span style={{ color: CHAT_T.purple, fontFamily: CHAT_T.mono }}>W1</span>{" "}
-            偏好；確認後即鎖定
+            {t("footnotePost")}
           </div>
         </>
       )}
@@ -524,9 +527,9 @@ export function BuildPlanCard({
           marginTop: 9, paddingTop: 8, borderTop: `1px solid ${CHAT_T.innerLine}`,
           fontSize: 10, color: CHAT_T.weak,
         }}>
-          內部逐步運作與「為什麼」 →{" "}
+          {t("consoleLinkPre")}{" "}
           <span onClick={onConsoleLink} style={{ color: CHAT_T.ink, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>
-            Console 分頁
+            {t("consoleLinkLabel")}
           </span>
         </div>
       )}
@@ -548,6 +551,7 @@ export function BuildDoneCard({
   state: BuildDoneState;
   onRate?: (rating: 1 | -1) => void;
 }) {
+  const t = useTranslations("buildFlow.done");
   const rated = state.rating != null;
   return (
     <div style={{ ...cardStyle(false), padding: "9px 12px" }}>
@@ -559,12 +563,12 @@ export function BuildDoneCard({
       )}
       {state.learned.length > 0 && (
         <div style={{ fontSize: 10, color: CHAT_T.purple, marginTop: 3 }}>
-          ◆ 這次學到 {state.learned.length} 筆：{state.learned.join(" · ")}
+          ◆ {t("learned", { n: state.learned.length })}{state.learned.join(" · ")}
         </div>
       )}
       {onRate && (
         <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          {([["有幫助", 1], ["不準確", -1]] as const).map(([label, val]) => {
+          {([[t("helpful"), 1], [t("inaccurate"), -1]] as const).map(([label, val]) => {
             const active = state.rating === val;
             return (
               <button

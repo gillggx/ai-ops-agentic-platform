@@ -1,0 +1,57 @@
+{
+  "agents": {
+    "memory": "メモリ"
+  },
+  "status": {
+    "idle": "アイドル — 進行中の build はありません",
+    "buildFailed": "build 失敗 · 却下 {n}",
+    "buildDone": "build 完了 · {phases} phases · 却下 {rejects}",
+    "planning": "プランニング中",
+    "finalizing": "仕上げ",
+    "rejectCount": "却下 {n}",
+    "inProgress": "進行中"
+  },
+  "mode": {
+    "phase_start": "起動",
+    "tool": "実行中",
+    "submit": "判定待ち",
+    "verdict_pass": "判定：合格",
+    "verdict_reject": "判定：却下",
+    "escalate": "Repair へエスカレーション",
+    "repair_start": "診断中",
+    "repair_out": "修復完了",
+    "recall": "メモリ読み取り",
+    "write": "メモリ書き込み",
+    "phase_done": "phase 完了",
+    "confirm": "プラン確認",
+    "final": "完了"
+  },
+  "group": {
+    "plan": "プランニング",
+    "fin": "仕上げ"
+  },
+  "stream": {
+    "idle": "アイドル",
+    "idleHint": "build の開始後、イベントが順次表示されます — agent 内部の各ステップ（決定・理由・根拠）をここに表示します",
+    "reason": "理由「{reason}」",
+    "selfReported": "自己申告",
+    "noRecall": "このステップでリコールされた関連メモリは 0 件です"
+  },
+  "teach": {
+    "title": "agent は知識のサポートなしで模索しています",
+    "question": "正しいやり方をご存知ですか？",
+    "button": "教える",
+    "autofill": "自動入力されます：{code} · phase「{phaseId}」· 元の指示"
+  },
+  "memory": {
+    "title": "メモリ効果",
+    "counts": "リコール {recalls} 件 · 書き込み {writes} 件",
+    "recall": "リコール",
+    "write": "書き込み",
+    "new": "新規"
+  },
+  "cost": {
+    "title": "コスト",
+    "note": "Verifier は deterministic · Monitor は LLM ゼロ — $0"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "agents": {
+    "memory": "記憶"
+  },
+  "status": {
+    "idle": "閒置 — 尚無進行中的 build",
+    "buildFailed": "build 失敗 · 拒 {n}",
+    "buildDone": "build 完成 · {phases} phases · 拒 {rejects}",
+    "planning": "規劃中",
+    "finalizing": "收尾",
+    "rejectCount": "拒 {n}",
+    "inProgress": "進行中"
+  },
+  "mode": {
+    "phase_start": "啟動",
+    "tool": "行動中",
+    "submit": "等待裁決",
+    "verdict_pass": "裁決：通過",
+    "verdict_reject": "裁決：拒絕",
+    "escalate": "升級 Repair",
+    "repair_start": "診斷中",
+    "repair_out": "修復完成",
+    "recall": "讀取記憶",
+    "write": "寫入記憶",
+    "phase_done": "phase 完成",
+    "confirm": "確認計畫",
+    "final": "完成"
+  },
+  "group": {
+    "plan": "規劃",
+    "fin": "收尾"
+  },
+  "stream": {
+    "idle": "閒置",
+    "idleHint": "build 開始後事件會逐條浮現 — 這裡顯示 agent 內部的每一步：決定、理由、依據",
+    "reason": "理由「{reason}」",
+    "selfReported": "自述",
+    "noRecall": "這一步召回 0 筆相關記憶"
+  },
+  "teach": {
+    "title": "agent 在沒有知識支援下摸索中",
+    "question": "你知道怎麼做對嗎？",
+    "button": "教它",
+    "autofill": "將自動帶入：{code} · phase「{phaseId}」· 原始指令"
+  },
+  "memory": {
+    "title": "記憶效應",
+    "counts": "{recalls} 筆召回 · {writes} 筆寫入",
+    "recall": "召回",
+    "write": "寫入",
+    "new": "新"
+  },
+  "cost": {
+    "title": "成本",
+    "note": "Verifier deterministic · Monitor 零 LLM — $0"
+  }
+}

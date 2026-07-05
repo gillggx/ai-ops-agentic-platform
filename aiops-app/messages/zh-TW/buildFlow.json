@@ -1,0 +1,54 @@
+{
+  "intent": {
+    "headerPending": "INTENT · 確認目的",
+    "headerConfirmed": "INTENT · 已確認 {time}",
+    "headerCancelled": "INTENT · 已取消",
+    "chipPending": "待回答",
+    "chipSending": "送出中",
+    "chipLocked": "已送出 · 選項已鎖定",
+    "chipCancelled": "已取消",
+    "tooVague": "上次嘗試太模糊：{reason}",
+    "hintOptions": "點選任一選項即送出並鎖定",
+    "hintPlain": "確認後即開始建構",
+    "edited": "已改寫",
+    "clickToEdit": "點擊改寫",
+    "locked": "已鎖定",
+    "cancel": "取消",
+    "confirmStart": "確認，開始建構"
+  },
+  "plan": {
+    "chipDraft": "草案 · 可編輯",
+    "chipBuilding": "建構中",
+    "chipDone": "完成",
+    "chipCancelled": "已取消",
+    "chipAborted": "中止",
+    "confirmedLine": "已確認 {time} · plan 已鎖定，後續修改請用追問",
+    "phaseDone": "完成",
+    "phaseInProgress": "進行中",
+    "phaseFailed": "未完成",
+    "phaseRepaired": "修復後通過",
+    "phaseRejected": "拒 {n}",
+    "editedW1": "你編輯了這行 → 會寫入 W1 偏好",
+    "footnotePre": "phase 文字可直接點擊編輯 — 你的修改會寫入",
+    "footnotePost": "偏好；確認後即鎖定",
+    "consoleLinkPre": "內部逐步運作與「為什麼」 →",
+    "consoleLinkLabel": "Console 分頁",
+    "sending": "送出中…",
+    "cancel": "取消",
+    "confirmStart": "確認，開始建構"
+  },
+  "expected": {
+    "raw_data": "原始資料",
+    "transform": "中繼資料",
+    "chart": "圖表",
+    "table": "表格",
+    "scalar": "數值",
+    "verdict": "判定",
+    "alarm": "告警"
+  },
+  "done": {
+    "learned": "這次學到 {n} 筆：",
+    "helpful": "有幫助",
+    "inaccurate": "不準確"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "progress": "Phase 进度（{done}/{total} 完成）",
+  "status": {
+    "pending": "等待",
+    "in_progress": "进行中",
+    "completed": "完成",
+    "failed": "失败",
+    "paused": "暂停"
+  },
+  "round": "round {round}/{max}",
+  "autoTooltip": "由 server verifier 自动检测完成（非 LLM 主动 declare）",
+  "ffTooltip": "由 {node} [{block}] 一个 block 覆盖多个 phase",
+  "consoleHint": "内部逐步运作与「为什么」",
+  "consoleTab": "Console 标签页"
+}

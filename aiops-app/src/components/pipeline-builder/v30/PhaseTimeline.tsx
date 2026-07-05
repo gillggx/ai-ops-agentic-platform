@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import type { GoalPhase } from "./GoalPlanCard";
 
 export type PhaseStatus = "pending" | "in_progress" | "completed" | "failed" | "paused";
@@ -37,6 +38,9 @@ interface Props {
  * Updates in real-time from SSE events.
  */
 export default function PhaseTimeline({ phases, runtime, onConsoleLink }: Props) {
+  const t = useTranslations("phaseTimeline");
+  const doneCount =
+    Object.values(runtime).filter((r) => r.status === "completed").length;
   return (
     <div
       style={{
@@ -59,7 +63,7 @@ export default function PhaseTimeline({ phases, runtime, onConsoleLink }: Props)
           marginBottom: 8,
         }}
       >
-        Phase progress ({Object.values(runtime).filter((r) => r.status === "completed").length}/{phases.length} done)
+        {t("progress", { done: doneCount, total: phases.length })}
       </div>
       <ol style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
         {phases.map((p, i) => {
@@ -72,10 +76,10 @@ export default function PhaseTimeline({ phases, runtime, onConsoleLink }: Props)
       {onConsoleLink && (
         <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px solid #f1f5f9",
                       fontSize: 10.5, color: "#8a877e" }}>
-          內部逐步運作與「為什麼」 →{" "}
+          {t("consoleHint")} →{" "}
           <span onClick={onConsoleLink}
                 style={{ color: "#2563eb", fontWeight: 600, cursor: "pointer" }}>
-            Console 分頁
+            {t("consoleTab")}
           </span>
         </div>
       )}
@@ -83,12 +87,13 @@ export default function PhaseTimeline({ phases, runtime, onConsoleLink }: Props)
   );
 }
 
-const STATUS_STYLE: Record<PhaseStatus, { bg: string; fg: string; icon: string; label: string }> = {
-  pending:     { bg: "#f1f5f9", fg: "#64748b", icon: ".",  label: "等待" },
-  in_progress: { bg: "#dbeafe", fg: "#1e40af", icon: ">",  label: "進行中" },
-  completed:   { bg: "#d1fae5", fg: "#065f46", icon: "[OK]", label: "完成" },
-  failed:      { bg: "#fee2e2", fg: "#991b1b", icon: "[X]",  label: "失敗" },
-  paused:      { bg: "#fef3c7", fg: "#92400e", icon: "[..]", label: "暫停" },
+// Labels live in messages/<locale>/phaseTimeline.json under "status.<key>".
+const STATUS_STYLE: Record<PhaseStatus, { bg: string; fg: string; icon: string }> = {
+  pending:     { bg: "#f1f5f9", fg: "#64748b", icon: "." },
+  in_progress: { bg: "#dbeafe", fg: "#1e40af", icon: ">" },
+  completed:   { bg: "#d1fae5", fg: "#065f46", icon: "[OK]" },
+  failed:      { bg: "#fee2e2", fg: "#991b1b", icon: "[X]" },
+  paused:      { bg: "#fef3c7", fg: "#92400e", icon: "[..]" },
 };
 
 function PhaseRow({
@@ -100,7 +105,9 @@ function PhaseRow({
   phase: GoalPhase;
   runtime: PhaseRuntime;
 }) {
+  const t = useTranslations("phaseTimeline");
   const st = STATUS_STYLE[runtime.status];
+  const statusLabel = t(`status.${runtime.status}`);
   return (
     <li
       style={{
@@ -124,7 +131,7 @@ function PhaseRow({
           alignItems: "center",
           justifyContent: "center",
         }}
-        title={st.label}
+        title={statusLabel}
       >
         {runtime.status === "completed" || runtime.status === "failed"
           ? st.icon
@@ -159,11 +166,11 @@ function PhaseRow({
               fontWeight: 600,
             }}
           >
-            {st.label}
+            {statusLabel}
           </span>
           {runtime.round != null && runtime.maxRound != null && (
             <span>
-              round {runtime.round}/{runtime.maxRound}
+              {t("round", { round: runtime.round, max: runtime.maxRound })}
             </span>
           )}
           {runtime.lastAction && (
@@ -187,7 +194,7 @@ function PhaseRow({
                 fontWeight: 600,
                 fontSize: 10.5,
               }}
-              title="由 server verifier 自動偵測完成（非 LLM 主動 declare）"
+              title={t("autoTooltip")}
             >
               auto
             </span>
@@ -202,7 +209,10 @@ function PhaseRow({
                 fontWeight: 600,
                 fontSize: 10.5,
               }}
-              title={`由 ${runtime.fastForwardedBy ?? "?"} [${runtime.fastForwardedByBlock}] 一個 block 涵蓋多 phase`}
+              title={t("ffTooltip", {
+                node: runtime.fastForwardedBy ?? "?",
+                block: runtime.fastForwardedByBlock,
+              })}
             >
               ff: {runtime.fastForwardedByBlock}
             </span>

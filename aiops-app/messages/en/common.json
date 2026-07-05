@@ -1,0 +1,11 @@
+{
+  "cancel": "Cancel",
+  "confirm": "Confirm",
+  "send": "Send",
+  "signIn": "Sign in",
+  "signOut": "Sign out",
+  "accountSettings": "Account settings",
+  "changePassword": "Change password",
+  "signInMethod": "Signed in via {provider}",
+  "language": "Language"
+}

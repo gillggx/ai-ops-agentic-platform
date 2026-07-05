@@ -1,0 +1,54 @@
+{
+  "intent": {
+    "headerPending": "INTENT · Confirm goal",
+    "headerConfirmed": "INTENT · Confirmed {time}",
+    "headerCancelled": "INTENT · Cancelled",
+    "chipPending": "Awaiting answer",
+    "chipSending": "Sending",
+    "chipLocked": "Sent · options locked",
+    "chipCancelled": "Cancelled",
+    "tooVague": "Previous attempt was too vague: {reason}",
+    "hintOptions": "Clicking an option sends and locks immediately",
+    "hintPlain": "Build starts after you confirm",
+    "edited": "edited",
+    "clickToEdit": "Click to rewrite",
+    "locked": "Locked",
+    "cancel": "Cancel",
+    "confirmStart": "Confirm and build"
+  },
+  "plan": {
+    "chipDraft": "Draft · editable",
+    "chipBuilding": "Building",
+    "chipDone": "Done",
+    "chipCancelled": "Cancelled",
+    "chipAborted": "Aborted",
+    "confirmedLine": "Confirmed {time} · plan locked — use a follow-up message for changes",
+    "phaseDone": "Done",
+    "phaseInProgress": "In progress",
+    "phaseFailed": "Incomplete",
+    "phaseRepaired": "Passed after repair",
+    "phaseRejected": "{n} rejected",
+    "editedW1": "You edited this line → saved as a W1 preference",
+    "footnotePre": "Click any phase text to edit — your changes are saved as",
+    "footnotePost": "preferences; locked once confirmed",
+    "consoleLinkPre": "Step-by-step internals and the \"why\" →",
+    "consoleLinkLabel": "Console tab",
+    "sending": "Sending…",
+    "cancel": "Cancel",
+    "confirmStart": "Confirm and build"
+  },
+  "expected": {
+    "raw_data": "raw data",
+    "transform": "transform",
+    "chart": "chart",
+    "table": "table",
+    "scalar": "scalar",
+    "verdict": "verdict",
+    "alarm": "alarm"
+  },
+  "done": {
+    "learned": "Learned {n} this build:",
+    "helpful": "Helpful",
+    "inaccurate": "Inaccurate"
+  }
+}

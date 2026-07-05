@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { useLocale, useTranslations } from "next-intl";
 import { NotificationBell } from "./NotificationBell";
+import { SUPPORTED_LOCALES, LOCALE_LABELS } from "@/i18n/locales";
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   IT_ADMIN: { bg: "#fef2f2", color: "#991b1b" },
@@ -38,6 +40,8 @@ export function Topbar() {
 
 function UserMenu() {
   const { data: session, status } = useSession();
+  const locale = useLocale();
+  const t = useTranslations("common");
   const [open, setOpen] = useState(false);
 
   if (status === "loading") {
@@ -52,7 +56,7 @@ function UserMenu() {
         padding: "6px 12px", borderRadius: 6,
         border: "1px solid #e2e8f0",
       }}>
-        登入
+        {t("signIn")}
       </a>
     );
   }
@@ -117,12 +121,37 @@ function UserMenu() {
                 ))}
               </div>
               <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-                登入方式：{provider}
+                {t("signInMethod", { provider })}
               </div>
             </div>
 
-            <DropdownLink href="/me/profile" icon="⚙️" label="帳號設定" onClick={() => setOpen(false)} />
-            <DropdownLink href="/me/change-password" icon="🔑" label="變更密碼" onClick={() => setOpen(false)} />
+            <DropdownLink href="/me/profile" icon="⚙️" label={t("accountSettings")} onClick={() => setOpen(false)} />
+            <DropdownLink href="/me/change-password" icon="🔑" label={t("changePassword")} onClick={() => setOpen(false)} />
+
+            <div style={{ borderTop: "1px solid #f1f5f9" }} />
+
+            {/* i18n P0 — 語系切換：寫 NEXT_LOCALE cookie 後 reload（無 URL routing） */}
+            <div style={{ padding: "8px 14px 4px", fontSize: 10, color: "#94a3b8", fontWeight: 600 }}>{t("language")}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 14px 10px" }}>
+              {SUPPORTED_LOCALES.map((loc) => (
+                <button
+                  key={loc}
+                  onClick={() => {
+                    document.cookie = `NEXT_LOCALE=${loc};path=/;max-age=31536000`;
+                    window.location.reload();
+                  }}
+                  style={{
+                    padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
+                    border: locale === loc ? "1px solid #2563eb" : "1px solid #e2e8f0",
+                    background: locale === loc ? "#eff6ff" : "#fff",
+                    color: locale === loc ? "#2563eb" : "#475569",
+                    fontWeight: locale === loc ? 600 : 400,
+                  }}
+                >
+                  {LOCALE_LABELS[loc]}
+                </button>
+              ))}
+            </div>
 
             <div style={{ borderTop: "1px solid #f1f5f9" }} />
 
@@ -137,7 +166,7 @@ function UserMenu() {
               onMouseEnter={(e) => (e.currentTarget.style.background = "#fef2f2")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
             >
-              🚪 登出
+              🚪 {t("signOut")}
             </button>
           </div>
         </>

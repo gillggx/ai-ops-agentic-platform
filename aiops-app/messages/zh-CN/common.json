@@ -1,0 +1,11 @@
+{
+  "cancel": "取消",
+  "confirm": "确认",
+  "send": "发送",
+  "signIn": "登录",
+  "signOut": "退出登录",
+  "accountSettings": "账号设置",
+  "changePassword": "修改密码",
+  "signInMethod": "登录方式：{provider}",
+  "language": "语言"
+}
