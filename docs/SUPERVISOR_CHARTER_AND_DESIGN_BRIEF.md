@@ -109,4 +109,31 @@
 
 - Supervisor 的判斷邏輯（後端）— 另案
 - 行動版
-- 知識編輯器本身（`/agent-knowledge` 既有，收件匣核准 W2 時跳轉即可）
+
+---
+
+## Part 3 — 知識面資訊架構定案（2026-07-05 對齊，與 Part 2 同一設計案）
+
+現況問題：`/agent-knowledge` 一頁混了三種治理等級 + 「手冊」與「待審件」
+混同 + W1 個人偏好放在全域頁 + 無 role gating。定案拆成四面：
+
+| 面 | 內容 | 誰看/誰用 |
+|---|---|---|
+| Console 記憶效應（既有，改一點） | 唯讀「這次用了哪些記憶」；記憶 chip 對非 PE 開**唯讀卡**，不進編輯器 | 所有角色 |
+| **知識工房**（/agent-knowledge 改版） | 上：手冊區（Knowledge / Lexicon / Examples，已生效的真理）；下或側：**收件匣**（W2 doc memo、W3 draft、教它草稿），帶待審數 badge — 手冊與 inbox 視覺上必須是兩種東西 | PE（維護）；ON_DUTY 僅能從教它入口提草稿 |
+| **平台治理**（併入 Supervisor 工作台） | Directives（admin-only，自知識工房移出）+ Supervisor 提案收件匣 + 設定簽核 | IT_ADMIN |
+| **/me 我的偏好**（新） | W1 個人偏好清單（agent 從我的行為學到的），可檢視/停用/刪除 | 每位 user 自己 |
+
+已拍板的四個決定：
+1. **教它權限**：ON_DUTY 可提草稿 → 進 PE 收件匣 review，不直寫手冊
+2. **Directives**：admin-only，歸 Supervisor 工作台治理區
+3. **W1 scope = 個人**：寫入已帶 user_id；檢索按 user 過濾列入實作驗證項；
+   /me 提供自助管理
+4. **設計交付**：知識工房與 Supervisor 工作台**同一輪**設計 — 兩張稿共用
+   「收件匣卡片」語彙（三段式 + 狀態 chip + 批次動作），視覺上是同一個系統
+
+給設計的補充約束：
+- 收件匣卡片跨兩張稿完全同構（PE 審 W2 和 ADMIN 審提案是同一種互動，
+  只是內容與簽核者不同）
+- 側欄入口按角色顯示：ON_DUTY 看不到知識工房與治理面；PE 看不到治理面
+- 待審 badge 數字出現在側欄入口上（inbox 的存在感）
