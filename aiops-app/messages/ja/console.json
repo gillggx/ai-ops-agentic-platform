@@ -30,6 +30,28 @@
     "plan": "プランニング",
     "fin": "仕上げ"
   },
+  "events": {
+    "planProposed": "{n} 個の phase を提案",
+    "planConfirmed": "プラン確認 — 検収 contract を抽出",
+    "verdictPassDefault": "検収合格",
+    "phaseDone": "{pid} 完了",
+    "phaseDoneFf": "{pid} 完了（ff: {block}）",
+    "phaseStart": "{pid} を開始",
+    "recall": "リコール {n} 件 · {subject}",
+    "rejectDefault": "検収不合格{blk}",
+    "stuckEscalated": "r{round} 修正が実らず — Repair へエスカレーション",
+    "repairTriggered": "Repair 介入 — 三方向整合診断（要求 × canvas × 却下理由）",
+    "repairRetry": "修復成功 — Builder に戻して続行",
+    "repairHandover": "修復失敗 — handover に移行"
+  },
+  "writeStatus": {
+    "active": "active · 即時反映",
+    "review_queue": "review queue · block_docs を直接変更しません",
+    "draft": "draft · Supervisor の承認待ち"
+  },
+  "evidence": {
+    "structuredReject": "構造化された却下理由：{json}"
+  },
   "stream": {
     "idle": "アイドル",
     "idleHint": "build の開始後、イベントが順次表示されます — agent 内部の各ステップ（決定・理由・根拠）をここに表示します",

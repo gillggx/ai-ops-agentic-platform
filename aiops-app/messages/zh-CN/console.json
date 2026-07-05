@@ -30,6 +30,28 @@
     "plan": "规划",
     "fin": "收尾"
   },
+  "events": {
+    "planProposed": "提出 {n} 个 phase",
+    "planConfirmed": "计划确认 — 萃取验收 contract",
+    "verdictPassDefault": "验收通过",
+    "phaseDone": "{pid} 完成",
+    "phaseDoneFf": "{pid} 完成（ff: {block}）",
+    "phaseStart": "开始 {pid}",
+    "recall": "召回 {n} 条 · {subject}",
+    "rejectDefault": "验收未过{blk}",
+    "stuckEscalated": "r{round} 修正未果 — 升级 Repair",
+    "repairTriggered": "Repair 介入 — 三路对齐诊断（需求 × canvas × 拒因）",
+    "repairRetry": "修复成功 — 交回 Builder 续跑",
+    "repairHandover": "修复失败 — handover 交棒"
+  },
+  "writeStatus": {
+    "active": "active · 立即生效",
+    "review_queue": "review queue · 不直接改 block_docs",
+    "draft": "draft · 待 Supervisor 转正"
+  },
+  "evidence": {
+    "structuredReject": "结构化拒因：{json}"
+  },
   "stream": {
     "idle": "闲置",
     "idleHint": "build 开始后事件会逐条浮现 — 这里显示 agent 内部的每一步：决定、理由、依据",

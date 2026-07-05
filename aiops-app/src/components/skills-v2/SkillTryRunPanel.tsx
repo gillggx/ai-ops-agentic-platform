@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useState } from "react";
+import { useTranslations } from "next-intl";
 import { executePipeline } from "@/lib/pipeline-builder/api";
 import type { ExecuteResponse, PipelineJSON } from "@/lib/pipeline-builder/types";
 import PipelineResultsPanel from "@/components/pipeline-builder/PipelineResultsPanel";
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export default function SkillTryRunPanel({ pipelineId }: Props) {
+  const t = useTranslations("skills.tryRun");
   const [expanded, setExpanded] = useState(false);
   const [pj, setPj] = useState<PipelineJSON | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,11 +52,11 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
       }
       setInputs(seed);
     } catch (e) {
-      setError(`載入 pipeline 失敗：${e instanceof Error ? e.message : String(e)}`);
+      setError(t("loadPipelineFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setLoading(false);
     }
-  }, [pipelineId]);
+  }, [pipelineId, t]);
 
   const handleExpand = useCallback(() => {
     setExpanded(true);
@@ -77,16 +79,16 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
       const res = await executePipeline(pj, coerced);
       setResult(res);
       if (res.status === "validation_error" || res.status === "failed") {
-        setError(res.error_message || firstNodeError(res) || `執行結果：${res.status}`);
+        setError(res.error_message || firstNodeError(res) || t("runStatus", { status: res.status }));
       } else {
         setPanelOpen(true);
       }
     } catch (e) {
-      setError(`試跑失敗：${e instanceof Error ? e.message : String(e)}`);
+      setError(t("runFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setRunning(false);
     }
-  }, [pj, inputs]);
+  }, [pj, inputs, t]);
 
   if (!expanded) {
     return (
@@ -96,7 +98,7 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
           color: "#fff", background: TK.black, border: `1px solid ${TK.black}`,
           padding: "9px 16px", borderRadius: 9, cursor: "pointer",
         }}>
-          ▷ 試跑（read-only，不會發 alarm）
+          {t("expandButton")}
         </button>
       </div>
     );
@@ -113,19 +115,19 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
       <div style={{
         font: `600 11px ${FONT.mono}`, letterSpacing: ".13em",
         color: TK.faint, textTransform: "uppercase", marginBottom: 4,
-      }}>試跑 · DRY RUN（唯讀）</div>
+      }}>{t("eyebrow")}</div>
       <div style={{ fontSize: 12.5, color: TK.body, marginBottom: 12 }}>
-        用測試輸入跑一次 pipeline，看 verdict 與圖表。不寫 skill_run、不發 alarm。
+        {t("description")}
       </div>
 
-      {loading && <div style={{ fontSize: 13, color: TK.faint }}>載入 pipeline…</div>}
+      {loading && <div style={{ fontSize: 13, color: TK.faint }}>{t("loadingPipeline")}</div>}
 
       {!loading && pj && (
         <>
           {/* Inputs */}
           {inputDefs.length === 0 ? (
             <div style={{ fontSize: 12.5, color: TK.faint, marginBottom: 12 }}>
-              此 pipeline 沒有宣告輸入參數，直接執行。
+              {t("noInputs")}
             </div>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
@@ -158,7 +160,7 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
               border: `1px solid ${running ? TK.faint : TK.indigo}`,
               padding: "9px 18px", borderRadius: 9, cursor: running ? "default" : "pointer",
             }}>
-              {running ? "執行中…" : "▶ 執行試跑"}
+              {running ? t("running") : t("run")}
             </button>
             {summary && !error && (
               <VerdictChip summary={summary} onOpen={() => setPanelOpen(true)} />
@@ -203,6 +205,7 @@ function VerdictChip({ summary, onOpen }: {
   summary: NonNullable<ExecuteResponse["result_summary"]>;
   onOpen: () => void;
 }) {
+  const t = useTranslations("skills.tryRun");
   const triggered = summary.triggered;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -213,17 +216,17 @@ function VerdictChip({ summary, onOpen }: {
         border: `1px solid ${triggered ? "#fecaca" : "#c5e7d3"}`,
         padding: "5px 11px", borderRadius: 999,
       }}>
-        {triggered ? "● 條件成立（會發 alarm）" : "○ 條件不成立"}
+        {triggered ? t("triggered") : t("notTriggered")}
       </span>
       <span style={{ fontSize: 12, color: TK.faint }}>
-        {summary.evidence_rows} 筆證據 · {summary.charts.length} 張圖
+        {t("evidenceSummary", { rows: summary.evidence_rows, charts: summary.charts.length })}
       </span>
       <button onClick={onOpen} style={{
         font: `600 12px ${FONT.sans}`,
         color: TK.indigo, background: "#fff", border: `1px solid ${TK.indigo}`,
         padding: "5px 12px", borderRadius: 8, cursor: "pointer",
       }}>
-        看完整結果 →
+        {t("viewFullResult")}
       </button>
     </div>
   );

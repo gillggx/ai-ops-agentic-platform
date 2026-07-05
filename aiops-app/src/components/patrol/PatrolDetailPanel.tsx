@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { formatAlarmSkipped, type PatrolItem } from "./types";
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
  * did it see?".
  */
 export function PatrolDetailPanel({ item, onClose }: Props) {
+  const t = useTranslations("patrol");
   return (
     <div style={{
       width: 360,
@@ -37,7 +39,7 @@ export function PatrolDetailPanel({ item, onClose }: Props) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>
-          Skill Run #{item.skill_run_id}
+          {t("runTitle", { id: item.skill_run_id })}
         </h3>
         <button
           onClick={onClose}
@@ -53,44 +55,44 @@ export function PatrolDetailPanel({ item, onClose }: Props) {
         >×</button>
       </div>
 
-      <Field label="Skill">
+      <Field label={t("fieldSkill")}>
         <div style={{ fontWeight: 600 }}>{item.skill_title ?? "—"}</div>
         <div style={{ fontSize: 10, color: "#a0aec0", fontFamily: "ui-monospace, monospace" }}>
           {item.skill_slug ?? `id=${item.skill_id}`} · stage={item.skill_stage ?? "—"}
         </div>
       </Field>
 
-      <Field label="Trigger">
+      <Field label={t("fieldTrigger")}>
         <div>{item.triggered_by ?? "—"}</div>
         <div style={{ fontSize: 10, color: "#a0aec0" }}>{item.triggered_at}</div>
       </Field>
 
-      <Field label="Event">
+      <Field label={t("fieldEvent")}>
         <div>{item.event_type ?? "—"}</div>
         {item.event_time && (
           <div style={{ fontSize: 10, color: "#a0aec0" }}>event_time={item.event_time}</div>
         )}
       </Field>
 
-      <Field label="Payload">
+      <Field label={t("fieldPayload")}>
         <KV k="equipment_id" v={item.equipment_id} />
         <KV k="lot_id" v={item.lot_id} />
         <KV k="step_id" v={item.step_id} />
       </Field>
 
-      <Field label="Run">
+      <Field label={t("fieldRun")}>
         <KV k="status" v={item.status} />
         <KV k="duration_ms" v={item.duration_ms?.toString() ?? null} />
         <KV k="steps" v={`${item.steps_passed} / ${item.steps_total}`} />
       </Field>
 
-      <Field label="Alarm">
+      <Field label={t("fieldAlarm")}>
         {item.alarm_id ? (
           <Link
             href={`/alarms/${item.alarm_id}`}
             style={{ color: "#3182ce", textDecoration: "none", fontWeight: 600 }}
           >
-            → 開啟 Alarm #{item.alarm_id}
+            → {t("openAlarm", { id: item.alarm_id })}
           </Link>
         ) : (
           <div>
@@ -110,7 +112,7 @@ export function PatrolDetailPanel({ item, onClose }: Props) {
             href={`/skills?slug=${encodeURIComponent(item.skill_slug)}`}
             style={{ fontSize: 12, color: "#3182ce", textDecoration: "none" }}
           >
-            ↗ 在 Skill Library 開啟 {item.skill_slug}
+            ↗ {t("openInSkillLibrary", { slug: item.skill_slug })}
           </Link>
         </div>
       )}

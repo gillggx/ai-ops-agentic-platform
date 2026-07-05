@@ -1,0 +1,118 @@
+{
+  "loading": "Loading…",
+  "kpi": {
+    "activeAlarms": "Active alarms",
+    "openClusters": "Open clusters",
+    "highSeverity": "High severity",
+    "healthScore": "Health score",
+    "mttrMin": "MTTR (min)",
+    "asOf": "As of"
+  },
+  "pulse": {
+    "title": "AI Pulse",
+    "runsPerHour": "Auto-check <strong>{n}</strong> runs/hr",
+    "avgLatency": "Avg latency <strong>{v}</strong>",
+    "high": "High <strong>{n}</strong>",
+    "footer": "last hour · refreshed every 60s"
+  },
+  "sevShort": {
+    "critical": "CRIT",
+    "high": "HIGH",
+    "med": "MED",
+    "low": "LOW"
+  },
+  "sevLong": {
+    "critical": "CRITICAL",
+    "high": "HIGH",
+    "med": "MED",
+    "low": "LOW"
+  },
+  "list": {
+    "header": "Clusters · {shown}/{total}",
+    "totalAlarms": "{n} alarms",
+    "filterAll": "All",
+    "filterHigh": "High",
+    "filterMed": "Med",
+    "filterLow": "Low",
+    "empty": "No alarms match the filter"
+  },
+  "card": {
+    "alarms": "<strong>{n}</strong> alarms",
+    "lots": "<strong>{n}</strong> lots",
+    "causeTooltip": "cause"
+  },
+  "detail": {
+    "emptyPrompt": "Select a cluster on the left to begin",
+    "metaOpen": "<strong>{n}</strong> open",
+    "metaAcked": "<strong>{n}</strong> acknowledged",
+    "cause": "cause: {cause}",
+    "ackNoOpen": "No open alarms",
+    "ackTitle": "Acknowledge {n} alarms in one batch",
+    "ackBusy": "Working…",
+    "ackButton": "✓ Acknowledge · {n}",
+    "synthesisTitle": "AI diagnostic report | {id}",
+    "synthesisMeta": "{n} alarms · {sev} · {range}",
+    "synthesisLoading": "AI is synthesizing all alarms in this cluster…",
+    "synthesisEmpty": "(no diagnostic summary)",
+    "rowsHint": "{n} alarms · click any row for deep diagnosis",
+    "noAlarms": "(no alarms)",
+    "enterDeep": "Open deep diagnosis →",
+    "backToList": "← Back to alarm list",
+    "alarmRef": "alarm #{id}",
+    "fullscreenTitle": "Open fullscreen view (95%)",
+    "fullscreen": "Fullscreen",
+    "loadFailed": "Load failed: {error}",
+    "close": "Close",
+    "closeEsc": "Close (Esc)"
+  },
+  "alarmDetail": {
+    "briefingFailed": "Failed to load briefing",
+    "noData": "No data",
+    "totalRows": "({n} rows total)",
+    "drHeader": "DR {index}/{total}: {name}",
+    "ruleFallback": "Rule #{id}",
+    "badgeAlert": "ALERT",
+    "badgePass": "PASS",
+    "synthesisHeading": "AI Synthesis",
+    "integrating": "AI is consolidating the analysis...",
+    "noDiagnosis": "(no diagnostic result)",
+    "tabTrigger": "Trigger cause",
+    "tabEvidence": "Deep diagnosis ({n})",
+    "sectionRule": "Trigger condition (rule)",
+    "sectionWhy": "Why it triggered",
+    "conditionMetFallback": "Condition met",
+    "measured": "Metric: <b>{label}</b>",
+    "actualValue": "Measured = <b>{v}</b>",
+    "thresholdExpr": "{op} threshold <b>{v}</b>",
+    "scanned": "scanned {n} rows",
+    "conditionMet": "Condition met — alarm fired",
+    "conditionNotMet": "Condition not met",
+    "triggerEvidence": "Trigger evidence (from patrol pipeline)",
+    "noTriggerData": "(no trigger data)",
+    "autoCheckLabel": "Auto-Check {index}/{total}",
+    "noRunOutput": "(this run produced no detail output)",
+    "acDiagHeading": "Auto-Check diagnosis (pipeline run #{id})",
+    "skillDeepCheck": "Skill built-in deep check (per-step pipeline output)",
+    "noDeepResults": "(no deep diagnostic results)"
+  },
+  "dispo": {
+    "heading": "Disposition",
+    "ackLabel": "ack:",
+    "acked": "acknowledged",
+    "pending": "not acknowledged",
+    "dispositionLabel": "disposition:",
+    "ackButton": "Acknowledge",
+    "reasonPlaceholder": "Disposition reason (required for dispose)",
+    "reasonRequired": "Please enter a disposition reason",
+    "reasonLabel": "Reason:",
+    "release": "Release",
+    "hold": "Hold",
+    "rerun": "Re-run",
+    "scrap": "Scrap"
+  },
+  "boundary": {
+    "crashTitle": "{label} failed to load",
+    "crashBody": "Malformed diagnostic result{ref}; skipped this entry to protect the page.",
+    "logRef": " (log #{id})"
+  }
+}

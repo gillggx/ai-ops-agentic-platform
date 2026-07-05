@@ -30,6 +30,28 @@
     "plan": "規劃",
     "fin": "收尾"
   },
+  "events": {
+    "planProposed": "提出 {n} 個 phase",
+    "planConfirmed": "計畫確認 — 萃取驗收 contract",
+    "verdictPassDefault": "驗收通過",
+    "phaseDone": "{pid} 完成",
+    "phaseDoneFf": "{pid} 完成（ff: {block}）",
+    "phaseStart": "開始 {pid}",
+    "recall": "召回 {n} 筆 · {subject}",
+    "rejectDefault": "驗收未過{blk}",
+    "stuckEscalated": "r{round} 修正未果 — 升級 Repair",
+    "repairTriggered": "Repair 介入 — 三路對齊診斷（需求 × canvas × 拒因）",
+    "repairRetry": "修復成功 — 交回 Builder 續跑",
+    "repairHandover": "修復失敗 — handover 交棒"
+  },
+  "writeStatus": {
+    "active": "active · 立即生效",
+    "review_queue": "review queue · 不直接改 block_docs",
+    "draft": "draft · 待 Supervisor 轉正"
+  },
+  "evidence": {
+    "structuredReject": "結構化拒因：{json}"
+  },
   "stream": {
     "idle": "閒置",
     "idleHint": "build 開始後事件會逐條浮現 — 這裡顯示 agent 內部的每一步：決定、理由、依據",

@@ -17,6 +17,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import { BuilderProvider, useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import { listBlocks } from "@/lib/pipeline-builder/api";
 import { autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
@@ -41,6 +42,7 @@ export default function SkillCanvasView({ pipelineId, height = 460 }: Props) {
 }
 
 function Inner({ pipelineId, height }: Props) {
+  const t = useTranslations("skills.canvas");
   const { actions } = useBuilder();
   const [catalog, setCatalog] = useState<BlockSpec[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
@@ -105,10 +107,10 @@ function Inner({ pipelineId, height }: Props) {
   }, [pipelineId]);
 
   if (status === "empty") {
-    return <Placeholder text={pipelineId ? "Pipeline 沒有 nodes" : "尚未綁定 Pipeline"}
-                        hint={pipelineId ? undefined : "點下方「用 Pipeline Builder 編譯」建立"} />;
+    return <Placeholder text={pipelineId ? t("noNodes") : t("notBound")}
+                        hint={pipelineId ? undefined : t("notBoundHint")} />;
   }
-  if (status === "error") return <Placeholder text={`載入失敗：${error}`} variant="error" />;
+  if (status === "error") return <Placeholder text={t("loadFailed", { error: error ?? "" })} variant="error" />;
 
   return (
     <div
@@ -126,7 +128,7 @@ function Inner({ pipelineId, height }: Props) {
           position: "absolute", inset: 0, display: "flex", alignItems: "center",
           justifyContent: "center", color: "#94a3b8", fontSize: 13, background: "#FAFAFA",
         }}>
-          載入 pipeline…
+          {t("loadingPipeline")}
         </div>
       )}
     </div>

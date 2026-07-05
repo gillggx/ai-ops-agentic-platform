@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 
 const SS_KEY = "pb:skill_v2_embed_ctx";
 
@@ -78,6 +79,7 @@ export function bootstrapSkillV2CtxFromUrl(): SkillV2EmbedCtx | null {
 }
 
 export default function SkillV2EmbedBanner({ pipelineId }: { pipelineId?: number | null }) {
+  const t = useTranslations("skills.embedBanner");
   const [ctx, setCtx] = useState<SkillV2EmbedCtx | null>(() => readSkillV2Ctx());
   const [autoBoundAt, setAutoBoundAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -125,23 +127,23 @@ export default function SkillV2EmbedBanner({ pipelineId }: { pipelineId?: number
           font: "600 10.5px 'IBM Plex Mono', ui-monospace, monospace",
           letterSpacing: ".12em", textTransform: "uppercase",
           background: "#fff", padding: "3px 7px", borderRadius: 5,
-        }}>SKILL · v2</span>
+        }}>{t("chip")}</span>
         <span style={{ fontWeight: 600, color: "#1a1c1f" }}>{ctx.name}</span>
         <span style={{ color: "#9aa0a8", fontSize: 11 }}>
           {pipelineId
             ? (autoBoundAt
-                ? "已自動綁回 Skill ✓"
-                : "正在綁回 Skill…")
-            : "存 pipeline 後會自動綁回 Skill"}
+                ? t("bound")
+                : t("binding"))
+            : t("willBind")}
         </span>
-        {error && <span style={{ color: "#b42318", fontSize: 11 }}>bind error: {error}</span>}
+        {error && <span style={{ color: "#b42318", fontSize: 11 }}>{t("bindError", { error })}</span>}
       </div>
       <Link href={`/skills/${encodeURIComponent(ctx.skill_slug)}`} style={{
         color: "#8a5500", textDecoration: "none",
         font: "600 12px 'IBM Plex Sans', system-ui, sans-serif",
         background: "#fff", border: "1px solid #ecdcb6",
         padding: "5px 11px", borderRadius: 7,
-      }}>← back to Skill</Link>
+      }}>{t("backToSkill")}</Link>
     </div>
   );
 }

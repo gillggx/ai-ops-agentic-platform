@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 export interface PatrolFilterState {
   range: "1h" | "6h" | "24h";
   eventType: string | null;
@@ -20,51 +22,52 @@ interface Props {
  * narrow scope.
  */
 export function PatrolFilters({ value, onChange }: Props) {
+  const t = useTranslations("patrol");
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
       <FilterSelect
-        label="範圍"
+        label={t("filterRange")}
         value={value.range}
         onChange={(v) => onChange({ ...value, range: v as PatrolFilterState["range"] })}
         options={[
-          { value: "1h",  label: "最近 1 小時" },
-          { value: "6h",  label: "最近 6 小時" },
-          { value: "24h", label: "最近 24 小時" },
+          { value: "1h",  label: t("range1h") },
+          { value: "6h",  label: t("range6h") },
+          { value: "24h", label: t("range24h") },
         ]}
       />
       <FilterSelect
-        label="Event Type"
+        label={t("filterEventType")}
         value={value.eventType ?? "__any__"}
         onChange={(v) => onChange({ ...value, eventType: v === "__any__" ? null : v })}
         options={[
-          { value: "__any__", label: "全部" },
+          { value: "__any__", label: t("optionAll") },
           { value: "OOC", label: "OOC" },
           { value: "ALARM", label: "ALARM" },
         ]}
       />
       <FilterSelect
-        label="Stage"
+        label={t("filterStage")}
         value={value.skillStage ?? "__any__"}
         onChange={(v) => onChange({
           ...value,
           skillStage: v === "__any__" ? null : (v as PatrolFilterState["skillStage"]),
         })}
         options={[
-          { value: "__any__",  label: "全部" },
-          { value: "patrol",   label: "patrol（會 alarm）" },
-          { value: "diagnose", label: "diagnose（純診斷）" },
+          { value: "__any__",  label: t("optionAll") },
+          { value: "patrol",   label: t("stagePatrol") },
+          { value: "diagnose", label: t("stageDiagnose") },
         ]}
       />
       <FilterSelect
-        label="結果"
+        label={t("filterOutcome")}
         value={value.outcome}
         onChange={(v) => onChange({ ...value, outcome: v as PatrolFilterState["outcome"] })}
         options={[
-          { value: "any",            label: "全部" },
-          { value: "alarm_emitted",  label: "有 alarm" },
-          { value: "step_passed",    label: "step pass 但無 alarm" },
-          { value: "no_op",          label: "no-op（空 skill）" },
-          { value: "error",          label: "錯誤" },
+          { value: "any",            label: t("optionAll") },
+          { value: "alarm_emitted",  label: t("outcomeAlarm") },
+          { value: "step_passed",    label: t("outcomeStepPassed") },
+          { value: "no_op",          label: t("outcomeNoOp") },
+          { value: "error",          label: t("outcomeError") },
         ]}
       />
     </div>

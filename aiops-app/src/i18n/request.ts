@@ -11,6 +11,7 @@ import { SUPPORTED_LOCALES, DEFAULT_LOCALE, type AppLocale } from "./locales";
 
 const NAMESPACES = [
   "common", "buildFlow", "console", "agentPanel", "phaseTimeline",
+  "nav", "dashboard", "patrol", "skills", "alarms",
 ] as const;
 
 export default getRequestConfig(async () => {

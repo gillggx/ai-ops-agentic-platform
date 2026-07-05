@@ -9,6 +9,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
+import { useTranslations } from "next-intl";
 import {
   RenderMiddleware, ChartListRenderer,
   type SkillFindings, type OutputSchemaField, type ChartDSL,
@@ -123,6 +124,7 @@ const _BRIEFING_CACHE = new Map<string, { text: string; ts: number }>();
 const _BRIEFING_TTL_MS = 10 * 60 * 1000;
 
 export function useBriefing(scope: string, data?: string, cacheKey?: string) {
+  const t = useTranslations("alarms");
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -178,9 +180,9 @@ export function useBriefing(scope: string, data?: string, cacheKey?: string) {
       if (cacheKey && collected) {
         _BRIEFING_CACHE.set(fullKey, { text: collected, ts: Date.now() });
       }
-    } catch { setText("⚠️ 簡報載入失敗"); }
+    } catch { setText(t("alarmDetail.briefingFailed")); }
     finally { setLoading(false); }
-  }, [scope, data, cacheKey]);
+  }, [scope, data, cacheKey, t]);
 
   return { text, loading, refresh: fetch_ };
 }
@@ -199,9 +201,10 @@ function alarmRowHighlight(row: Record<string, unknown>): boolean {
 }
 
 export function DataViewTable({ dv }: { dv: DataView }) {
+  const t = useTranslations("alarms");
   const rows = dv.rows || [];
   if ((dv.columns || []).length === 0 && rows.length === 0) {
-    return <div style={{ fontSize: 12, color: "#a0aec0" }}>無資料</div>;
+    return <div style={{ fontSize: 12, color: "#a0aec0" }}>{t("alarmDetail.noData")}</div>;
   }
   return (
     <div style={{
@@ -216,7 +219,7 @@ export function DataViewTable({ dv }: { dv: DataView }) {
           {dv.title}
           {dv.total_rows > rows.length && (
             <span style={{ marginLeft: 8, fontSize: 10, color: "#999", fontWeight: 400 }}>
-              (共 {dv.total_rows} 列)
+              {t("alarmDetail.totalRows", { n: dv.total_rows })}
             </span>
           )}
         </div>
@@ -227,7 +230,7 @@ export function DataViewTable({ dv }: { dv: DataView }) {
         </div>
       )}
       <div style={{ height: 300, display: "flex", flexDirection: "column", padding: 10 }}>
-        <DataResultView result={rows} enableFullscreen={false} emptyText="無資料" rowHighlight={alarmRowHighlight} />
+        <DataResultView result={rows} enableFullscreen={false} emptyText={t("alarmDetail.noData")} rowHighlight={alarmRowHighlight} />
       </div>
     </div>
   );
@@ -236,6 +239,7 @@ export function DataViewTable({ dv }: { dv: DataView }) {
 // ── DR Accordion ─────────────────────────────────────────────
 
 function DRAccordion({ dr, index, total }: { dr: DiagnosticResult; index: number; total: number }) {
+  const t = useTranslations("alarms");
   const isAlert = dr.findings?.condition_met === true;
   const [open, setOpen] = useState(isAlert);
   return (
@@ -251,13 +255,13 @@ function DRAccordion({ dr, index, total }: { dr: DiagnosticResult; index: number
         borderLeft: isAlert ? "4px solid #e53e3e" : "4px solid #48bb78",
         borderBottom: open ? "1px solid #e0e0e0" : "none",
       }}>
-        <span>DR {index + 1}/{total}：{dr.skill_name || `Rule #${dr.skill_id}`}</span>
+        <span>{t("alarmDetail.drHeader", { index: index + 1, total, name: dr.skill_name || t("alarmDetail.ruleFallback", { id: dr.skill_id ?? "?" }) })}</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{
             padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 700, color: "#fff",
             background: isAlert ? "#f5222d" : "#52c41a",
           }}>
-            {isAlert ? "ALERT" : "PASS"}
+            {isAlert ? t("alarmDetail.badgeAlert") : t("alarmDetail.badgePass")}
           </span>
           <span style={{ color: "#999", fontSize: 12 }}>{open ? "▼" : "▶"}</span>
         </div>
@@ -301,6 +305,7 @@ function AlarmSection({ label, children }: { label: string; children: React.Reac
 }
 
 export function AlarmDetail({ alarm }: { alarm: Alarm }) {
+  const t = useTranslations("alarms");
   const drs = alarm.diagnostic_results ?? [];
   const triggerDvs = alarm.trigger_data_views ?? [];
   const diagnosticDvs = alarm.diagnostic_data_views ?? [];
@@ -350,7 +355,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
   return (
     <div>
       <h2 style={{ margin: "0 0 4px 0", fontSize: 17, color: "var(--text)" }}>
-        AI 診斷報告 | {alarm.equipment_id}
+        {t("detail.synthesisTitle", { id: alarm.equipment_id })}
       </h2>
       <p style={{ color: "var(--text-3)", marginBottom: 18, fontSize: 12 }}>
         {alarm.title} • {timeAgo(alarm.created_at)}
@@ -364,24 +369,24 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
         borderRadius: 8, padding: "16px 20px", marginBottom: 16,
       }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#595959", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-          ✨ AI 綜合診斷 (Synthesis)
+          ✨ {t("alarmDetail.synthesisHeading")}
         </div>
         <div style={{ fontSize: 14, lineHeight: 1.6, color: "#262626" }}>
           {synthesis.loading ? (
             <span style={{ color: "#a0aec0" }}>
               <span style={{ display: "inline-block", width: 8, height: 14, background: "#1890ff", animation: "blink 1s step-end infinite", marginRight: 6, verticalAlign: "text-bottom" }} />
-              AI 正在整合分析結果...
+              {t("alarmDetail.integrating")}
             </span>
           ) : synthesis.text ? (
             <ReactMarkdown>{synthesis.text}</ReactMarkdown>
           ) : (
-            <span style={{ color: "#a0aec0" }}>（無診斷結果）</span>
+            <span style={{ color: "#a0aec0" }}>{t("alarmDetail.noDiagnosis")}</span>
           )}
         </div>
       </div>
 
       <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", marginBottom: 16 }}>
-        {([["trigger", "🔴 觸發原因"], ["evidence", `📊 深度診斷 (${drs.length + (autoCheckRuns.length > 0 ? autoCheckRuns.length : (hasAnyAutoCheck ? 1 : 0))})`]] as const).map(([key, label]) => (
+        {([["trigger", `🔴 ${t("alarmDetail.tabTrigger")}`], ["evidence", `📊 ${t("alarmDetail.tabEvidence", { n: drs.length + (autoCheckRuns.length > 0 ? autoCheckRuns.length : (hasAnyAutoCheck ? 1 : 0)) })}`]] as const).map(([key, label]) => (
           <button key={key} onClick={() => setDetailTab(key as "trigger" | "evidence")} style={{
             padding: "10px 20px", fontSize: 13, fontWeight: detailTab === key ? 700 : 400,
             color: detailTab === key ? "#1890ff" : "#666", cursor: "pointer",
@@ -397,7 +402,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
         <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, padding: 20 }}>
           {/* 觸發條件（規則）— human rule from skill.nl */}
           {alarm.trigger_condition && (
-            <AlarmSection label="觸發條件（規則）">
+            <AlarmSection label={t("alarmDetail.sectionRule")}>
               <div style={{ fontSize: 13, color: "#2d3748", whiteSpace: "pre-line", lineHeight: 1.6 }}>
                 {alarm.trigger_condition}
               </div>
@@ -406,15 +411,15 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
 
           {/* 為什麼達標 — measured value vs threshold, from block_step_check */}
           {alarm.check_result && (
-            <AlarmSection label="為什麼達標">
+            <AlarmSection label={t("alarmDetail.sectionWhy")}>
               <div style={{ fontSize: 15, fontWeight: 700, color: "#dc2626", marginBottom: 8 }}>
-                {alarm.check_result.headline ?? alarm.check_result.note ?? "條件達標"}
+                {alarm.check_result.headline ?? alarm.check_result.note ?? t("alarmDetail.conditionMetFallback")}
               </div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#4a5568", fontFamily: "ui-monospace, monospace" }}>
-                {alarm.check_result.label && <span>量測：<b>{alarm.check_result.label}</b></span>}
-                <span>實測值 = <b style={{ color: "#1d4ed8" }}>{String(alarm.check_result.value ?? "—")}</b></span>
-                <span>{alarm.check_result.operator ?? ""} 門檻 <b>{String(alarm.check_result.threshold ?? "—")}</b></span>
-                {alarm.check_result.evidence_rows != null && <span style={{ color: "#94a3b8" }}>掃描 {alarm.check_result.evidence_rows} 筆</span>}
+                {alarm.check_result.label && <span>{t.rich("alarmDetail.measured", { label: alarm.check_result.label, b: chunks => <b>{chunks}</b> })}</span>}
+                <span>{t.rich("alarmDetail.actualValue", { v: String(alarm.check_result.value ?? "—"), b: chunks => <b style={{ color: "#1d4ed8" }}>{chunks}</b> })}</span>
+                <span>{t.rich("alarmDetail.thresholdExpr", { op: alarm.check_result.operator ?? "", v: String(alarm.check_result.threshold ?? "—"), b: chunks => <b>{chunks}</b> })}</span>
+                {alarm.check_result.evidence_rows != null && <span style={{ color: "#94a3b8" }}>{t("alarmDetail.scanned", { n: alarm.check_result.evidence_rows })}</span>}
               </div>
             </AlarmSection>
           )}
@@ -428,7 +433,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
             fontSize: 13,
           }}>
             <div style={{ fontWeight: 700, marginBottom: 4, color: triggered ? "#dc2626" : "#16a34a" }}>
-              {triggered ? "🔴 條件達成 — 已觸發警報" : "🟢 條件未達成"}
+              {triggered ? `🔴 ${t("alarmDetail.conditionMet")}` : `🟢 ${t("alarmDetail.conditionNotMet")}`}
             </div>
             {/* Headline already shown in 為什麼達標 above; only show raw summary when no structured check exists. */}
             {!alarm.check_result && triggerSummaryText && (
@@ -442,7 +447,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
                 fontSize: 11, fontWeight: 700, color: "#595959",
                 textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8,
               }}>
-                觸發證據（patrol pipeline 回傳）
+                {t("alarmDetail.triggerEvidence")}
               </div>
               {triggerDvs.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
             </div>
@@ -457,7 +462,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
           )}
 
           {triggerDvs.length === 0 && !alarm.findings && (
-            <div style={{ color: "#a0aec0", fontSize: 13 }}>（無觸發資料）</div>
+            <div style={{ color: "#a0aec0", fontSize: 13 }}>{t("alarmDetail.noTriggerData")}</div>
           )}
         </div>
       )}
@@ -471,7 +476,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
               return (
                 <DRErrorBoundary
                   key={run.run_id ?? `ac-${idx}`}
-                  label={`Auto-Check ${idx + 1}/${autoCheckRuns.length}`}
+                  label={t("alarmDetail.autoCheckLabel", { index: idx + 1, total: autoCheckRuns.length })}
                   logId={run.run_id ?? null}
                 >
                   <div style={{
@@ -513,7 +518,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
                       </div>
                     )}
                     {dvs.length === 0 && charts.length === 0 && !run.alert && (
-                      <div style={{ fontSize: 12, color: "#94a3b8" }}>（這次跑沒有產出明細）</div>
+                      <div style={{ fontSize: 12, color: "#94a3b8" }}>{t("alarmDetail.noRunOutput")}</div>
                     )}
                   </div>
                 </DRErrorBoundary>
@@ -530,8 +535,8 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
                   textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8,
                 }}>
                   {alarm.diagnostic_log_id
-                    ? `Auto-Check 診斷 (pipeline run #${alarm.diagnostic_log_id})`
-                    : "Skill 內建深度檢查 (per-step pipeline 回傳)"}
+                    ? t("alarmDetail.acDiagHeading", { id: alarm.diagnostic_log_id })
+                    : t("alarmDetail.skillDeepCheck")}
                 </div>
                 {diagnosticAlert?.title && (
                   <div style={{
@@ -559,7 +564,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
           {drs.length > 0 && drs.map((dr, idx) => (
             <DRErrorBoundary
               key={dr.log_id ?? `dr-${idx}`}
-              label={`DR ${idx + 1}/${drs.length}：${dr.skill_name || `Rule #${dr.skill_id ?? "?"}`}`}
+              label={t("alarmDetail.drHeader", { index: idx + 1, total: drs.length, name: dr.skill_name || t("alarmDetail.ruleFallback", { id: dr.skill_id ?? "?" }) })}
               logId={dr.log_id ?? null}
             >
               <DRAccordion dr={dr} index={idx} total={drs.length} />
@@ -567,7 +572,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
           ))}
 
           {drs.length === 0 && !hasAnyAutoCheck && (
-            <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>（無深度診斷結果）</div>
+            <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>{t("alarmDetail.noDeepResults")}</div>
           )}
         </div>
       )}
@@ -582,14 +587,15 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
 // Local state mirrors the optimistic update so the bar reflects the
 // new status without a full reload — the parent page can also re-fetch.
 
-const _DISPOSITIONS: Array<{ key: string; label: string; tone: string }> = [
-  { key: "release", label: "Release",  tone: "#16a34a" },
-  { key: "hold",    label: "Hold",     tone: "#d97706" },
-  { key: "rerun",   label: "Re-run",   tone: "#2563eb" },
-  { key: "scrap",   label: "Scrap",    tone: "#dc2626" },
+const _DISPOSITIONS: Array<{ key: string; labelKey: string; tone: string }> = [
+  { key: "release", labelKey: "dispo.release", tone: "#16a34a" },
+  { key: "hold",    labelKey: "dispo.hold",    tone: "#d97706" },
+  { key: "rerun",   labelKey: "dispo.rerun",   tone: "#2563eb" },
+  { key: "scrap",   labelKey: "dispo.scrap",   tone: "#dc2626" },
 ];
 
 function DispositionBar({ alarm }: { alarm: Alarm }) {
+  const t = useTranslations("alarms");
   const [acked, setAcked]           = useState<boolean>(!!alarm.acked_at);
   const [disposition, setDisp]      = useState<string | null>(alarm.disposition ?? null);
   const [reason, setReason]         = useState<string>(alarm.disposition_reason ?? "");
@@ -607,7 +613,7 @@ function DispositionBar({ alarm }: { alarm: Alarm }) {
   }, [alarm.id]);
 
   const dispose = useCallback(async (key: string) => {
-    if (!reason.trim()) { setError("請填寫處置原因"); return; }
+    if (!reason.trim()) { setError(t("dispo.reasonRequired")); return; }
     setBusy(key); setError(null);
     try {
       const r = await fetch(`/api/admin/alarms/${alarm.id}/dispose`, {
@@ -620,7 +626,7 @@ function DispositionBar({ alarm }: { alarm: Alarm }) {
       setAcked(true);
     } catch (e) { setError(String(e)); }
     finally { setBusy(null); }
-  }, [alarm.id, reason]);
+  }, [alarm.id, reason, t]);
 
   return (
     <div style={{
@@ -631,17 +637,17 @@ function DispositionBar({ alarm }: { alarm: Alarm }) {
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: "#595959" }}>
-          🛠 處置 (Disposition)
+          🛠 {t("dispo.heading")}
         </span>
         <span style={{ fontSize: 11, color: "#a0aec0" }}>
-          ack: {acked ? "✅ acknowledged" : "⏳ 未確認"}
-          {disposition && <> ・ disposition: <strong style={{ color: "#1f2937" }}>{disposition}</strong></>}
+          {t("dispo.ackLabel")} {acked ? t("dispo.acked") : t("dispo.pending")}
+          {disposition && <> ・ {t("dispo.dispositionLabel")} <strong style={{ color: "#1f2937" }}>{disposition}</strong></>}
         </span>
         {!acked && (
           <button onClick={ack} disabled={busy !== null}
             style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 12, fontWeight: 600,
               background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-            {busy === "ack" ? "..." : "Acknowledge"}
+            {busy === "ack" ? "..." : t("dispo.ackButton")}
           </button>
         )}
       </div>
@@ -649,7 +655,7 @@ function DispositionBar({ alarm }: { alarm: Alarm }) {
       {!disposition && (
         <>
           <input
-            type="text" placeholder="處置原因 (required for dispose)"
+            type="text" placeholder={t("dispo.reasonPlaceholder")}
             value={reason} onChange={e => setReason(e.target.value)}
             style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 4 }}
           />
@@ -659,7 +665,7 @@ function DispositionBar({ alarm }: { alarm: Alarm }) {
                 onClick={() => dispose(d.key)} disabled={busy !== null}
                 style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600,
                   background: d.tone, color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-                {busy === d.key ? "..." : d.label}
+                {busy === d.key ? "..." : t(d.labelKey)}
               </button>
             ))}
           </div>
@@ -668,7 +674,7 @@ function DispositionBar({ alarm }: { alarm: Alarm }) {
 
       {disposition && reason && (
         <div style={{ fontSize: 11, color: "#4a5568" }}>
-          原因: <span style={{ color: "#1f2937" }}>{reason}</span>
+          {t("dispo.reasonLabel")} <span style={{ color: "#1f2937" }}>{reason}</span>
         </div>
       )}
 

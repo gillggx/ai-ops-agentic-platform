@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { PatrolFunnelSummary } from "@/components/patrol/PatrolFunnelSummary";
 import { PatrolFilters, type PatrolFilterState } from "@/components/patrol/PatrolFilters";
 import { PatrolList } from "@/components/patrol/PatrolList";
@@ -29,6 +30,7 @@ interface PatrolActivityResponse {
 }
 
 export default function PatrolActivityPage() {
+  const t = useTranslations("patrol");
   const [funnel, setFunnel] = useState<PatrolFunnel | null>(null);
   const [items, setItems] = useState<PatrolItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,13 +102,13 @@ export default function PatrolActivityPage() {
     <div style={{ padding: "20px 24px", minHeight: "100vh", background: "#f7f8fc" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: "#1a202c" }}>巡檢動態 / Patrol Activity</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: "#1a202c" }}>{t("title")}</h1>
           <p style={{ fontSize: 12, color: "#718096", margin: "4px 0 0" }}>
-            事件 → Skill 執行 → Alarm — 完整漏斗、含 AlarmEmitter 跳過原因
+            {t("subtitle")}
           </p>
         </div>
-        {loading && <span style={{ fontSize: 11, color: "#a0aec0" }}>載入中...</span>}
-        {error && <span style={{ fontSize: 11, color: "#e53e3e" }}>error: {error}</span>}
+        {loading && <span style={{ fontSize: 11, color: "#a0aec0" }}>{t("loading")}</span>}
+        {error && <span style={{ fontSize: 11, color: "#e53e3e" }}>{t("errorLabel", { message: error })}</span>}
       </div>
 
       <PatrolFunnelSummary funnel={funnel} />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { ClusterCard } from "./ClusterCard";
 import type { Cluster, Severity } from "./types";
 
@@ -18,6 +19,7 @@ export function ClusterListPanel({
   onSelect: (id: string) => void;
   loading: boolean;
 }) {
+  const t = useTranslations("alarms");
   const filtered = useMemo(() => clusters.filter(c => {
     if (sevFilter !== "all") {
       const matchSev: Record<SevFilter, Severity[]> = {
@@ -44,15 +46,15 @@ export function ClusterListPanel({
   return (
     <aside className="alarm-center__list" aria-label="Cluster list" data-tour-id="alarm-list">
       <div className="alarm-center__list-header">
-        <span>Clusters · {filtered.length}/{clusters.length}</span>
-        <span style={{ color: "var(--text-4)" }}>{totalAlarms} alarms</span>
+        <span>{t("list.header", { shown: filtered.length, total: clusters.length })}</span>
+        <span style={{ color: "var(--text-4)" }}>{t("list.totalAlarms", { n: totalAlarms })}</span>
       </div>
       <div className="alarm-center__list-filters">
         {([
-          ["all", "全部", sevCounts.all],
-          ["high", "High", sevCounts.high],
-          ["med", "Med", sevCounts.med],
-          ["low", "Low", sevCounts.low],
+          ["all", t("list.filterAll"), sevCounts.all],
+          ["high", t("list.filterHigh"), sevCounts.high],
+          ["med", t("list.filterMed"), sevCounts.med],
+          ["low", t("list.filterLow"), sevCounts.low],
         ] as const).map(([key, label, n]) => (
           <button key={key} className={"chip" + (sevFilter === key ? " chip--active" : "")} onClick={() => setSevFilter(key as SevFilter)}>
             {label} <span className="chip__count">{n}</span>
@@ -61,13 +63,13 @@ export function ClusterListPanel({
       </div>
       <div className="alarm-center__list-body">
         {loading && filtered.length === 0 && (
-          <div className="alarm-center__empty">載入中…</div>
+          <div className="alarm-center__empty">{t("loading")}</div>
         )}
         {!loading && filtered.length === 0 && (
           <div className="alarm-center__empty">
             <div>
               <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-              <div>沒有符合條件的告警</div>
+              <div>{t("list.empty")}</div>
             </div>
           </div>
         )}

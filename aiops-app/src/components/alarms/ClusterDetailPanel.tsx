@@ -2,26 +2,37 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { useTranslations } from "next-intl";
 import { AlarmDetail, useBriefing, type Alarm } from "./AlarmDetailLegacy";
 import type { Cluster } from "./types";
+import { activeLocale } from "@/i18n/format";
 
-const SEV_LABEL: Record<string, string> = {
-  critical: "CRITICAL", high: "HIGH", med: "MED", low: "LOW",
-};
+const KNOWN_SEVERITIES = ["critical", "high", "med", "low"] as const;
+
+function useSevLabel() {
+  const t = useTranslations("alarms");
+  return (severity: string): string =>
+    (KNOWN_SEVERITIES as readonly string[]).includes(severity)
+      ? t(`sevLong.${severity}`)
+      : severity;
+}
 
 function fmtDateRange(first: string | null, last: string | null): string {
   if (!first || !last) return "—";
   const f = new Date(first), l = new Date(last);
   const sameDay = f.toDateString() === l.toDateString();
-  const t = (d: Date) => d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
-  if (sameDay) return `${f.toLocaleDateString("zh-TW")} ${t(f)} → ${t(l)}`;
-  return `${f.toLocaleDateString("zh-TW")} ${t(f)} → ${l.toLocaleDateString("zh-TW")} ${t(l)}`;
+  const t = (d: Date) => d.toLocaleTimeString(activeLocale(), { hour: "2-digit", minute: "2-digit" });
+  if (sameDay) return `${f.toLocaleDateString(activeLocale())} ${t(f)} → ${t(l)}`;
+  return `${f.toLocaleDateString(activeLocale())} ${t(f)} → ${l.toLocaleDateString(activeLocale())} ${t(l)}`;
 }
 
 export function ClusterDetailPanel({ cluster, onAcked }: {
   cluster: Cluster | null;
   onAcked: (count: number) => void;
 }) {
+  const t = useTranslations("alarms");
+  const sevLabel = useSevLabel();
+  const strong = (chunks: React.ReactNode) => <strong>{chunks}</strong>;
   // Cluster-level briefing.
   const briefingData = useMemo(() => cluster ? JSON.stringify({
     total: cluster.count,
@@ -99,7 +110,7 @@ export function ClusterDetailPanel({ cluster, onAcked }: {
         <div className="alarm-center__empty">
           <div>
             <div style={{ fontSize: 32, marginBottom: 8 }}>👈</div>
-            <div>左側選擇 cluster 開始</div>
+            <div>{t("detail.emptyPrompt")}</div>
           </div>
         </div>
       </main>
@@ -114,25 +125,25 @@ export function ClusterDetailPanel({ cluster, onAcked }: {
         <h1 className="cluster-detail__title">
           {cluster.equipment_id}{" "}
           <span style={{ color: "var(--text-3)", fontWeight: 400, fontSize: 13 }}>
-            ({SEV_LABEL[cluster.severity] ?? cluster.severity})
+            ({sevLabel(cluster.severity)})
           </span>
         </h1>
         <div className="cluster-detail__meta">
-          <span><strong>{cluster.count}</strong> alarms</span>
-          <span><strong>{cluster.open_count}</strong> open</span>
-          {cluster.ack_count > 0 && <span><strong>{cluster.ack_count}</strong> acknowledged</span>}
-          {cluster.affected_lots > 0 && <span><strong>{cluster.affected_lots}</strong> lots</span>}
+          <span>{t.rich("card.alarms", { n: cluster.count, strong })}</span>
+          <span>{t.rich("detail.metaOpen", { n: cluster.open_count, strong })}</span>
+          {cluster.ack_count > 0 && <span>{t.rich("detail.metaAcked", { n: cluster.ack_count, strong })}</span>}
+          {cluster.affected_lots > 0 && <span>{t.rich("card.lots", { n: cluster.affected_lots, strong })}</span>}
           <span style={{ flexBasis: "100%" }} />
           <span>{fmtDateRange(cluster.first_at, cluster.last_at)}</span>
-          {cluster.cause && <span>cause: {cluster.cause}</span>}
+          {cluster.cause && <span>{t("detail.cause", { cause: cluster.cause })}</span>}
         </div>
         <button
           className="cluster-detail__action"
           onClick={ack}
           disabled={acking || cluster.open_count === 0}
-          title={cluster.open_count === 0 ? "沒有 open alarm" : `批次 acknowledge ${cluster.open_count} 個告警`}
+          title={cluster.open_count === 0 ? t("detail.ackNoOpen") : t("detail.ackTitle", { n: cluster.open_count })}
         >
-          {acking ? "處理中…" : `✓ Acknowledge · ${cluster.open_count}`}
+          {acking ? t("detail.ackBusy") : t("detail.ackButton", { n: cluster.open_count })}
         </button>
         {ackError && (
           <div style={{ position: "absolute", top: 48, right: 16, color: "var(--high)", fontSize: 11 }}>
@@ -172,33 +183,39 @@ function ListView({ cluster, synthesis, onPick }: {
   synthesis: ReturnType<typeof useBriefing>;
   onPick: (id: number) => void;
 }) {
+  const t = useTranslations("alarms");
+  const sevLabel = useSevLabel();
   return (
     <>
       <section className="cluster-synthesis" data-tour-id="alarm-dr">
-        <div className="cluster-synthesis__title">✨ AI 診斷報告 | {cluster.equipment_id}</div>
+        <div className="cluster-synthesis__title">✨ {t("detail.synthesisTitle", { id: cluster.equipment_id })}</div>
         <div className="cluster-synthesis__meta">
-          {cluster.count} alarms · {SEV_LABEL[cluster.severity] ?? cluster.severity} · {fmtDateRange(cluster.first_at, cluster.last_at)}
+          {t("detail.synthesisMeta", {
+            n: cluster.count,
+            sev: sevLabel(cluster.severity),
+            range: fmtDateRange(cluster.first_at, cluster.last_at),
+          })}
         </div>
         <div className="cluster-synthesis__body">
           {synthesis.loading ? (
             <span className="cluster-synthesis__loading">
               <span style={{ display: "inline-block", width: 8, height: 14, background: "var(--accent)", animation: "blink 1s step-end infinite", marginRight: 6, verticalAlign: "text-bottom" }} />
-              AI 正在綜合此 cluster 的所有告警…
+              {t("detail.synthesisLoading")}
             </span>
           ) : synthesis.text ? (
             <ReactMarkdown>{synthesis.text}</ReactMarkdown>
           ) : (
-            <span className="cluster-synthesis__loading">（無診斷摘要）</span>
+            <span className="cluster-synthesis__loading">{t("detail.synthesisEmpty")}</span>
           )}
         </div>
       </section>
 
       <section>
         <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, fontFamily: "var(--font-mono)" }}>
-          {cluster.count} alarms · 點任一筆進入深度診斷
+          {t("detail.rowsHint", { n: cluster.count })}
         </div>
         {cluster.alarm_ids.length === 0 && (
-          <div style={{ padding: 24, color: "var(--text-3)", textAlign: "center", fontSize: 13 }}>（無告警）</div>
+          <div style={{ padding: 24, color: "var(--text-3)", textAlign: "center", fontSize: 13 }}>{t("detail.noAlarms")}</div>
         )}
         {cluster.alarm_ids.map(id => (
           <button
@@ -210,9 +227,9 @@ function ListView({ cluster, synthesis, onPick }: {
           >
             <div className="alarm-row__head">
               <span style={{ color: "var(--text)", fontWeight: 600 }}>#{id}</span>
-              <span>{SEV_LABEL[cluster.severity] ?? cluster.severity}</span>
+              <span>{sevLabel(cluster.severity)}</span>
               <span>{cluster.equipment_id}</span>
-              <span className="alarm-row__link">進入深度診斷 →</span>
+              <span className="alarm-row__link">{t("detail.enterDeep")}</span>
             </div>
             <div className="alarm-row__title">{cluster.title}</div>
           </button>
@@ -230,6 +247,7 @@ function DetailView({ alarm, loading, error, alarmId, onBack, onExpand }: {
   onBack: () => void;
   onExpand: () => void;
 }) {
+  const t = useTranslations("alarms");
   return (
     <section style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 18 }}>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 12, gap: 10 }}>
@@ -242,10 +260,10 @@ function DetailView({ alarm, loading, error, alarmId, onBack, onExpand }: {
             fontFamily: "var(--font-mono)",
           }}
         >
-          ← 回 alarm 列表
+          {t("detail.backToList")}
         </button>
         <span style={{ fontSize: 12, color: "var(--text-3)", fontFamily: "var(--font-mono)" }}>
-          alarm #{alarmId}
+          {t("detail.alarmRef", { id: alarmId ?? "" })}
         </span>
         <button
           type="button"
@@ -257,19 +275,20 @@ function DetailView({ alarm, loading, error, alarmId, onBack, onExpand }: {
             padding: "6px 12px", fontSize: 12, color: "var(--text-2)", cursor: alarm ? "pointer" : "not-allowed",
             fontFamily: "var(--font-mono)", opacity: alarm ? 1 : 0.4,
           }}
-          title="開啟全螢幕檢視（95%）"
+          title={t("detail.fullscreenTitle")}
         >
-          ⛶ 全螢幕
+          ⛶ {t("detail.fullscreen")}
         </button>
       </div>
-      {loading && <div style={{ color: "var(--text-3)", fontSize: 13 }}>載入中…</div>}
-      {error && <div style={{ color: "var(--high)", fontSize: 13 }}>載入失敗: {error}</div>}
+      {loading && <div style={{ color: "var(--text-3)", fontSize: 13 }}>{t("loading")}</div>}
+      {error && <div style={{ color: "var(--high)", fontSize: 13 }}>{t("detail.loadFailed", { error })}</div>}
       {alarm && <AlarmDetail alarm={alarm} />}
     </section>
   );
 }
 
 function ExpandedModal({ alarm, onClose }: { alarm: Alarm; onClose: () => void }) {
+  const t = useTranslations("alarms");
   // Close on Escape.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -289,8 +308,8 @@ function ExpandedModal({ alarm, onClose }: { alarm: Alarm; onClose: () => void }
           type="button"
           className="alarm-detail-modal__close"
           onClick={onClose}
-          aria-label="關閉"
-          title="關閉 (Esc)"
+          aria-label={t("detail.close")}
+          title={t("detail.closeEsc")}
         >
           ✕
         </button>

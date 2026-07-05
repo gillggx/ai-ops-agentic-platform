@@ -1,0 +1,118 @@
+{
+  "loading": "読み込み中…",
+  "kpi": {
+    "activeAlarms": "有効アラーム",
+    "openClusters": "未解決クラスター",
+    "highSeverity": "高深刻度",
+    "healthScore": "ヘルススコア",
+    "mttrMin": "MTTR (分)",
+    "asOf": "更新時刻"
+  },
+  "pulse": {
+    "title": "AI 稼働状況",
+    "runsPerHour": "Auto-check <strong>{n}</strong> runs/hr",
+    "avgLatency": "Avg latency <strong>{v}</strong>",
+    "high": "High <strong>{n}</strong>",
+    "footer": "直近 1 時間 · 60 秒ごとに更新"
+  },
+  "sevShort": {
+    "critical": "CRIT",
+    "high": "HIGH",
+    "med": "MED",
+    "low": "LOW"
+  },
+  "sevLong": {
+    "critical": "CRITICAL",
+    "high": "HIGH",
+    "med": "MED",
+    "low": "LOW"
+  },
+  "list": {
+    "header": "Clusters · {shown}/{total}",
+    "totalAlarms": "{n} alarms",
+    "filterAll": "すべて",
+    "filterHigh": "High",
+    "filterMed": "Med",
+    "filterLow": "Low",
+    "empty": "条件に一致するアラームはありません"
+  },
+  "card": {
+    "alarms": "<strong>{n}</strong> alarms",
+    "lots": "<strong>{n}</strong> lots",
+    "causeTooltip": "原因"
+  },
+  "detail": {
+    "emptyPrompt": "左側でクラスターを選択してください",
+    "metaOpen": "<strong>{n}</strong> open",
+    "metaAcked": "<strong>{n}</strong> acknowledged",
+    "cause": "原因: {cause}",
+    "ackNoOpen": "オープンのアラームはありません",
+    "ackTitle": "{n} 件のアラームを一括で acknowledge します",
+    "ackBusy": "処理中…",
+    "ackButton": "✓ Acknowledge · {n}",
+    "synthesisTitle": "AI 診断レポート | {id}",
+    "synthesisMeta": "{n} alarms · {sev} · {range}",
+    "synthesisLoading": "AI がこのクラスターのすべてのアラームを分析しています…",
+    "synthesisEmpty": "（診断サマリーはありません）",
+    "rowsHint": "アラーム {n} 件 · 行をクリックすると詳細診断に進みます",
+    "noAlarms": "（アラームはありません）",
+    "enterDeep": "詳細診断へ →",
+    "backToList": "← アラーム一覧に戻る",
+    "alarmRef": "alarm #{id}",
+    "fullscreenTitle": "全画面表示を開きます（95%）",
+    "fullscreen": "全画面",
+    "loadFailed": "読み込みに失敗しました: {error}",
+    "close": "閉じる",
+    "closeEsc": "閉じる (Esc)"
+  },
+  "alarmDetail": {
+    "briefingFailed": "ブリーフィングの読み込みに失敗しました",
+    "noData": "データなし",
+    "totalRows": "（全 {n} 行）",
+    "drHeader": "DR {index}/{total}：{name}",
+    "ruleFallback": "Rule #{id}",
+    "badgeAlert": "ALERT",
+    "badgePass": "PASS",
+    "synthesisHeading": "AI 総合診断 (Synthesis)",
+    "integrating": "AI が分析結果を統合しています...",
+    "noDiagnosis": "（診断結果はありません）",
+    "tabTrigger": "トリガー原因",
+    "tabEvidence": "詳細診断 ({n})",
+    "sectionRule": "トリガー条件（ルール）",
+    "sectionWhy": "しきい値超過の理由",
+    "conditionMetFallback": "条件を満たしました",
+    "measured": "測定：<b>{label}</b>",
+    "actualValue": "実測値 = <b>{v}</b>",
+    "thresholdExpr": "{op} しきい値 <b>{v}</b>",
+    "scanned": "{n} 件をスキャン",
+    "conditionMet": "条件成立 — アラームを発報しました",
+    "conditionNotMet": "条件未成立",
+    "triggerEvidence": "トリガー証跡（patrol pipeline の結果）",
+    "noTriggerData": "（トリガーデータはありません）",
+    "autoCheckLabel": "Auto-Check {index}/{total}",
+    "noRunOutput": "（この実行では詳細データが生成されませんでした）",
+    "acDiagHeading": "Auto-Check 診断 (pipeline run #{id})",
+    "skillDeepCheck": "Skill 内蔵の詳細チェック (per-step pipeline の結果)",
+    "noDeepResults": "（詳細診断の結果はありません）"
+  },
+  "dispo": {
+    "heading": "処置 (Disposition)",
+    "ackLabel": "ack:",
+    "acked": "確認済み",
+    "pending": "未確認",
+    "dispositionLabel": "disposition:",
+    "ackButton": "Acknowledge",
+    "reasonPlaceholder": "処置理由（dispose に必須）",
+    "reasonRequired": "処置理由を入力してください",
+    "reasonLabel": "理由:",
+    "release": "Release",
+    "hold": "Hold",
+    "rerun": "Re-run",
+    "scrap": "Scrap"
+  },
+  "boundary": {
+    "crashTitle": "{label} を読み込めませんでした",
+    "crashBody": "診断結果の形式が不正なため{ref}、このエントリをスキップしてページを保護しました。",
+    "logRef": "（log #{id}）"
+  }
+}

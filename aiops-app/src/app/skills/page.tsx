@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import {
   parseTrigger, roleLabel, summarizeTrigger, type Role, type Skill,
@@ -18,6 +19,7 @@ import {
 type Filter = "all" | "patrol" | "datacheck" | "tool";
 
 export default function SkillsLibraryPage() {
+  const t = useTranslations("skills.library");
   const router = useRouter();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export default function SkillsLibraryPage() {
   useEffect(() => { reload(); }, []);
 
   const handleDelete = async (skill: Skill) => {
-    if (!confirm(`確認刪除 Skill「${skill.name}」？此動作無法復原。`)) return;
+    if (!confirm(t("confirmDelete", { name: skill.name }))) return;
     setDeletingSlug(skill.slug);
     try {
       const res = await fetch(`/api/skills-v2/${encodeURIComponent(skill.slug)}`, { method: "DELETE" });
@@ -44,7 +46,7 @@ export default function SkillsLibraryPage() {
       // optimistic remove
       setSkills(prev => prev.filter(s => s.slug !== skill.slug));
     } catch (e) {
-      alert(`刪除失敗：${e instanceof Error ? e.message : e}`);
+      alert(t("deleteFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setDeletingSlug(null);
     }
@@ -72,11 +74,11 @@ export default function SkillsLibraryPage() {
               textTransform: "uppercase",
               marginBottom: 6,
             }}>
-              SKILLS LIBRARY
+              {t("eyebrow")}
             </div>
-            <h1 style={{ font: `700 28px ${FONT.sans}`, color: TK.ink, margin: 0 }}>Skills</h1>
+            <h1 style={{ font: `700 28px ${FONT.sans}`, color: TK.ink, margin: 0 }}>{t("title")}</h1>
             <p style={{ fontSize: 13, color: TK.body, margin: "6px 0 0", maxWidth: 720 }}>
-              用自然語言描述、編譯成 data pipeline 的可重用工具。Skill 建好後可選擇自動化成 Auto Patrol 或 Data Check，或先當純工具用。
+              {t("intro")}
             </p>
           </div>
           <button
@@ -87,23 +89,23 @@ export default function SkillsLibraryPage() {
               padding: "10px 16px", borderRadius: 9, cursor: "pointer",
             }}
           >
-            + 新增 Skill
+            {t("newSkill")}
           </button>
         </div>
 
         {/* Filter chips */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          <FilterChip label="全部"        n={counts.all}       active={filter === "all"}       onClick={() => setFilter("all")} />
-          <FilterChip label="Auto Patrol" n={counts.patrol}    active={filter === "patrol"}    onClick={() => setFilter("patrol")} role="patrol" />
-          <FilterChip label="Data Check"  n={counts.datacheck} active={filter === "datacheck"} onClick={() => setFilter("datacheck")} role="datacheck" />
-          <FilterChip label="工具"        n={counts.tool}      active={filter === "tool"}      onClick={() => setFilter("tool")} role="tool" />
+          <FilterChip label={t("filterAll")}       n={counts.all}       active={filter === "all"}       onClick={() => setFilter("all")} />
+          <FilterChip label={t("filterPatrol")}    n={counts.patrol}    active={filter === "patrol"}    onClick={() => setFilter("patrol")} role="patrol" />
+          <FilterChip label={t("filterDatacheck")} n={counts.datacheck} active={filter === "datacheck"} onClick={() => setFilter("datacheck")} role="datacheck" />
+          <FilterChip label={t("filterTool")}      n={counts.tool}      active={filter === "tool"}      onClick={() => setFilter("tool")} role="tool" />
         </div>
 
         {/* List */}
         {loadError && (
           <div style={{ background: "#fef3f2", border: "1px solid #fecaca", color: "#b42318",
                          padding: 14, borderRadius: 8, fontSize: 13, marginBottom: 14 }}>
-            載入失敗：{loadError}
+            {t("loadFailed", { error: loadError })}
           </div>
         )}
 
@@ -121,7 +123,7 @@ export default function SkillsLibraryPage() {
               background: "#fff", border: `1px solid ${TK.divider}`, borderRadius: 10,
               padding: 32, textAlign: "center", color: TK.faint, fontSize: 13,
             }}>
-              這個分類下沒有 skill。
+              {t("emptyCategory")}
             </div>
           )}
         </div>
@@ -133,6 +135,7 @@ export default function SkillsLibraryPage() {
 function DeleteButton({
   onDelete, deleting, skillName,
 }: { onDelete: () => void; deleting: boolean; skillName: string }) {
+  const t = useTranslations("skills.library");
   const [hover, setHover] = useState(false);
   return (
     <button
@@ -140,8 +143,8 @@ function DeleteButton({
       disabled={deleting}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title="刪除 Skill"
-      aria-label={`刪除 ${skillName}`}
+      title={t("deleteTitle")}
+      aria-label={t("deleteAria", { name: skillName })}
       style={{
         marginLeft: 4,
         width: 32, height: 32,
@@ -202,6 +205,7 @@ function FilterChip({
 }
 
 function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () => void; deleting: boolean }) {
+  const t = useTranslations("skills.library");
   const c = ROLE_COLORS[skill.role];
   const trigger = parseTrigger(skill.trigger_config);
   const isActive = skill.status === "active";
@@ -213,7 +217,7 @@ function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () =
     }}>
       {/* status dot — draft = hollow gray, active = filled role color */}
       <span
-        title={isActive ? "已啟用" : "草稿（未啟用）"}
+        title={isActive ? t("statusActive") : t("statusDraft")}
         style={{
           width: 9, height: 9, borderRadius: 5, flexShrink: 0,
           background: isActive ? c.color : "transparent",
@@ -240,7 +244,7 @@ function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () =
               color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a",
               padding: "3px 7px", borderRadius: 6, whiteSpace: "nowrap",
             }}>
-              草稿
+              {t("draftBadge")}
             </span>
           )}
         </div>
@@ -263,7 +267,7 @@ function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () =
           color: TK.ink, background: TK.card,
           border: `1px solid ${TK.divider}`, padding: "7px 13px", borderRadius: 8,
           textDecoration: "none",
-        }}>編寫</Link>
+        }}>{t("edit")}</Link>
         <Link href={`/skills/${skill.id}/automate`} style={{
           font: `600 12px ${FONT.sans}`,
           color: skill.role === "tool" ? "#fff" : TK.ink,
@@ -271,7 +275,7 @@ function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () =
           border: `1px solid ${skill.role === "tool" ? TK.black : TK.divider}`,
           padding: "7px 13px", borderRadius: 8, textDecoration: "none",
         }}>
-          {skill.role === "tool" ? "設定自動化" : "編輯自動化"}
+          {skill.role === "tool" ? t("setupAutomation") : t("editAutomation")}
         </Link>
         <DeleteButton onDelete={onDelete} deleting={deleting} skillName={skill.name} />
       </div>

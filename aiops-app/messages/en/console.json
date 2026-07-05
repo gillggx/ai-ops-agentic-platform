@@ -30,6 +30,28 @@
     "plan": "Plan",
     "fin": "Finalize"
   },
+  "events": {
+    "planProposed": "Proposed {n} phases",
+    "planConfirmed": "Plan confirmed — extracting acceptance contract",
+    "verdictPassDefault": "Acceptance passed",
+    "phaseDone": "{pid} done",
+    "phaseDoneFf": "{pid} done (ff: {block})",
+    "phaseStart": "Starting {pid}",
+    "recall": "{n} recalled · {subject}",
+    "rejectDefault": "Acceptance failed{blk}",
+    "stuckEscalated": "r{round} fixes exhausted — escalating to Repair",
+    "repairTriggered": "Repair engaged — three-way alignment diagnosis (requirement × canvas × rejection)",
+    "repairRetry": "Repair succeeded — handing back to Builder",
+    "repairHandover": "Repair failed — handover"
+  },
+  "writeStatus": {
+    "active": "active · takes effect immediately",
+    "review_queue": "review queue · does not modify block_docs directly",
+    "draft": "draft · awaiting Supervisor promotion"
+  },
+  "evidence": {
+    "structuredReject": "Structured rejection: {json}"
+  },
   "stream": {
     "idle": "Idle",
     "idleHint": "Events appear here one by one once the build starts — every internal agent step: decision, reason, evidence",

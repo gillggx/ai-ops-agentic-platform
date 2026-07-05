@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import type { PatrolFunnel } from "./types";
 
 interface Props {
@@ -15,29 +16,30 @@ interface Props {
  * the alarms tile avoids implying it's a separate funnel branch.
  */
 export function PatrolFunnelSummary({ funnel }: Props) {
+  const t = useTranslations("patrol");
   if (!funnel) {
     return (
       <div style={containerStyle}>
-        <div style={{ ...chipStyle, color: "#a0aec0", fontStyle: "italic" }}>計算中...</div>
+        <div style={{ ...chipStyle, color: "#a0aec0", fontStyle: "italic" }}>{t("computing")}</div>
       </div>
     );
   }
 
   return (
     <div style={containerStyle}>
-      <Chip label="Events" value={funnel.events} hint="從 simulator 進來" />
+      <Chip label={t("chipEvents")} value={funnel.events} hint={t("hintEvents")} />
       <Arrow />
-      <Chip label="Skill Runs" value={funnel.skill_runs} hint="auto-check 觸發數" />
+      <Chip label={t("chipSkillRuns")} value={funnel.skill_runs} hint={t("hintSkillRuns")} />
       <Arrow />
-      <Chip label="Step Passed" value={funnel.step_passed} hint="≥1 step pass" />
+      <Chip label={t("chipStepPassed")} value={funnel.step_passed} hint={t("hintStepPassed")} />
       <Arrow />
       <Chip
-        label="Alarms"
+        label={t("chipAlarms")}
         value={funnel.alarms}
         hint={
           funnel.dedup_suppressed > 0
-            ? `+${funnel.dedup_suppressed} 被 dedup 擋`
-            : "AlarmEmitter 已寫入"
+            ? t("hintDedupSuppressed", { count: funnel.dedup_suppressed })
+            : t("hintAlarmsWritten")
         }
         accent="primary"
       />

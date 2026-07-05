@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useTranslations } from "next-intl";
 // Resizable panel via native CSS resize
 import { Topbar } from "@/components/layout/Topbar";
 import HandoffListener from "@/components/shell/HandoffListener";
@@ -51,13 +52,14 @@ interface GlassEvent {
 // RoleHierarchy in Java: IT_ADMIN > PE > ON_DUTY — a user with IT_ADMIN
 // implicitly has PE + ON_DUTY authority server-side.
 
+// labelKey → messages/<locale>/nav.json
 const OPS_ITEMS = [
-  { href: "/alarms",             label: "Alarm Center",     icon: "🔔" },
+  { href: "/alarms",             labelKey: "alarmCenter",     icon: "🔔" },
   // 2026-06-27 — Patrol Activity: see "what happened between events and
   // the alarms that landed". Non-emoji icon per feedback_no_emoji rule;
   // legacy emojis above predate the rule and stay as-is.
-  { href: "/patrol-activity",    label: "Patrol Activity",  icon: "○" },
-  { href: "/dashboard",          label: "Dashboard",        icon: "📊" },
+  { href: "/patrol-activity",    labelKey: "patrolActivity",  icon: "○" },
+  { href: "/dashboard",          labelKey: "dashboard",       icon: "📊" },
 ];
 
 const KNOWLEDGE_ITEMS = [
@@ -66,25 +68,25 @@ const KNOWLEDGE_ITEMS = [
   // reachable only via Skill → Build/Refine → embed=skill (see
   // SkillEmbedBanner). Direct hits to /admin/pipeline-builder redirect
   // back to /skills.
-  { href: "/skills",                  label: "Skill Library",          icon: "📖" },
+  { href: "/skills",                  labelKey: "skillLibrary",        icon: "📖" },
   // 2026-05-11: Agent Rules & Knowledge — user-owned prompt directives,
   // RAG facts, jargon lexicon, and few-shot examples that the chat
   // orchestrator's context_loader retrieves to enrich the system prompt.
-  { href: "/agent-knowledge",         label: "Rules & Knowledge",      icon: "📓" },
+  { href: "/agent-knowledge",         labelKey: "rulesKnowledge",      icon: "📓" },
   // Chart catalog — 18 chart components catalog + per-user style preference.
-  { href: "/help/charts",             label: "Chart Catalog",          icon: "📚" },
+  { href: "/help/charts",             labelKey: "chartCatalog",        icon: "📚" },
 ];
 
 const ADMIN_ITEMS = [
-  { href: "/agent-activity",          label: "Agent Activity",    icon: "◎" },
-  { href: "/supervisor",              label: "Supervisor",        icon: "◈" },
-  { href: "/admin/build-traces",      label: "Build Traces",      icon: "📜" },
-  { href: "/admin/block-docs",        label: "Block Docs",        icon: "📖" },
-  { href: "/system/data-sources",     label: "Data Sources",      icon: "🗄️" },
-  { href: "/system/event-registry",   label: "Event Registry",    icon: "📋" },
-  { href: "/system/monitor",          label: "System Monitor",    icon: "🖥️" },
-  { href: "/admin/simulator-health",  label: "Simulator Health",  icon: "💓" },
-  { href: "/admin/users",             label: "Users",             icon: "👥" },
+  { href: "/agent-activity",          labelKey: "agentActivity",    icon: "◎" },
+  { href: "/supervisor",              labelKey: "supervisor",       icon: "◈" },
+  { href: "/admin/build-traces",      labelKey: "buildTraces",      icon: "📜" },
+  { href: "/admin/block-docs",        labelKey: "blockDocs",        icon: "📖" },
+  { href: "/system/data-sources",     labelKey: "dataSources",      icon: "🗄️" },
+  { href: "/system/event-registry",   labelKey: "eventRegistry",    icon: "📋" },
+  { href: "/system/monitor",          labelKey: "systemMonitor",    icon: "🖥️" },
+  { href: "/admin/simulator-health",  labelKey: "simulatorHealth",  icon: "💓" },
+  { href: "/admin/users",             labelKey: "users",            icon: "👥" },
 ];
 
 function userCanSeeOps(_roles: string[]): boolean {
@@ -138,6 +140,7 @@ function ContextualSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(true);
   const session = useSession();
+  const t = useTranslations("nav");
 
   if (pathname.startsWith("/topology")) return null;
 
@@ -174,7 +177,7 @@ function ContextualSidebar() {
         flexShrink: 0,
       }}>
         {!collapsed && <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>AIOps</span>}
-        <button onClick={() => setCollapsed(c => !c)} title={collapsed ? "展開選單" : "收合選單"} style={{
+        <button onClick={() => setCollapsed(c => !c)} title={collapsed ? t("expandMenu") : t("collapseMenu")} style={{
           background: "none", border: "none", cursor: "pointer",
           color: "#718096", fontSize: 12, padding: "4px",
         }}>
@@ -185,9 +188,9 @@ function ContextualSidebar() {
       <div style={{ padding: collapsed ? "4px" : "8px", flex: 1 }}>
         {showOps && (
           <>
-            <SidebarSection title="Operations Center" collapsed={collapsed} />
-            {OPS_ITEMS.map(({ href, label, icon }) => (
-              <NavLink key={href} href={href} icon={icon} label={label}
+            <SidebarSection title={t("sectionOps")} collapsed={collapsed} />
+            {OPS_ITEMS.map(({ href, labelKey, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={t(labelKey)}
                 active={isExact(href)} collapsed={collapsed} />
             ))}
           </>
@@ -195,9 +198,9 @@ function ContextualSidebar() {
 
         {showKnowledge && (
           <>
-            <SidebarSection title="Knowledge Studio" collapsed={collapsed} />
-            {KNOWLEDGE_ITEMS.map(({ href, label, icon }) => (
-              <NavLink key={href} href={href} icon={icon} label={label}
+            <SidebarSection title={t("sectionKnowledge")} collapsed={collapsed} />
+            {KNOWLEDGE_ITEMS.map(({ href, labelKey, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={t(labelKey)}
                 active={isExact(href)} collapsed={collapsed} />
             ))}
           </>
@@ -205,9 +208,9 @@ function ContextualSidebar() {
 
         {showAdmin && (
           <>
-            <SidebarSection title="Admin" collapsed={collapsed} />
-            {ADMIN_ITEMS.map(({ href, label, icon }) => (
-              <NavLink key={href} href={href} icon={icon} label={label}
+            <SidebarSection title={t("sectionAdmin")} collapsed={collapsed} />
+            {ADMIN_ITEMS.map(({ href, labelKey, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={t(labelKey)}
                 active={isExact(href)} collapsed={collapsed} />
             ))}
           </>
@@ -220,6 +223,7 @@ function ContextualSidebar() {
 // ── Inner shell ──────────────────────────────────────────────────────────────
 
 function Shell({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("nav");
   const {
     triggerMessage, setTriggerMessage,
     contract, setContract,
@@ -332,7 +336,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               cursor: "pointer", userSelect: "none",
               transition: "background 0.15s",
             }}
-            title={copilotOpen ? "收合 Copilot" : "展開 Copilot"}
+            title={copilotOpen ? t("collapseCopilot") : t("expandCopilot")}
           >
             <span style={{ fontSize: 14 }}>{copilotOpen ? "▶" : "◀"}</span>
             <span style={{
@@ -429,7 +433,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                   // until pb_run_start flips us to "running".
                   if (ev.status && ev.status !== "finished" && ev.status !== "success") {
                     setRunPhase("build_failed");
-                    setRunError(ev.summary ?? `建構未完成（status=${ev.status}）`);
+                    setRunError(ev.summary ?? t("buildIncomplete", { status: ev.status }));
                   }
                   setGlassOverlay((prev) => prev ? { ...prev, active: false } : prev);
                 }}

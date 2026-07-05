@@ -1,0 +1,118 @@
+{
+  "loading": "載入中…",
+  "kpi": {
+    "activeAlarms": "Active alarms",
+    "openClusters": "Open clusters",
+    "highSeverity": "High severity",
+    "healthScore": "Health score",
+    "mttrMin": "MTTR (min)",
+    "asOf": "As of"
+  },
+  "pulse": {
+    "title": "AI 戰況",
+    "runsPerHour": "Auto-check <strong>{n}</strong> runs/hr",
+    "avgLatency": "Avg latency <strong>{v}</strong>",
+    "high": "High <strong>{n}</strong>",
+    "footer": "last hour · refreshed every 60s"
+  },
+  "sevShort": {
+    "critical": "CRIT",
+    "high": "HIGH",
+    "med": "MED",
+    "low": "LOW"
+  },
+  "sevLong": {
+    "critical": "CRITICAL",
+    "high": "HIGH",
+    "med": "MED",
+    "low": "LOW"
+  },
+  "list": {
+    "header": "Clusters · {shown}/{total}",
+    "totalAlarms": "{n} alarms",
+    "filterAll": "全部",
+    "filterHigh": "High",
+    "filterMed": "Med",
+    "filterLow": "Low",
+    "empty": "沒有符合條件的告警"
+  },
+  "card": {
+    "alarms": "<strong>{n}</strong> alarms",
+    "lots": "<strong>{n}</strong> lots",
+    "causeTooltip": "cause"
+  },
+  "detail": {
+    "emptyPrompt": "左側選擇 cluster 開始",
+    "metaOpen": "<strong>{n}</strong> open",
+    "metaAcked": "<strong>{n}</strong> acknowledged",
+    "cause": "cause: {cause}",
+    "ackNoOpen": "沒有 open alarm",
+    "ackTitle": "批次 acknowledge {n} 個告警",
+    "ackBusy": "處理中…",
+    "ackButton": "✓ Acknowledge · {n}",
+    "synthesisTitle": "AI 診斷報告 | {id}",
+    "synthesisMeta": "{n} alarms · {sev} · {range}",
+    "synthesisLoading": "AI 正在綜合此 cluster 的所有告警…",
+    "synthesisEmpty": "（無診斷摘要）",
+    "rowsHint": "{n} alarms · 點任一筆進入深度診斷",
+    "noAlarms": "（無告警）",
+    "enterDeep": "進入深度診斷 →",
+    "backToList": "← 回 alarm 列表",
+    "alarmRef": "alarm #{id}",
+    "fullscreenTitle": "開啟全螢幕檢視（95%）",
+    "fullscreen": "全螢幕",
+    "loadFailed": "載入失敗: {error}",
+    "close": "關閉",
+    "closeEsc": "關閉 (Esc)"
+  },
+  "alarmDetail": {
+    "briefingFailed": "簡報載入失敗",
+    "noData": "無資料",
+    "totalRows": "(共 {n} 列)",
+    "drHeader": "DR {index}/{total}：{name}",
+    "ruleFallback": "Rule #{id}",
+    "badgeAlert": "ALERT",
+    "badgePass": "PASS",
+    "synthesisHeading": "AI 綜合診斷 (Synthesis)",
+    "integrating": "AI 正在整合分析結果...",
+    "noDiagnosis": "（無診斷結果）",
+    "tabTrigger": "觸發原因",
+    "tabEvidence": "深度診斷 ({n})",
+    "sectionRule": "觸發條件（規則）",
+    "sectionWhy": "為什麼達標",
+    "conditionMetFallback": "條件達標",
+    "measured": "量測：<b>{label}</b>",
+    "actualValue": "實測值 = <b>{v}</b>",
+    "thresholdExpr": "{op} 門檻 <b>{v}</b>",
+    "scanned": "掃描 {n} 筆",
+    "conditionMet": "條件達成 — 已觸發警報",
+    "conditionNotMet": "條件未達成",
+    "triggerEvidence": "觸發證據（patrol pipeline 回傳）",
+    "noTriggerData": "（無觸發資料）",
+    "autoCheckLabel": "Auto-Check {index}/{total}",
+    "noRunOutput": "（這次跑沒有產出明細）",
+    "acDiagHeading": "Auto-Check 診斷 (pipeline run #{id})",
+    "skillDeepCheck": "Skill 內建深度檢查 (per-step pipeline 回傳)",
+    "noDeepResults": "（無深度診斷結果）"
+  },
+  "dispo": {
+    "heading": "處置 (Disposition)",
+    "ackLabel": "ack:",
+    "acked": "acknowledged",
+    "pending": "未確認",
+    "dispositionLabel": "disposition:",
+    "ackButton": "Acknowledge",
+    "reasonPlaceholder": "處置原因 (required for dispose)",
+    "reasonRequired": "請填寫處置原因",
+    "reasonLabel": "原因:",
+    "release": "Release",
+    "hold": "Hold",
+    "rerun": "Re-run",
+    "scrap": "Scrap"
+  },
+  "boundary": {
+    "crashTitle": "{label} 無法載入",
+    "crashBody": "診斷結果格式異常{ref}，已略過此筆以保護整頁。",
+    "logRef": "（log #{id}）"
+  }
+}

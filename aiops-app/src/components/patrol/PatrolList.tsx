@@ -1,6 +1,8 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { formatAlarmSkipped, type PatrolItem } from "./types";
+import { activeLocale } from "@/i18n/format";
 
 interface Props {
   items: PatrolItem[];
@@ -8,16 +10,18 @@ interface Props {
   onSelect: (item: PatrolItem) => void;
 }
 
+// labelKey → messages/<locale>/patrol.json
 const HEADERS = [
-  { key: "time",   label: "Time" },
-  { key: "event",  label: "Event" },
-  { key: "equip",  label: "Equipment" },
-  { key: "skill",  label: "Skill (stage)" },
-  { key: "steps",  label: "Steps" },
-  { key: "result", label: "Result" },
+  { key: "time",   labelKey: "colTime" },
+  { key: "event",  labelKey: "colEvent" },
+  { key: "equip",  labelKey: "colEquipment" },
+  { key: "skill",  labelKey: "colSkill" },
+  { key: "steps",  labelKey: "colSteps" },
+  { key: "result", labelKey: "colResult" },
 ];
 
 export function PatrolList({ items, selected, onSelect }: Props) {
+  const t = useTranslations("patrol");
   if (items.length === 0) {
     return (
       <div style={{
@@ -29,7 +33,7 @@ export function PatrolList({ items, selected, onSelect }: Props) {
         color: "#a0aec0",
         fontSize: 13,
       }}>
-        所選範圍內沒有 skill 執行。試試放寬時間範圍或拿掉 filter。
+        {t("emptyList")}
       </div>
     );
   }
@@ -55,7 +59,7 @@ export function PatrolList({ items, selected, onSelect }: Props) {
                 fontSize: 10,
                 textTransform: "uppercase",
                 letterSpacing: "0.4px",
-              }}>{h.label}</th>
+              }}>{t(h.labelKey)}</th>
             ))}
           </tr>
         </thead>
@@ -103,8 +107,9 @@ export function PatrolList({ items, selected, onSelect }: Props) {
 }
 
 function ResultBadge({ item }: { item: PatrolItem }) {
+  const t = useTranslations("patrol");
   if (item.alarm_id) {
-    return <span style={badge("#3182ce", "#ebf8ff")}>Alarm #{item.alarm_id}</span>;
+    return <span style={badge("#3182ce", "#ebf8ff")}>{t("alarmRef", { id: item.alarm_id })}</span>;
   }
   if (item.alarm_skipped_reason) {
     return <span style={badge("#9c4221", "#fffaf0")}>{formatAlarmSkipped(item.alarm_skipped_reason)}</span>;
@@ -156,5 +161,5 @@ const tdStyle: React.CSSProperties = {
 function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return d.toLocaleTimeString(activeLocale(), { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }

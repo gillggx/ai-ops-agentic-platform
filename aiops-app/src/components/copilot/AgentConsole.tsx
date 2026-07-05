@@ -62,16 +62,24 @@ export interface ConsoleEvent {
   code: string;
   /** one-line title (the 決定 for tool steps) */
   title: string;
+  /** i18n: when set, render shows t("console." + titleKey) instead of `title`
+   *  (`title` stays the zh-TW fallback for non-render consumers) */
+  titleKey?: string;
+  titleParams?: Record<string, string | number>;
   /** 理由 — from the tool call's reason field (B3); absent → row has no 理由 line */
   reason?: string;
-  /** evidences (依據): sys = 系統事實 (▣), cite = 引用 (◈ + how_apply) */
-  evidences?: { lv: "sys" | "cite"; id?: string; text: string }[];
+  /** evidences (依據): sys = 系統事實 (▣), cite = 引用 (◈ + how_apply);
+   *  textKey/textParams: i18n override for composed `text` (same rule as titleKey) */
+  evidences?: {
+    lv: "sys" | "cite"; id?: string; text: string;
+    textKey?: string; textParams?: Record<string, string | number>;
+  }[];
   /** 結果 — measured outcome (▣ n rows) */
   result?: string;
   /** recall events: which memories */
   mems?: RecalledMem[];
-  /** write events: W-code payload */
-  write?: { code: string; wcls: string; title: string; status: string };
+  /** write events: W-code payload; statusKey: i18n override for the composed status label */
+  write?: { code: string; wcls: string; title: string; status: string; statusKey?: string };
   /** recall came back empty on a tool step → teach moment */
   teach?: { blockId?: string; phaseId?: string };
 }
@@ -123,15 +131,12 @@ export function useConsoleStore(): [ConsoleState, React.Dispatch<ConsoleAction>]
 // ── SSE → ConsoleEvent/action normalisation (shared by both surfaces) ─────
 /** Map one SSE payload (chat pb_glass_* shape OR builder raw shape) to
  *  console actions. Returns [] when the event carries no console signal. */
-// i18n-TODO-START — normalizeConsoleEvent 的組合字串（title/evidences/
-// write-status）仍為 zh-TW：它們在 normalisation 時燒進 ConsoleEvent，被
-// 多個檔案消費；改法是 emit 結構化欄位、render 端再翻（P2 收尾項）。
+// i18n note: the zh-TW `title` / `evidences[].text` / write-status strings set
+// below are FALLBACKS only (kept so non-render consumers of ConsoleEvent stay
+// stable). Every one also carries titleKey/textKey/statusKey + params, and the
+// render side translates via the "console" namespace — hence the per-line
+// i18n-exempt markers.
 export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleAction[] {
-  // i18n-TODO: the composed `title` / `evidences` / write-status strings below
-  // are still zh-TW. They are baked into ConsoleEvent at normalisation time
-  // (module scope, no hook access) and consumed by both surfaces. Proper fix:
-  // emit raw structured parts and compose at render — deferred to keep this
-  // exported API stable in this pass.
   const t = String(ev.type ?? "");
   const out: ConsoleAction[] = [];
 
@@ -144,34 +149,41 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
       id: String(p.id ?? "?"), goal: String(p.goal ?? "") })) });
     out.push({ t: "event", ev: {
       kind: "tool", agent: "planner", phaseId: "plan", code: "plan_proposed",
-      title: `提出 ${planField.phases.length} 個 phase`,
+      title: `提出 ${planField.phases.length} 個 phase`, // i18n-exempt: fallback, render uses titleKey
+      titleKey: "events.planProposed", titleParams: { n: planField.phases.length },
     }});
   }
   if (ev.plan_confirmed) {
     out.push({ t: "event", ev: {
       kind: "confirm", agent: "planner", phaseId: "plan", code: "plan_confirmed",
-      title: "計畫確認 — 萃取驗收 contract",
+      title: "計畫確認 — 萃取驗收 contract", // i18n-exempt: fallback, render uses titleKey
+      titleKey: "events.planConfirmed",
     }});
   }
   const puField = ev.phase_update as Record<string, unknown> | undefined;
   if (puField && String(puField.status) === "completed") {
     const pid = String(puField.phase_id ?? "?");
+    const rationale = puField.rationale != null ? String(puField.rationale) : "";
     out.push({ t: "event", ev: {
       kind: "verdict_pass", agent: "verifier", phaseId: pid, code: "ADVANCED",
-      title: String(puField.rationale ?? "驗收通過").slice(0, 120),
+      title: (rationale || "驗收通過").slice(0, 120), // i18n-exempt: fallback, render uses titleKey
+      ...(rationale ? {} : { titleKey: "events.verdictPassDefault" }),
     }});
     out.push({ t: "event", ev: {
       kind: "phase_done", agent: "builder", phaseId: pid, code: "phase_done",
-      title: `${pid} 完成`,
+      title: `${pid} 完成`, // i18n-exempt: fallback, render uses titleKey
+      titleKey: "events.phaseDone", titleParams: { pid },
     }});
   }
   const ffField = ev.ff_update as { phase_ids?: unknown[]; advanced_by_block?: string } | undefined;
   if (ffField?.phase_ids?.length) {
     ffField.phase_ids.forEach((pidRaw) => {
       const pid = String(pidRaw ?? "?");
+      const block = String(ffField.advanced_by_block ?? "");
       out.push({ t: "event", ev: {
         kind: "phase_done", agent: "builder", phaseId: pid, code: "fast_forward",
-        title: `${pid} 完成（ff: ${String(ffField.advanced_by_block ?? "")}）`,
+        title: `${pid} 完成（ff: ${block}）`, // i18n-exempt: fallback, render uses titleKey
+        titleKey: "events.phaseDoneFf", titleParams: { pid, block },
       }});
     });
   }
@@ -202,7 +214,8 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
         kind: "recall", agent: "memory", phaseId: pid,
         round: p.round != null ? Number(p.round) : undefined,
         code: "memory_recall",
-        title: `召回 ${mems.length} 筆 · ${subject}`,
+        title: `召回 ${mems.length} 筆 · ${subject}`, // i18n-exempt: fallback, render uses titleKey
+        titleKey: "events.recall", titleParams: { n: mems.length, subject },
         mems,
       }});
     } else if (kind === "memory_write") {
@@ -210,39 +223,53 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
         code: String(p.code ?? "W?"), wcls: String(p.memo_class ?? ""),
         title: String(p.title ?? ""), status: String(p.status ?? ""),
       };
-      const statusLabel =
-        w.status === "active" ? "active · 立即生效"
-        : w.status === "review_queue" ? "review queue · 不直接改 block_docs"
-        : w.status === "draft" ? "draft · 待 Supervisor 轉正" : w.status;
+      const statusMeta: Record<string, { label: string; key: string }> = {
+        active: { label: "active · 立即生效", key: "writeStatus.active" }, // i18n-exempt: fallback, render uses statusKey
+        review_queue: { label: "review queue · 不直接改 block_docs", key: "writeStatus.review_queue" }, // i18n-exempt: fallback, render uses statusKey
+        draft: { label: "draft · 待 Supervisor 轉正", key: "writeStatus.draft" }, // i18n-exempt: fallback, render uses statusKey
+      };
+      const meta = statusMeta[w.status];
       out.push({ t: "event", ev: {
         kind: "write", agent: "memory", phaseId: pid, code: w.code,
-        title: w.title, write: { ...w, status: statusLabel },
+        title: w.title,
+        write: { ...w, status: meta?.label ?? w.status, statusKey: meta?.key },
       }});
     } else if (kind === "verifier_reject") {
-      const reason = String(
-        p.judge_reject_reason ?? p.reason ?? p.missing_for_phase ?? "驗收未過");
+      const rawReason = p.judge_reject_reason ?? p.reason ?? p.missing_for_phase;
+      const reason = rawReason != null ? String(rawReason) : "";
       const blk = p.block_id ? ` [${String(p.block_id)}]` : "";
+      const json = JSON.stringify(p).slice(0, 200);
       out.push({ t: "event", ev: {
         kind: "verdict_reject", agent: "verifier", phaseId: pid,
-        code: "REJECTED", title: `${reason.slice(0, 120)}${blk}`,
-        evidences: [{ lv: "sys", text: `結構化拒因：${JSON.stringify(p).slice(0, 200)}` }],
+        code: "REJECTED",
+        title: `${(reason || "驗收未過").slice(0, 120)}${blk}`, // i18n-exempt: fallback, render uses titleKey
+        ...(reason ? {} : { titleKey: "events.rejectDefault", titleParams: { blk } }),
+        evidences: [{
+          lv: "sys",
+          text: `結構化拒因：${json}`, // i18n-exempt: fallback, render uses textKey
+          textKey: "evidence.structuredReject", textParams: { json },
+        }],
       }});
     } else if (kind === "stuck_escalated") {
+      const round = String(p.round ?? "?");
       out.push({ t: "event", ev: {
         kind: "escalate", agent: "builder", phaseId: pid, code: "stuck_escalated",
         round: p.round != null ? Number(p.round) : undefined,
-        title: `r${String(p.round ?? "?")} 修正未果 — 升級 Repair`,
+        title: `r${round} 修正未果 — 升級 Repair`, // i18n-exempt: fallback, render uses titleKey
+        titleKey: "events.stuckEscalated", titleParams: { round },
       }});
     } else if (kind === "repair_triggered") {
       out.push({ t: "event", ev: {
         kind: "repair_start", agent: "repair", phaseId: pid, code: "repair_triggered",
-        title: "Repair 介入 — 三路對齊診斷（需求 × canvas × 拒因）",
+        title: "Repair 介入 — 三路對齊診斷（需求 × canvas × 拒因）", // i18n-exempt: fallback, render uses titleKey
+        titleKey: "events.repairTriggered",
       }});
     } else if (kind === "repair_outcome") {
       const r = String(p.result ?? "?");
       out.push({ t: "event", ev: {
         kind: "repair_out", agent: "repair", phaseId: pid, code: "repair_outcome",
-        title: r === "retry" ? "修復成功 — 交回 Builder 續跑" : "修復失敗 — handover 交棒",
+        title: r === "retry" ? "修復成功 — 交回 Builder 續跑" : "修復失敗 — handover 交棒", // i18n-exempt: fallback, render uses titleKey
+        titleKey: r === "retry" ? "events.repairRetry" : "events.repairHandover",
       }});
     }
     return out;
@@ -284,22 +311,28 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
 
   // phase lifecycle — both surfaces
   if (t === "phase_started") {
+    const pid = String(ev.phase_id ?? "");
     out.push({ t: "event", ev: {
       kind: "phase_start", agent: "builder",
-      phaseId: String(ev.phase_id ?? "") || "plan",
-      code: "phase_started", title: `開始 ${String(ev.phase_id ?? "")}`,
+      phaseId: pid || "plan",
+      code: "phase_started",
+      title: `開始 ${pid}`, // i18n-exempt: fallback, render uses titleKey
+      titleKey: "events.phaseStart", titleParams: { pid },
     }});
     return out;
   }
   if (t === "phase_completed") {
     const pid = String(ev.phase_id ?? "") || "?";
+    const rationale = ev.rationale != null ? String(ev.rationale) : "";
     out.push({ t: "event", ev: {
       kind: "verdict_pass", agent: "verifier", phaseId: pid, code: "ADVANCED",
-      title: String(ev.rationale ?? "驗收通過").slice(0, 120),
+      title: (rationale || "驗收通過").slice(0, 120), // i18n-exempt: fallback, render uses titleKey
+      ...(rationale ? {} : { titleKey: "events.verdictPassDefault" }),
     }});
     out.push({ t: "event", ev: {
       kind: "phase_done", agent: "builder", phaseId: pid, code: "phase_done",
-      title: `${pid} 完成`,
+      title: `${pid} 完成`, // i18n-exempt: fallback, render uses titleKey
+      titleKey: "events.phaseDone", titleParams: { pid },
     }});
     return out;
   }
@@ -309,13 +342,16 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
     const u = pu.phase_update;
     if (u && String(u.status) === "completed") {
       const pid = String(u.phase_id ?? "?");
+      const rationale = u.rationale != null ? String(u.rationale) : "";
       out.push({ t: "event", ev: {
         kind: "verdict_pass", agent: "verifier", phaseId: pid, code: "ADVANCED",
-        title: String(u.rationale ?? "驗收通過").slice(0, 120),
+        title: (rationale || "驗收通過").slice(0, 120), // i18n-exempt: fallback, render uses titleKey
+        ...(rationale ? {} : { titleKey: "events.verdictPassDefault" }),
       }});
       out.push({ t: "event", ev: {
         kind: "phase_done", agent: "builder", phaseId: pid, code: "phase_done",
-        title: `${pid} 完成`,
+        title: `${pid} 完成`, // i18n-exempt: fallback, render uses titleKey
+        titleKey: "events.phaseDone", titleParams: { pid },
       }});
     }
     return out;
@@ -326,20 +362,21 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
       id: String(p.id ?? "?"), goal: String(p.goal ?? "") })) });
     out.push({ t: "event", ev: {
       kind: "tool", agent: "planner", phaseId: "plan", code: "plan_proposed",
-      title: `提出 ${phases.length} 個 phase`,
+      title: `提出 ${phases.length} 個 phase`, // i18n-exempt: fallback, render uses titleKey
+      titleKey: "events.planProposed", titleParams: { n: phases.length },
     }});
     return out;
   }
   if (t === "goal_plan_confirmed") {
     out.push({ t: "event", ev: {
       kind: "confirm", agent: "planner", phaseId: "plan", code: "plan_confirmed",
-      title: "計畫確認 — 萃取驗收 contract",
+      title: "計畫確認 — 萃取驗收 contract", // i18n-exempt: fallback, render uses titleKey
+      titleKey: "events.planConfirmed",
     }});
     return out;
   }
   return out;
 }
-// i18n-TODO-END
 
 // ── derived helpers ─────────────────────────────────────────────────────────
 const PHASE_LABEL = (
@@ -695,9 +732,10 @@ export function AgentConsole({
                   </span>);
               }
               (ev.evidences ?? []).forEach((e2, i2) => {
+                const txt = e2.textKey ? t(e2.textKey, e2.textParams) : e2.text;
                 parts.push(e2.lv === "sys"
-                  ? <span key={`ev${i2}`}><span style={chipS("#fff", "#3d3b36", "#b3b0a8")}>▣</span> {e2.text}</span>
-                  : <span key={`ev${i2}`}><span style={chipS("#efe8fc", "#6d28d9", "#ddd0f7")}>◈ {e2.id ?? ""}</span> {e2.text}</span>);
+                  ? <span key={`ev${i2}`}><span style={chipS("#fff", "#3d3b36", "#b3b0a8")}>▣</span> {txt}</span>
+                  : <span key={`ev${i2}`}><span style={chipS("#efe8fc", "#6d28d9", "#ddd0f7")}>◈ {e2.id ?? ""}</span> {txt}</span>);
               });
               if (ev.kind === "tool" && !(ev.evidences ?? []).length && isTeach) {
                 parts.push(<span key="no-recall" style={{ color: "#7c3aed" }}>✕ {t("stream.noRecall")}</span>);
@@ -712,7 +750,10 @@ export function AgentConsole({
                   </span>);
               });
               if (ev.write) {
-                parts.push(<span key="w" style={{ color: "#6d28d9" }}>{ev.write.status}</span>);
+                parts.push(
+                  <span key="w" style={{ color: "#6d28d9" }}>
+                    {ev.write.statusKey ? t(ev.write.statusKey) : ev.write.status}
+                  </span>);
               }
               const hasDetail = parts.length > 0;
               return (
@@ -736,7 +777,7 @@ export function AgentConsole({
                                    color: isMem ? "#4c1d95" : "#3d3b36",
                                    whiteSpace: "nowrap", overflow: "hidden",
                                    textOverflow: "ellipsis" }}>
-                      {ev.title}
+                      {ev.titleKey ? t(ev.titleKey, ev.titleParams) : ev.title}
                     </span>
                     {(isTeach || !!ev.round) && (
                       <span style={{ fontFamily: M, fontSize: 9, color: isTeach ? "#7c3aed" : "#a09d95",
@@ -820,14 +861,19 @@ export function AgentConsole({
                       alignItems: "center" }}>
           <span style={{ fontSize: 10, color: "#8a877e", width: 26, flex: "none" }}>{t("memory.write")}</span>
           {writes.length === 0 && <span style={{ fontSize: 10, color: "#c9c6bf" }}>—</span>}
-          {writes.map((w, i) => (
-            <span key={i} title={`${w.title}（${w.status}）`}
-                  style={w.status.startsWith("draft")
-                    ? chipS("#f9f6fe", "#6d28d9", "#c9b3f2")
-                    : chipS("#7c3aed", "#fff")}>
-              {w.code} {w.wcls}
-            </span>
-          ))}
+          {writes.map((w, i) => {
+            const statusText = w.statusKey ? t(w.statusKey) : w.status;
+            const isDraft = w.statusKey
+              ? w.statusKey === "writeStatus.draft" : w.status.startsWith("draft");
+            return (
+              <span key={i} title={`${w.title}（${statusText}）`}
+                    style={isDraft
+                      ? chipS("#f9f6fe", "#6d28d9", "#c9b3f2")
+                      : chipS("#7c3aed", "#fff")}>
+                {w.code} {w.wcls}
+              </span>
+            );
+          })}
         </div>
       </div>
 

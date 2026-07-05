@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import { parsePipelineNodes, roleLabel, type Skill, type PipelineNode } from "@/components/skills-v2/types";
 import { writeSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
@@ -18,6 +19,7 @@ import SkillCanvasView from "@/components/skills-v2/SkillCanvasView";
 import SkillTryRunPanel from "@/components/skills-v2/SkillTryRunPanel";
 
 export default function SkillEditorPage() {
+  const t = useTranslations("skills.editor");
   const params = useParams<{ slug: string }>();
   const router = useRouter();
   const slug = params?.slug ?? "";
@@ -90,10 +92,10 @@ export default function SkillEditorPage() {
         : `/admin/pipeline-builder/new?embed=skill-v2&slug=${encodeURIComponent(slug)}&mode=${mode}`;
       router.push(target);
     } catch (e) {
-      setToast(`開啟 Builder 失敗：${e instanceof Error ? e.message : e}`);
+      setToast(t("openBuilderFailed", { error: e instanceof Error ? e.message : String(e) }));
       setOpening(false);
     }
-  }, [nl, nlDirty, skill, slug, router]);
+  }, [nl, nlDirty, skill, slug, router, t]);
 
   const handleSaveNl = useCallback(async () => {
     if (!skill) return;
@@ -108,13 +110,13 @@ export default function SkillEditorPage() {
       const env = await res.json();
       setSkill((env?.data ?? env) as Skill);
       setNlDirty(false);
-      setToast("已存");
+      setToast(t("saved"));
     } catch (e) {
-      setToast(`Save failed: ${e instanceof Error ? e.message : e}`);
+      setToast(t("saveFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSaving(false);
     }
-  }, [nl, skill, slug]);
+  }, [nl, skill, slug, t]);
 
   const handleToggleActive = useCallback(async (activate: boolean) => {
     if (!skill) return;
@@ -126,16 +128,16 @@ export default function SkillEditorPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const env = await res.json();
       setSkill((env?.data ?? env) as Skill);
-      setToast(activate ? "已啟用 — 開始生效" : "已停用 — 回到草稿");
+      setToast(activate ? t("activatedToast") : t("deactivatedToast"));
     } catch (e) {
-      setToast(`操作失敗：${e instanceof Error ? e.message : e}`);
+      setToast(t("actionFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setActivating(false);
     }
-  }, [skill, slug]);
+  }, [skill, slug, t]);
 
-  if (loadError) return <Center>讀取失敗：{loadError}</Center>;
-  if (!skill) return <Center>載入中...</Center>;
+  if (loadError) return <Center>{t("loadFailed", { error: loadError })}</Center>;
+  if (!skill) return <Center>{t("loading")}</Center>;
 
   const c = ROLE_COLORS[skill.role];
 
@@ -146,7 +148,7 @@ export default function SkillEditorPage() {
         <div style={{ marginBottom: 12 }}>
           <Link href="/skills" style={{
             color: TK.body, fontSize: 13, textDecoration: "none",
-          }}>← Skills Library</Link>
+          }}>{t("backToLibrary")}</Link>
         </div>
 
         {/* Header */}
@@ -157,13 +159,13 @@ export default function SkillEditorPage() {
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{ font: `600 11px ${FONT.mono}`, color: TK.faint, letterSpacing: ".13em", textTransform: "uppercase" }}>
-              SKILL · 自然語言 → DATA PIPELINE
+              {t("eyebrow")}
             </div>
             <span style={{
               font: `600 10.5px ${FONT.mono}`,
               color: TK.indigo, background: TK.indigoTint,
               padding: "3px 8px", borderRadius: 6,
-            }}>✦ 可當 MCP 工具</span>
+            }}>{t("mcpChip")}</span>
             <span style={{
               font: `600 10.5px ${FONT.mono}`,
               color: c.color, background: c.tint, border: `1px solid ${c.border}`,
@@ -178,12 +180,12 @@ export default function SkillEditorPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* NL description */}
           <Column>
-            <ColumnHeader>你的描述 · 自然語言</ColumnHeader>
+            <ColumnHeader>{t("nlHeader")}</ColumnHeader>
             <textarea
               ref={nlRef}
               value={nl}
               onChange={(e) => { setNl(e.target.value); setNlDirty(true); }}
-              placeholder="用自然語言描述這個 Skill 要做什麼…（例如：檢查指定機台最近 5 次 process 是否有 ≥2 次 OOC）"
+              placeholder={t("nlPlaceholder")}
               style={{
                 minHeight: 56, overflowY: "auto",
                 padding: "12px 18px", border: "none", outline: "none",
@@ -193,7 +195,7 @@ export default function SkillEditorPage() {
             />
             <ColumnFooter>
               <span style={{ fontSize: 11, color: TK.faint }}>
-                {nlDirty ? "未存（編輯中）" : "已存"}
+                {nlDirty ? t("unsaved") : t("saved")}
               </span>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={handleSaveNl} disabled={!nlDirty || saving} style={{
@@ -204,7 +206,7 @@ export default function SkillEditorPage() {
                   cursor: nlDirty ? "pointer" : "not-allowed",
                   opacity: nlDirty ? 1 : 0.5,
                 }}>
-                  {saving ? "Saving..." : "Save Draft"}
+                  {saving ? t("saving") : t("saveDraft")}
                 </button>
               </div>
             </ColumnFooter>
@@ -220,26 +222,26 @@ export default function SkillEditorPage() {
                 font: `600 11px ${FONT.mono}`, letterSpacing: ".13em",
                 color: TK.body, textTransform: "uppercase",
               }}>
-                ✦ 編譯結果 · DATA PIPELINE（唯讀）
-                <span style={{ color: TK.faint, marginLeft: 10 }}>{pipeline.length} nodes</span>
+                {t("compiledHeader")}
+                <span style={{ color: TK.faint, marginLeft: 10 }}>{t("nodeCount", { n: pipeline.length })}</span>
               </span>
               <span style={{ display: "flex", gap: 8 }}>
                 {skill.pipeline_id ? (
                   <>
-                    <button onClick={() => handleOpenBuilder("rebuild")} disabled={opening} title="用 NL 重新跑 Agent，覆蓋目前 pipeline" style={{
+                    <button onClick={() => handleOpenBuilder("rebuild")} disabled={opening} title={t("rebuildTitle")} style={{
                       font: `600 11.5px ${FONT.sans}`,
                       color: TK.body, background: "#fff",
                       border: `1px solid ${TK.divider}`,
                       padding: "6px 11px", borderRadius: 7, cursor: "pointer",
                     }}>
-                      用 Agent 重新編譯
+                      {t("rebuild")}
                     </button>
-                    <button onClick={() => handleOpenBuilder("edit")} disabled={opening} title="開 Pipeline Builder 人手調 canvas" style={{
+                    <button onClick={() => handleOpenBuilder("edit")} disabled={opening} title={t("editPipelineTitle")} style={{
                       font: `600 11.5px ${FONT.sans}`,
                       color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
                       padding: "6px 11px", borderRadius: 7, cursor: "pointer",
                     }}>
-                      {opening ? "Opening…" : "編輯 pipeline →"}
+                      {opening ? t("opening") : t("editPipeline")}
                     </button>
                   </>
                 ) : (
@@ -248,7 +250,7 @@ export default function SkillEditorPage() {
                     color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
                     padding: "6px 11px", borderRadius: 7, cursor: "pointer",
                   }}>
-                    {opening ? "Opening…" : "用 Pipeline Builder 編譯 →"}
+                    {opening ? t("opening") : t("compileWithBuilder")}
                   </button>
                 )}
               </span>
@@ -281,7 +283,7 @@ export default function SkillEditorPage() {
         <ContractStrip
           inType={skill.in_type}
           outType={skill.out_type}
-          actionLabel={skill.role === "tool" ? "自動化此 Skill →" : "編輯自動化 →"}
+          actionLabel={skill.role === "tool" ? t("automateAction") : t("editAutomationAction")}
           onAction={() => router.push(`/skills/${encodeURIComponent(slug)}/automate`)}
         />
       </div>
@@ -338,6 +340,7 @@ function ActivationBanner({
 }: {
   status: string; busy: boolean; onActivate: () => void; onDeactivate: () => void;
 }) {
+  const t = useTranslations("skills.editor");
   const active = status === "active";
   return (
     <div style={{
@@ -348,11 +351,7 @@ function ActivationBanner({
       display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
     }}>
       <div style={{ font: `500 12.5px ${FONT.sans}`, color: active ? "#166534" : "#92400e" }}>
-        {active ? (
-          <>● 已啟用 — 這個 Skill 已生效。</>
-        ) : (
-          <>○ 草稿狀態 — 尚未生效。Review 後按「啟用」才會開始運作。</>
-        )}
+        {active ? t("activeBanner") : t("draftBanner")}
       </div>
       {active ? (
         <button onClick={onDeactivate} disabled={busy} style={{
@@ -361,7 +360,7 @@ function ActivationBanner({
           padding: "7px 14px", borderRadius: 8, cursor: busy ? "wait" : "pointer",
           opacity: busy ? 0.6 : 1, whiteSpace: "nowrap",
         }}>
-          {busy ? "…" : "停用"}
+          {busy ? "…" : t("deactivate")}
         </button>
       ) : (
         <button onClick={onActivate} disabled={busy} style={{
@@ -370,7 +369,7 @@ function ActivationBanner({
           padding: "8px 18px", borderRadius: 8, cursor: busy ? "wait" : "pointer",
           opacity: busy ? 0.6 : 1, whiteSpace: "nowrap",
         }}>
-          {busy ? "啟用中…" : "啟用 — 開始生效"}
+          {busy ? t("activating") : t("activate")}
         </button>
       )}
     </div>
@@ -378,6 +377,7 @@ function ActivationBanner({
 }
 
 function AlarmCheck({ hasAlarm }: { hasAlarm: boolean }) {
+  const t = useTranslations("skills.editor");
   if (hasAlarm) {
     return (
       <div style={{
@@ -386,7 +386,7 @@ function AlarmCheck({ hasAlarm }: { hasAlarm: boolean }) {
         borderRadius: 10, padding: "11px 16px",
         font: `500 12.5px ${FONT.sans}`, color: TK.patrolDeep,
       }}>
-        ✓ 系統檢查：pipeline 含 alarm 判斷式 · 可自動化為 Auto Patrol（alarm 條件由你設、系統檢查）
+        {t("alarmYes")}
       </div>
     );
   }
@@ -397,7 +397,7 @@ function AlarmCheck({ hasAlarm }: { hasAlarm: boolean }) {
       borderRadius: 10, padding: "11px 16px",
       font: `500 12.5px ${FONT.sans}`, color: TK.body,
     }}>
-      ℹ 系統檢查：pipeline 無 alarm · 只能作為 Data Check 或工具；要出 alarm 請在描述加入判斷條件再重新編譯。
+      {t("alarmNo")}
     </div>
   );
 }

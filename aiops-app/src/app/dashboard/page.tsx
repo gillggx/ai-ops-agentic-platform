@@ -14,12 +14,14 @@
 import "@/styles/fleet-overview.css";
 import { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import ReactMarkdown from "react-markdown";
 import { FleetOverview } from "@/components/fleet/FleetOverview";
 import { EqpDetail } from "@/components/fleet/eqp/EqpDetail";
 import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
 import SurfaceTour from "@/components/tour/SurfaceTour";
 import { FLEET_STEPS, EQP_DETAIL_STEPS } from "@/components/tour/steps/fleet";
+import { activeLocale } from "@/i18n/format";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -113,6 +115,7 @@ async function fetchSummary(): Promise<Record<string, unknown>> {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: string }) {
+  const t = useTranslations("dashboard");
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -147,11 +150,11 @@ function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: stri
         }
       }
     } catch (e) {
-      setText(`⚠️ 簡報載入失敗: ${e}`);
+      setText(`⚠️ ${t("briefingLoadFailed", { error: String(e) })}`);
     } finally {
       setLoading(false);
     }
-  }, [scope, toolId]);
+  }, [scope, toolId, t]);
 
   // 2026-05-04 cost cut: removed auto-fire on mount + dashboard 5-min refresh
   // re-trigger. AI briefing now only fires when user clicks 「🔄 重新生成」.
@@ -169,16 +172,16 @@ function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: stri
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 18 }}>✨</span>
           <span style={{ fontSize: 14, fontWeight: 600, color: "#262626" }}>
-            {scope === "fab" ? "AI Summary" : `AI Summary — ${toolId}`}
+            {scope === "fab" ? t("aiSummary") : t("aiSummaryTool", { toolId: String(toolId) })}
           </span>
-          {loading && <span style={{ fontSize: 11, color: "#1890ff" }}>生成中...</span>}
+          {loading && <span style={{ fontSize: 11, color: "#1890ff" }}>{t("generating")}</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={(e) => { e.stopPropagation(); fetchBriefing(); }} style={{
             padding: "3px 10px", fontSize: 11, borderRadius: 4,
             border: "1px solid #d9d9d9", background: "#fff", cursor: "pointer", color: "#666",
           }}>
-            🔄 重新生成
+            🔄 {t("regenerate")}
           </button>
           <span style={{ color: "#999", fontSize: 12, transition: "transform 0.3s", transform: collapsed ? "rotate(-180deg)" : "none" }}>
             ▼
@@ -203,11 +206,11 @@ function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: stri
           ) : loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#a0aec0" }}>
               <span style={{ display: "inline-block", width: 8, height: 16, background: "#1890ff", animation: "blink 1s step-end infinite" }} />
-              <span>AI 正在分析資料並生成簡報...</span>
+              <span>{t("analyzing")}</span>
             </div>
           ) : (
             <span style={{ color: "#a0aec0" }}>
-              點上方「🔄 重新生成」產生 AI 簡報（消耗 LLM token，按需觸發）
+              {t("briefingHint")}
             </span>
           )}
         </div>
@@ -218,7 +221,8 @@ function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: stri
 }
 
 function DataTable({ data, columns }: { data: Record<string, unknown>[]; columns?: string[] }) {
-  if (!data || data.length === 0) return <div style={{ color: "#a0aec0", fontSize: 12, padding: 16 }}>（無資料）</div>;
+  const t = useTranslations("dashboard");
+  if (!data || data.length === 0) return <div style={{ color: "#a0aec0", fontSize: 12, padding: 16 }}>{t("noData")}</div>;
   const cols = columns ?? Object.keys(data[0]).filter(k => !["_id", "eventTime", "lotID", "toolID", "step", "objectName", "objectID", "last_updated_time", "updated_by"].includes(k));
   return (
     <div style={{ overflowX: "auto" }}>
@@ -241,6 +245,7 @@ function DataTable({ data, columns }: { data: Record<string, unknown>[]; columns
 }
 
 function SPCTab({ events }: { events: ProcessEvent[] }) {
+  const t = useTranslations("dashboard");
   // Flatten SPC data for chart rendering
   const chartData = useMemo(() => {
     const flat: Record<string, unknown>[] = [];
@@ -275,7 +280,7 @@ function SPCTab({ events }: { events: ProcessEvent[] }) {
     xbar_chart: "X-bar Chart", r_chart: "R Chart", s_chart: "S Chart", p_chart: "P Chart", c_chart: "C Chart",
   };
 
-  if (groups.length === 0) return <div style={{ color: "#a0aec0", padding: 16 }}>（無 SPC 資料）</div>;
+  if (groups.length === 0) return <div style={{ color: "#a0aec0", padding: 16 }}>{t("noSpcData")}</div>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -320,8 +325,9 @@ function SPCTab({ events }: { events: ProcessEvent[] }) {
 }
 
 function APCTab({ events }: { events: ProcessEvent[] }) {
+  const t = useTranslations("dashboard");
   const latest = events[0];
-  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>（無資料）</div>;
+  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>{t("noData")}</div>;
   const apc = (latest.APC as Record<string, unknown>) ?? {};
   const params = (apc.parameters as Record<string, unknown>) ?? {};
   const ACTIVE = new Set(["etch_time_offset", "rf_power_bias", "gas_flow_comp", "ff_correction", "fb_correction"]);
@@ -334,8 +340,9 @@ function APCTab({ events }: { events: ProcessEvent[] }) {
 }
 
 function DCTab({ events }: { events: ProcessEvent[] }) {
+  const t = useTranslations("dashboard");
   const latest = events[0];
-  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>（無資料）</div>;
+  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>{t("noData")}</div>;
   const dc = (latest.DC as Record<string, unknown>) ?? {};
   const params = (dc.parameters as Record<string, unknown>) ?? {};
   const rows = Object.entries(params).map(([k, v]) => ({
@@ -346,8 +353,9 @@ function DCTab({ events }: { events: ProcessEvent[] }) {
 }
 
 function RecipeTab({ events }: { events: ProcessEvent[] }) {
+  const t = useTranslations("dashboard");
   const latest = events[0];
-  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>（無資料）</div>;
+  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>{t("noData")}</div>;
   const recipe = (latest.RECIPE as Record<string, unknown>) ?? {};
   const version = recipe.recipe_version ?? "?";
   const params = (recipe.parameters as Record<string, unknown>) ?? {};
@@ -355,7 +363,7 @@ function RecipeTab({ events }: { events: ProcessEvent[] }) {
   return (
     <div>
       <div style={{ padding: "8px 0", fontSize: 13, fontWeight: 600, color: "#2d3748" }}>
-        Recipe Version: <span style={S.badge("#2b6cb0")}>v{String(version)}</span>
+        {t("recipeVersion")}: <span style={S.badge("#2b6cb0")}>v{String(version)}</span>
       </div>
       <DataTable data={rows} columns={["parameter", "value"]} />
     </div>
@@ -363,23 +371,24 @@ function RecipeTab({ events }: { events: ProcessEvent[] }) {
 }
 
 function FDCTab({ events }: { events: ProcessEvent[] }) {
+  const t = useTranslations("dashboard");
   const latest = events[0];
-  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>（無資料）</div>;
+  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>{t("noData")}</div>;
   const fdc = (latest.FDC as Record<string, unknown>) ?? {};
   const classif = String(fdc.classification ?? "UNKNOWN");
   const classifColor = classif === "FAULT" ? "#e53e3e" : classif === "WARNING" ? "#dd6b20" : "#48bb78";
   return (
     <div style={{ padding: 8 }}>
       <div style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Classification: </span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{t("classification")}: </span>
         <span style={S.badge(classifColor)}>{classif}</span>
       </div>
-      {fdc.fault_code ? <div style={{ fontSize: 12, color: "#4a5568", marginBottom: 4 }}>Fault Code: <strong>{String(fdc.fault_code)}</strong></div> : null}
-      {fdc.confidence ? <div style={{ fontSize: 12, color: "#4a5568", marginBottom: 4 }}>Confidence: <strong>{String(fdc.confidence)}</strong></div> : null}
-      {fdc.description ? <div style={{ fontSize: 12, color: "#4a5568", marginBottom: 4 }}>Description: {String(fdc.description)}</div> : null}
+      {fdc.fault_code ? <div style={{ fontSize: 12, color: "#4a5568", marginBottom: 4 }}>{t("faultCode")}: <strong>{String(fdc.fault_code)}</strong></div> : null}
+      {fdc.confidence ? <div style={{ fontSize: 12, color: "#4a5568", marginBottom: 4 }}>{t("confidence")}: <strong>{String(fdc.confidence)}</strong></div> : null}
+      {fdc.description ? <div style={{ fontSize: 12, color: "#4a5568", marginBottom: 4 }}>{t("description")}: {String(fdc.description)}</div> : null}
       {Array.isArray(fdc.contributing_sensors) && (fdc.contributing_sensors as string[]).length > 0 ? (
         <div style={{ fontSize: 12, color: "#4a5568" }}>
-          Contributing Sensors: {(fdc.contributing_sensors as string[]).join(", ")}
+          {t("contributingSensors")}: {(fdc.contributing_sensors as string[]).join(", ")}
         </div>
       ) : null}
     </div>
@@ -387,8 +396,9 @@ function FDCTab({ events }: { events: ProcessEvent[] }) {
 }
 
 function ECTab({ events }: { events: ProcessEvent[] }) {
+  const t = useTranslations("dashboard");
   const latest = events[0];
-  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>（無資料）</div>;
+  if (!latest) return <div style={{ color: "#a0aec0", padding: 16 }}>{t("noData")}</div>;
   const ec = (latest.EC as Record<string, unknown>) ?? {};
   const constants = (ec.constants as Record<string, Record<string, unknown>>) ?? {};
   const statusColor = (s: string) => s === "ALERT" ? "#e53e3e" : s === "DRIFT" ? "#dd6b20" : "#48bb78";
@@ -404,7 +414,7 @@ function ECTab({ events }: { events: ProcessEvent[] }) {
     <div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead><tr>
-          {["Constant", "Value", "Nominal", "Deviation", "Status", "Unit"].map(h => (
+          {[t("ecConstant"), t("ecValue"), t("ecNominal"), t("ecDeviation"), t("ecStatus"), t("ecUnit")].map(h => (
             <th key={h} style={{ background: "#f7fafc", padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "#4a5568", borderBottom: "2px solid #e2e8f0" }}>{h}</th>
           ))}
         </tr></thead>
@@ -440,6 +450,7 @@ interface TraceNode {
 }
 
 function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId: string }) {
+  const t = useTranslations("dashboard");
   // Group events by lotID, pick recent 10 lots
   const lots = useMemo(() => {
     const lotMap = new Map<string, ProcessEvent[]>();
@@ -563,7 +574,7 @@ function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId:
   }, [latestEvent, selectedNode, toolId, lotId, spcStatus, fdcClassif, lotEvents.length]);
 
   if (lots.length === 0) {
-    return <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>（無製程事件可溯源）</div>;
+    return <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>{t("noTraceEvents")}</div>;
   }
 
   return (
@@ -589,7 +600,7 @@ function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId:
                 {lid}
               </div>
               <div style={{ fontSize: 9, color: hasOOC ? "#e53e3e" : "#a0aec0", marginTop: 2 }}>
-                {hasOOC ? "🔴 OOC" : "✅"} · {evs.length} events
+                {hasOOC ? "🔴 OOC" : "✅"} · {t("eventsCount", { count: evs.length })}
               </div>
             </div>
           );
@@ -601,7 +612,7 @@ function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId:
         {/* SVG Topology */}
         <div style={{ flex: 3, background: "#fafbfc", position: "relative" }}>
           <div style={{ padding: "8px 12px", fontSize: 11, fontWeight: 600, color: "#718096", borderBottom: "1px solid #e2e8f0" }}>
-            製程溯源拓撲 — {lotId} ({String(latestEvent?.eventTime ?? "").slice(0, 19)})
+            {t("traceTitle", { lotId, time: String(latestEvent?.eventTime ?? "").slice(0, 19) })}
           </div>
           <svg viewBox="0 0 600 300" style={{ width: "100%", height: "calc(100% - 32px)" }}>
             <defs>
@@ -651,22 +662,22 @@ function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId:
             })}
 
             {/* Layer labels */}
-            <text x={60} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">上游設定</text>
-            <text x={220} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">設備</text>
-            <text x={380} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">批次</text>
-            <text x={540} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">製程結果</text>
+            <text x={60} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">{t("layerUpstream")}</text>
+            <text x={220} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">{t("layerTool")}</text>
+            <text x={380} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">{t("layerLot")}</text>
+            <text x={540} y={285} textAnchor="middle" fontSize={9} fill="#a0aec0" fontStyle="italic">{t("layerResults")}</text>
           </svg>
         </div>
 
         {/* Inspector Panel */}
         <div style={{ flex: 2, borderLeft: "1px solid #e2e8f0", background: "#fff", display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "8px 12px", fontSize: 11, fontWeight: 600, color: "#718096", borderBottom: "1px solid #e2e8f0" }}>
-            {selectedNode ? `📋 Inspector — ${selectedNode}` : "📋 Inspector"}
+            📋 {selectedNode ? t("inspectorNode", { node: selectedNode }) : t("inspector")}
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
             {!selectedNode ? (
               <div style={{ padding: 16, textAlign: "center", color: "#a0aec0", fontSize: 12 }}>
-                ← 點擊拓撲圖上的節點查看詳細資料
+                {t("clickNodeHint")}
               </div>
             ) : inspectorData && inspectorData.length > 0 ? (
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
@@ -686,7 +697,7 @@ function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId:
                 ))}</tbody>
               </table>
             ) : (
-              <div style={{ padding: 16, textAlign: "center", color: "#a0aec0", fontSize: 12 }}>（此節點無資料）</div>
+              <div style={{ padding: 16, textAlign: "center", color: "#a0aec0", fontSize: 12 }}>{t("nodeNoData")}</div>
             )}
           </div>
         </div>
@@ -696,6 +707,7 @@ function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId:
 }
 
 function OOCTopologyPanel({ events, lastUpdate, onRefresh }: { events: ProcessEvent[]; lastUpdate: string; onRefresh: () => void }) {
+  const t = useTranslations("dashboard");
   // Find most recent OOC event
   const oocEvent = useMemo(() => events.find(e => e.spc_status === "OOC"), [events]);
 
@@ -704,7 +716,7 @@ function OOCTopologyPanel({ events, lastUpdate, onRefresh }: { events: ProcessEv
       <div style={{ ...S.topoPanel, alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", color: "#a0aec0" }}>
           <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
-          <div style={{ fontSize: 13 }}>近期無 OOC 事件</div>
+          <div style={{ fontSize: 13 }}>{t("noRecentOoc")}</div>
         </div>
       </div>
     );
@@ -732,12 +744,12 @@ function OOCTopologyPanel({ events, lastUpdate, onRefresh }: { events: ProcessEv
   return (
     <div style={S.topoPanel}>
       <div style={S.refreshBar}>
-        <span>最後更新：{lastUpdate}</span>
+        <span>{t("lastUpdate", { time: lastUpdate })}</span>
         <button onClick={onRefresh} style={{ padding: "2px 8px", fontSize: 10, borderRadius: 4, border: "1px solid #cbd5e0", background: "#fff", cursor: "pointer" }}>⟳</button>
-        <span style={{ marginLeft: "auto", fontSize: 10, color: "#a0aec0" }}>5 分鐘自動更新</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "#a0aec0" }}>{t("autoRefresh")}</span>
       </div>
       <div style={{ padding: "12px 16px", fontSize: 12, fontWeight: 600, color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>
-        🔴 最近一次 OOC — {String(oocEvent.eventTime).slice(0, 19)}
+        🔴 {t("lastOoc", { time: String(oocEvent.eventTime).slice(0, 19) })}
       </div>
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
         <svg viewBox="0 0 400 350" style={{ width: "100%", height: "100%" }}>
@@ -814,12 +826,13 @@ function OocRateGrid({
 }: {
   toolIds: string[]; steps: string[]; zMatrix: number[][]; textMatrix: string[][];
 }) {
+  const t = useTranslations("dashboard");
   return (
     <div style={{ overflowX: "auto" }}>
       <table style={{ borderCollapse: "collapse", fontSize: 11, fontFamily: "Inter, sans-serif" }}>
         <thead>
           <tr>
-            <th style={{ padding: "6px 8px", textAlign: "left", color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>Step \ Tool</th>
+            <th style={{ padding: "6px 8px", textAlign: "left", color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>{t("cornerHeader")}</th>
             {toolIds.map(t => (
               <th key={t} style={{ padding: "6px 8px", color: "#4a5568", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{t}</th>
             ))}
@@ -835,7 +848,7 @@ function OocRateGrid({
                 return (
                   <td
                     key={ci}
-                    title={`Tool: ${toolIds[ci]} · Step: ${step} · OOC: ${text}`}
+                    title={t("cellTooltip", { tool: toolIds[ci], step, ooc: text })}
                     style={{
                       padding: "6px 8px", textAlign: "center",
                       background: oocCellColor(rate),
@@ -857,12 +870,13 @@ function OocRateGrid({
 }
 
 function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
+  const t = useTranslations("dashboard");
   const byToolStep = (summary.by_tool_step as Array<Record<string, unknown>>) ?? [];
   const byTool = (summary.by_tool as Array<Record<string, unknown>>) ?? [];
   const byStep = (summary.by_step as Array<Record<string, unknown>>) ?? [];
 
   if (byTool.length === 0) {
-    return <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>（等待資料累積...）</div>;
+    return <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>{t("waitingData")}</div>;
   }
 
   // Build heatmap from by_tool_step cross table
@@ -910,7 +924,7 @@ function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
     };
     return (
       <div style={{ padding: "16px 24px" }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#1a202c", marginBottom: 12 }}>全廠 OOC Rate by Tool (24h)</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#1a202c", marginBottom: 12 }}>{t("oocRateByTool")}</div>
         <div className="pb-chart-card">
           <SvgChartRenderer spec={spec} height={250} />
         </div>
@@ -921,21 +935,21 @@ function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
   return (
     <div data-tour-id="fleet-heatmap" style={{ padding: "16px 24px" }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#1a202c", marginBottom: 12 }}>
-        全廠 SPC OOC Rate Heatmap — Tool × Step (24h)
+        {t("heatmapTitle")}
       </div>
       <OocRateGrid toolIds={toolIds} steps={steps} zMatrix={zMatrix} textMatrix={textMatrix} />
       {/* Summary stats below heatmap */}
       <div style={{ display: "flex", gap: 24, marginTop: 16 }}>
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 20px", flex: 1 }}>
-          <div style={{ fontSize: 11, color: "#718096", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Events</div>
+          <div style={{ fontSize: 11, color: "#718096", textTransform: "uppercase", letterSpacing: "0.5px" }}>{t("totalEvents")}</div>
           <div style={{ fontSize: 24, fontWeight: 700, color: "#1a202c" }}>{String(summary.total_events ?? 0)}</div>
         </div>
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 20px", flex: 1 }}>
-          <div style={{ fontSize: 11, color: "#718096", textTransform: "uppercase", letterSpacing: "0.5px" }}>OOC Count</div>
+          <div style={{ fontSize: 11, color: "#718096", textTransform: "uppercase", letterSpacing: "0.5px" }}>{t("oocCount")}</div>
           <div style={{ fontSize: 24, fontWeight: 700, color: "#e53e3e" }}>{String(summary.ooc_count ?? 0)}</div>
         </div>
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 20px", flex: 1 }}>
-          <div style={{ fontSize: 11, color: "#718096", textTransform: "uppercase", letterSpacing: "0.5px" }}>OOC Rate</div>
+          <div style={{ fontSize: 11, color: "#718096", textTransform: "uppercase", letterSpacing: "0.5px" }}>{t("oocRate")}</div>
           <div style={{ fontSize: 24, fontWeight: 700, color: "#dd6b20" }}>{String(summary.ooc_rate ?? "0%")}</div>
         </div>
       </div>
@@ -946,6 +960,7 @@ function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 function DashboardInner() {
+  const t = useTranslations("dashboard");
   const searchParams = useSearchParams();
   const router = useRouter();
   const toolId = searchParams.get("toolId");
@@ -976,7 +991,7 @@ function DashboardInner() {
         const result = await fetchSummary();
         setSummary(result);
       }
-      setLastUpdate(new Date().toLocaleTimeString("zh-TW", { hour12: false }));
+      setLastUpdate(new Date().toLocaleTimeString(activeLocale(), { hour12: false }));
     } finally {
       setLoading(false);
     }
@@ -1014,7 +1029,7 @@ function DashboardInner() {
       {toolId && (
       <div style={S.sidebar(sidebarCollapsed)}>
         <div style={S.sidebarHeader}>
-          {!sidebarCollapsed && <span style={{ fontSize: 13, fontWeight: 700, color: "#1a202c" }}>🏭 設備清單</span>}
+          {!sidebarCollapsed && <span style={{ fontSize: 13, fontWeight: 700, color: "#1a202c" }}>🏭 {t("equipmentList")}</span>}
           <button onClick={() => setSidebarCollapsed(c => !c)}
             style={{ background: "none", border: "none", color: "#718096", cursor: "pointer", fontSize: 14, padding: "2px 4px" }}>
             {sidebarCollapsed ? "▶" : "◀"}
@@ -1024,7 +1039,7 @@ function DashboardInner() {
         <div style={{ ...S.toolItem(!toolId), borderLeftColor: !toolId ? "#4299e1" : "transparent" }}
           onClick={() => selectTool(null)}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#4299e1" }} />
-          {!sidebarCollapsed && <span>全廠總覽</span>}
+          {!sidebarCollapsed && <span>{t("fabOverview")}</span>}
         </div>
         {/* Tool list */}
         {tools.map(t => (
@@ -1072,8 +1087,9 @@ function DashboardInner() {
 
 
 export default function DashboardPage() {
+  const t = useTranslations("dashboard");
   return (
-    <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#a0aec0" }}>載入中...</div>}>
+    <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#a0aec0" }}>{t("loading")}</div>}>
       <DashboardInner />
     </Suspense>
   );
