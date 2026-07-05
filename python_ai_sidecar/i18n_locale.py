@@ -31,8 +31,10 @@ def locale_directive(locale: str | None = None) -> str:
         return ""
     ja_style = " Use polite です・ます style." if loc.strip() == "ja" else ""
     return (
-        f"\n\n# Response language\n"
-        f"Reply to the user in {label}.{ja_style} Keep technical tokens "
-        f"(OOC, Cpk, SPC, xbar, UCL/LCL, block/pipeline/phase names, "
-        f"tool_id / lot_id values) in their original form.\n"
+        f"\n\n# Response language (MANDATORY)\n"
+        f"The user's UI locale is {label}. You MUST write your entire reply "
+        f"in {label}, even when the user's message or this system prompt is "
+        f"in another language.{ja_style} Keep technical tokens (OOC, Cpk, "
+        f"SPC, xbar, UCL/LCL, block/pipeline/phase names, tool_id / lot_id "
+        f"values) in their original form.\n"
     )

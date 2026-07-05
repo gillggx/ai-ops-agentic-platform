@@ -176,6 +176,7 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
     _loc_directive = _locale_directive(_locale)
     if _loc_directive:
         system_text += _loc_directive
+        logger.info("llm_call: locale directive injected (locale=%s)", _locale)
     messages = state.get("messages", [])
     iteration = state.get("current_iteration", 0) + 1
 
