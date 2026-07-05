@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import type { AIOpsReportContract, SuggestedAction } from "aiops-contract";
 import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
+import { activeLocale } from "@/i18n/format";
 import { ContractCard } from "./ContractCard";
 import { type PlanItem } from "./PlanRenderer";
 import SlashCommandMenu from "./SlashCommandMenu";
@@ -825,6 +826,8 @@ export function AIAgentPanel({
       // Part B (SPEC_context_engineering): pass user-side state to the agent.
       // Currently `selected_equipment_id` only; future: current_page, last alarm, etc.
       const clientContext: Record<string, unknown> = {};
+      // i18n P4 — 對話跟隨 UI 語系（sidecar llm_call/advisor 注入 prompt）。
+      clientContext.locale = activeLocale();
       if (selectedEquipment?.equipment_id) {
         clientContext.selected_equipment_id = selectedEquipment.equipment_id;
       }

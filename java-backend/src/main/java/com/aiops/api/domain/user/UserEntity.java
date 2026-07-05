@@ -50,6 +50,10 @@ public class UserEntity extends Auditable {
 	@Column(name = "oidc_provider", length = 40)
 	private String oidcProvider;
 
+	/** i18n P3: UI locale (zh-TW / zh-CN / en / ja); null = default. */
+	@Column(name = "locale", length = 8)
+	private String locale;
+
 	/** OIDC subject claim — stable per-provider identity. NULL = local-only. */
 	@Column(name = "oidc_sub", length = 255)
 	private String oidcSub;

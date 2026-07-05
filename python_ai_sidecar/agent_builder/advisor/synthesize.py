@@ -9,6 +9,8 @@ doesn't blow up vertically.
 
 from __future__ import annotations
 
+from python_ai_sidecar.i18n_locale import locale_directive
+
 import json
 import logging
 from typing import Any
@@ -139,7 +141,7 @@ async def synthesize_explain(user_question: str, block: dict[str, Any]) -> str:
     params_section = render_params_section(block.get("param_schema"))
     try:
         resp = await client.create(
-            system=_EXPLAIN_SYSTEM,
+            system=_EXPLAIN_SYSTEM + locale_directive(),
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             max_tokens=_MAX_OUTPUT_TOKENS,
         )
@@ -193,7 +195,7 @@ async def synthesize_compare(user_question: str, blocks: list[dict[str, Any]]) -
     }
     try:
         resp = await client.create(
-            system=_COMPARE_SYSTEM,
+            system=_COMPARE_SYSTEM + locale_directive(),
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             max_tokens=_MAX_OUTPUT_TOKENS,
         )

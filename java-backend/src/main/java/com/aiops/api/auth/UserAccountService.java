@@ -110,4 +110,19 @@ public class UserAccountService {
 				? user.getUsername() : displayName.trim());
 		return userRepository.save(user);
 	}
+
+	/** i18n P3: persist the user's UI locale (cross-device source of truth). */
+	private static final java.util.Set<String> SUPPORTED_LOCALES =
+			java.util.Set.of("zh-TW", "zh-CN", "en", "ja");
+
+	@Transactional
+	public UserEntity updateLocale(Long userId, String locale) {
+		if (locale == null || !SUPPORTED_LOCALES.contains(locale)) {
+			throw ApiException.badRequest("unsupported locale: " + locale);
+		}
+		UserEntity user = userRepository.findById(userId)
+				.orElseThrow(() -> ApiException.notFound("user"));
+		user.setLocale(locale);
+		return userRepository.save(user);
+	}
 }

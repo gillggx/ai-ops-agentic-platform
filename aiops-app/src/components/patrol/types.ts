@@ -38,16 +38,17 @@ export interface PatrolItem {
   alarm_skipped_reason: string | null;  // test | stage_not_patrol | confirm_failed | no_step_passed | dedup | null
 }
 
-/** Maps AlarmEmitter guard names to short user-facing labels. */
-export const ALARM_SKIPPED_LABELS: Record<string, string> = {
-  test: "test run",
-  stage_not_patrol: "diagnose 階段（不 alarm）",
-  confirm_failed: "confirm 沒過",
-  no_step_passed: "無 step pass",
-  dedup: "1h 內已 alarm",
-};
+/** AlarmEmitter guard codes (wire values) with a user-facing label in the
+ *  patrol catalog (i18n P3: code on the wire, translate at the edge).
+ *  Unknown codes fall back to the raw wire value. */
+export const ALARM_SKIPPED_CODES = new Set([
+  "test", "stage_not_patrol", "confirm_failed", "no_step_passed", "dedup",
+]);
 
-export function formatAlarmSkipped(reason: string | null): string {
+export function formatAlarmSkipped(
+  reason: string | null,
+  t: (key: string) => string,
+): string {
   if (!reason) return "—";
-  return ALARM_SKIPPED_LABELS[reason] ?? reason;
+  return ALARM_SKIPPED_CODES.has(reason) ? t(`alarmSkipped.${reason}`) : reason;
 }

@@ -92,6 +92,7 @@ public class AuthController {
 					? user.getDisplayName() : ap.username());
 			body.put("roles", ap.roles().stream().map(Enum::name).toList());
 			body.put("oidc_provider", user != null ? user.getOidcProvider() : null);
+			body.put("locale", user != null ? user.getLocale() : null);
 			return ApiResponse.ok(body);
 		}
 		// OIDC path — principal is a Jwt with subject claim
@@ -115,6 +116,14 @@ public class AuthController {
 		));
 	}
 
+	@PutMapping("/me/locale")
+	public ApiResponse<Map<String, Object>> updateLocale(@RequestBody UpdateLocaleRequest req,
+	                                                      @org.springframework.security.core.annotation.AuthenticationPrincipal AuthPrincipal principal) {
+		if (principal == null) throw ApiException.forbidden("not authenticated");
+		var user = userAccountService.updateLocale(principal.userId(), req.locale());
+		return ApiResponse.ok(Map.of("locale", user.getLocale()));
+	}
+
 	@PutMapping("/me/password")
 	public ApiResponse<Map<String, Object>> changePassword(@org.springframework.validation.annotation.Validated
 	                                                        @RequestBody ChangePasswordRequest req,
@@ -126,6 +135,7 @@ public class AuthController {
 
 	public record LoginRequest(@NotBlank String username, @NotBlank String password) {}
 	public record UpdateProfileRequest(String displayName) {}
+	public record UpdateLocaleRequest(String locale) {}
 	public record ChangePasswordRequest(
 			@NotBlank String oldPassword,
 			@NotBlank String newPassword) {}

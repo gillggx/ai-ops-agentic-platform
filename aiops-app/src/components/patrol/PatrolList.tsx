@@ -112,7 +112,7 @@ function ResultBadge({ item }: { item: PatrolItem }) {
     return <span style={badge("#3182ce", "#ebf8ff")}>{t("alarmRef", { id: item.alarm_id })}</span>;
   }
   if (item.alarm_skipped_reason) {
-    return <span style={badge("#9c4221", "#fffaf0")}>{formatAlarmSkipped(item.alarm_skipped_reason)}</span>;
+    return <span style={badge("#9c4221", "#fffaf0")}>{formatAlarmSkipped(item.alarm_skipped_reason, t)}</span>;
   }
   if (item.status === "failed" || item.status === "error") {
     return <span style={badge("#c53030", "#fff5f5")}>{item.status}</span>;

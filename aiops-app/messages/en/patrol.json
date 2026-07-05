@@ -43,5 +43,12 @@
   "fieldRun": "Run",
   "fieldAlarm": "Alarm",
   "openAlarm": "Open Alarm #{id}",
-  "openInSkillLibrary": "Open {slug} in Skill Library"
+  "openInSkillLibrary": "Open {slug} in Skill Library",
+  "alarmSkipped": {
+    "test": "test run",
+    "stage_not_patrol": "diagnose stage (no alarm)",
+    "confirm_failed": "confirm failed",
+    "no_step_passed": "no step passed",
+    "dedup": "already alarmed within 1h"
+  }
 }

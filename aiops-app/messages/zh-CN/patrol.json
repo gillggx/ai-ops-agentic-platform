@@ -43,5 +43,12 @@
   "fieldRun": "执行",
   "fieldAlarm": "Alarm",
   "openAlarm": "打开 Alarm #{id}",
-  "openInSkillLibrary": "在 Skill Library 打开 {slug}"
+  "openInSkillLibrary": "在 Skill Library 打开 {slug}",
+  "alarmSkipped": {
+    "test": "test run",
+    "stage_not_patrol": "diagnose 阶段（不 alarm）",
+    "confirm_failed": "confirm 未通过",
+    "no_step_passed": "无 step pass",
+    "dedup": "1h 内已 alarm"
+  }
 }

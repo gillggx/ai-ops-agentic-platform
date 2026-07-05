@@ -58,6 +58,10 @@ async def advisor_dispatch_node(
         timeout_sec=CONFIG.java_timeout_sec,
     )
 
+    # i18n P4: advisor synthesize 在深層呼叫，用 contextvar 帶 locale。
+    from python_ai_sidecar.i18n_locale import current_locale
+    current_locale.set(((state.get("client_context") or {}).get("locale") or ""))
+
     # Stream advisor events to SSE.
     final_markdown_parts: list[str] = []
     try:

@@ -96,7 +96,7 @@ export function PatrolDetailPanel({ item, onClose }: Props) {
           </Link>
         ) : (
           <div>
-            <span style={{ color: "#9c4221" }}>{formatAlarmSkipped(item.alarm_skipped_reason)}</span>
+            <span style={{ color: "#9c4221" }}>{formatAlarmSkipped(item.alarm_skipped_reason, t)}</span>
             {item.alarm_skipped_reason && (
               <div style={{ fontSize: 10, color: "#a0aec0", marginTop: 2 }}>
                 code = {item.alarm_skipped_reason}

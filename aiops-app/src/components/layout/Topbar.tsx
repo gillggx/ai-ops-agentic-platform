@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
 import { NotificationBell } from "./NotificationBell";
@@ -43,6 +43,26 @@ function UserMenu() {
   const locale = useLocale();
   const t = useTranslations("common");
   const [open, setOpen] = useState(false);
+
+  // i18n P3 — users.locale 是跨裝置 source of truth，cookie 是本機快取。
+  // 每個 tab session 只同步一次（sessionStorage 防 reload 迴圈）：profile
+  // 有 locale 且與 cookie 不同 → 採用 profile 並 reload。
+  useEffect(() => {
+    if (!session) return;
+    if (sessionStorage.getItem("i18n:profile-synced")) return;
+    sessionStorage.setItem("i18n:profile-synced", "1");
+    fetch("/api/me/profile", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => {
+        const prof = p?.locale as string | undefined;
+        if (prof && (SUPPORTED_LOCALES as readonly string[]).includes(prof) && prof !== locale) {
+          document.cookie = `NEXT_LOCALE=${prof};path=/;max-age=31536000`;
+          window.location.reload();
+        }
+      })
+      .catch(() => { /* fail-open：同步失敗就用 cookie 現值 */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   if (status === "loading") {
     return <div style={{ fontSize: 12, color: "#94a3b8" }}>…</div>;
@@ -138,6 +158,12 @@ function UserMenu() {
                   key={loc}
                   onClick={() => {
                     document.cookie = `NEXT_LOCALE=${loc};path=/;max-age=31536000`;
+                    // 跨裝置持久化（fire-and-forget；失敗不擋切換）
+                    void fetch("/api/me/locale", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ locale: loc }),
+                    }).catch(() => {});
                     window.location.reload();
                   }}
                   style={{

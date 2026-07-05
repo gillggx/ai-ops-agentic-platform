@@ -152,6 +152,9 @@ def _v1_response_to_tool_calls(response) -> List[Dict[str, Any]]:
     return tool_calls
 
 
+from python_ai_sidecar.i18n_locale import locale_directive as _locale_directive
+
+
 async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
     """Call the LLM and return an AIMessage (with or without tool_calls)."""
     from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
@@ -167,6 +170,12 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
             f"User picked **{intent_hint}** — focus the response on that direction; "
             f"don't ask again, don't go broader.\n"
         )
+    # i18n P4 (2026-07-05): 對話跟隨 user 語系。zh-TW（預設）不注入 —
+    # 現行 prompt 已產繁中，保持 byte-identical（不影響 SMOKE 基線與 cache）。
+    _locale = ((state.get("client_context") or {}).get("locale") or "").strip()
+    _loc_directive = _locale_directive(_locale)
+    if _loc_directive:
+        system_text += _loc_directive
     messages = state.get("messages", [])
     iteration = state.get("current_iteration", 0) + 1
 

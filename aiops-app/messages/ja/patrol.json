@@ -43,5 +43,12 @@
   "fieldRun": "実行",
   "fieldAlarm": "アラーム",
   "openAlarm": "Alarm #{id} を開く",
-  "openInSkillLibrary": "Skill Library で {slug} を開く"
+  "openInSkillLibrary": "Skill Library で {slug} を開く",
+  "alarmSkipped": {
+    "test": "test run",
+    "stage_not_patrol": "diagnose 段階（alarm なし）",
+    "confirm_failed": "confirm 不合格",
+    "no_step_passed": "pass した step なし",
+    "dedup": "1h 以内に alarm 済み"
+  }
 }
