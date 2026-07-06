@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIOps 平台改造總覽 — Multi-Agent / 知識治理 / 記憶重構 / 多語系</title>
+<style>
+  :root {
+    --bg:#edeae2; --paper:#fbfbf9; --card:#fff; --ink:#211f1c;
+    --muted:#6f6a61; --faint:#8a857c; --ghost:#a49e91;
+    --line:#e7e3d9; --line2:#dedacf;
+    --amber:#9a6700; --amberBg:#faf3e2; --amberBd:#ecd9a8;
+    --green:#1a7f4e; --greenBg:#eaf5ee; --greenBd:#bfe0cd;
+    --purple:#6d28d9; --purpleBg:#f3effc; --purpleBd:#ded2f3;
+    --blue:#2563eb; --cyan:#0e7490; --cyanBg:#e9f5f8; --cyanBd:#bfe0e9;
+    --red:#b42318;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"Segoe UI","PingFang TC","Noto Sans TC",sans-serif;
+    line-height:1.75; -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 26px; }
+
+  /* hero */
+  header.hero {
+    background:linear-gradient(180deg,#211f1c 0%,#2b2824 100%); color:#fbfbf9;
+    padding:60px 0 52px;
+  }
+  .hero .eyebrow { font:600 11px var(--mono); letter-spacing:.16em; color:#b9b2a5; text-transform:uppercase; margin-bottom:14px; }
+  .hero h1 { margin:0 0 12px; font-size:30px; font-weight:800; letter-spacing:-0.4px; text-wrap:balance; line-height:1.25; }
+  .hero p { margin:0; font-size:15px; color:#d6d0c4; max-width:680px; }
+  .hero .meta { margin-top:22px; display:flex; flex-wrap:wrap; gap:8px; }
+  .hero .pill { font:600 11px var(--mono); background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.16); color:#e8e3d8; border-radius:999px; padding:4px 12px; }
+
+  /* toc */
+  nav.toc { background:var(--paper); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+  nav.toc .wrap { display:flex; flex-wrap:wrap; gap:2px; padding:8px 26px; }
+  nav.toc a { font-size:12.5px; color:var(--muted); text-decoration:none; padding:6px 11px; border-radius:7px; white-space:nowrap; }
+  nav.toc a:hover { background:#efece3; color:var(--ink); }
+
+  section { padding:46px 0 8px; }
+  section > .wrap > .kicker { font:700 11px var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--ghost); margin-bottom:6px; }
+  h2 { font-size:23px; font-weight:800; margin:0 0 6px; letter-spacing:-0.3px; display:flex; align-items:center; gap:12px; }
+  h2 .num { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:26px; padding:0 8px; border-radius:7px; background:var(--ink); color:#fbfbf9; font:800 13px var(--mono); }
+  .lede { font-size:14.5px; color:var(--muted); margin:0 0 20px; max-width:760px; }
+  h3 { font-size:14px; font-weight:800; margin:26px 0 10px; letter-spacing:.01em; }
+
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; box-shadow:0 1px 3px rgba(33,31,28,.05); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  @media (max-width:760px){ .grid2,.grid3{ grid-template-columns:1fr; } .wrap{ padding:0 18px; } nav.toc{ display:none; } }
+
+  p { font-size:14px; margin:10px 0; }
+  ul { font-size:14px; margin:8px 0; padding-left:20px; }
+  li { margin:5px 0; }
+  b, strong { font-weight:700; }
+  code { font-family:var(--mono); font-size:12.5px; background:#efece3; border-radius:4px; padding:1px 5px; color:#3d3a34; }
+
+  table { border-collapse:collapse; width:100%; font-size:13px; margin:12px 0; }
+  .tblwrap { overflow-x:auto; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font:700 11px var(--mono); letter-spacing:.05em; color:var(--ghost); text-transform:uppercase; white-space:nowrap; }
+  td:first-child { white-space:nowrap; }
+
+  .chip { display:inline-block; font:600 10.5px var(--mono); border-radius:4px; padding:1px 7px; white-space:nowrap; }
+  .c-amber { color:var(--amber); background:var(--amberBg); border:1px solid var(--amberBd); }
+  .c-green { color:var(--green); background:var(--greenBg); border:1px solid var(--greenBd); }
+  .c-purple{ color:var(--purple); background:var(--purpleBg); border:1px solid var(--purpleBd); }
+  .c-cyan  { color:var(--cyan); background:var(--cyanBg); border:1px solid var(--cyanBd); }
+  .c-blue  { color:#1e40af; background:#eef4fe; border:1px solid #c7d9fa; }
+  .c-ink   { color:#fbfbf9; background:var(--ink); }
+
+  .before-after { display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center; margin:12px 0; }
+  .ba-box { border-radius:9px; padding:11px 14px; font-size:13px; }
+  .ba-before { background:#f4f2ec; border:1px solid var(--line2); color:var(--muted); }
+  .ba-after { background:var(--greenBg); border:1px solid var(--greenBd); color:#1a5c3a; }
+  .ba-arrow { font:700 16px var(--mono); color:var(--ghost); }
+  @media (max-width:620px){ .before-after{ grid-template-columns:1fr; } .ba-arrow{ transform:rotate(90deg); justify-self:center; } }
+
+  .principle { border-left:3px solid var(--ink); background:var(--paper); padding:12px 16px; margin:14px 0; font-size:13.5px; border-radius:0 8px 8px 0; }
+  .principle b { color:var(--ink); }
+
+  /* service diagram */
+  .svc { display:flex; flex-direction:column; gap:10px; }
+  .svc-row { display:flex; align-items:center; gap:12px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; }
+  .svc-port { font:800 13px var(--mono); color:var(--cyan); min-width:52px; }
+  .svc-name { font-weight:700; font-size:14px; min-width:150px; }
+  .svc-desc { font-size:13px; color:var(--muted); flex:1; }
+  .svc-tag { font:600 10px var(--mono); }
+
+  .legend { display:flex; flex-wrap:wrap; gap:14px; font-size:11.5px; color:var(--muted); margin-top:8px; }
+  .legend span b { font-family:var(--mono); color:var(--ink); }
+
+  footer { margin-top:40px; padding:28px 0 60px; border-top:1px solid var(--line); color:var(--ghost); font-size:12px; }
+  footer .wrap { line-height:1.9; }
+  a.inline { color:var(--blue); }
+  .tier { display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-bottom:1px dashed var(--line2); }
+  .tier:last-child { border-bottom:none; }
+  .tier-badge { flex:none; font:800 11px var(--mono); border-radius:6px; padding:3px 8px; margin-top:2px; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">AIOps Platform · 2026 H2 系統改造總覽 · 給 DevOps 團隊</div>
+    <h1>從單一 Agent 到治理化的 Multi-Agent 平台</h1>
+    <p>這一輪把平台重構成四件事：多 Agent 的明確分工、知識與規則的來源治理、記憶的三級信任階梯、以及四語系支援。本文著重「做了什麼能力、為什麼這樣設計」，運維細節隨附。</p>
+    <div class="meta">
+      <span class="pill">Multi-Agent</span>
+      <span class="pill">Knowledge &amp; Rules</span>
+      <span class="pill">Memory 重構</span>
+      <span class="pill">4 語系</span>
+      <span class="pill">Supervisor 治理</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#arch">1 架構總覽</a>
+    <a href="#agents">2 Agents 分工</a>
+    <a href="#knowledge">3 知識與規則</a>
+    <a href="#memory">4 記憶重構</a>
+    <a href="#i18n">5 多語系</a>
+    <a href="#governance">6 治理閉環</a>
+    <a href="#ops">7 運維速查</a>
+  </div>
+</nav>
+
+<!-- 1 架構 -->
+<section id="arch">
+  <div class="wrap">
+    <div class="kicker">Section 1</div>
+    <h2><span class="num">1</span>架構總覽</h2>
+    <p class="lede">四個服務、各司其職、邊界清楚。核心設計原則：<b>單一 DB 擁有者</b>（只有 Java 碰 PostgreSQL），Agent 全部住 sidecar，前端只做 UI 與 proxy。</p>
+
+    <div class="svc">
+      <div class="svc-row">
+        <span class="svc-port">:8000</span>
+        <span class="svc-name">aiops-app</span>
+        <span class="svc-desc">Next.js standalone。UI 渲染 + <code>/api/</code> proxy。不直接連 sidecar/simulator/DB。</span>
+        <span class="chip c-blue">Frontend</span>
+      </div>
+      <div class="svc-row">
+        <span class="svc-port">:8002</span>
+        <span class="svc-name">aiops-java-api</span>
+        <span class="svc-desc">Spring Boot，<b>唯一 DB 擁有者</b>。所有 PostgreSQL 讀寫、JWT auth、business CRUD、pipeline/skill/alarm registry、治理簽核。</span>
+        <span class="chip c-ink">Java · DB</span>
+      </div>
+      <div class="svc-row">
+        <span class="svc-port">:8050</span>
+        <span class="svc-name">python_ai_sidecar</span>
+        <span class="svc-desc">LangGraph + Pipeline Executor。<b>所有 Agent 住這裡</b>（chat orchestrator、Glass Box builder、Supervisor）。透過 Java client 對話，永不直連 DB。</span>
+        <span class="chip c-purple">Agents</span>
+      </div>
+      <div class="svc-row">
+        <span class="svc-port">:8012</span>
+        <span class="svc-name">ontology-simulator</span>
+        <span class="svc-desc">純資料服務（MES 後端），API 與 production ontology 相同。不知道 Agent 的存在。</span>
+        <span class="chip c-cyan">Data Source</span>
+      </div>
+      <div class="svc-row">
+        <span class="svc-port">:8003</span>
+        <span class="svc-name">aiops-java-scheduler</span>
+        <span class="svc-desc">排程觸發（Auto-Patrol、記憶生命週期 janitor）。</span>
+        <span class="chip c-amber">Scheduler</span>
+      </div>
+    </div>
+
+    <div class="principle">
+      <b>資料流原則</b>：前端 → Java（一切業務） → sidecar（Agent 推理） → simulator（取資料）。sidecar 需要任何 DB 資料都經 Java client，<b>不存在 sidecar → PostgreSQL 的直連</b>。這讓 DB schema 演進只需改一處，也讓 Agent 層可獨立擴縮。
+    </div>
+    <div class="legend">
+      <span>DB：<b>PostgreSQL + pgvector</b>（knowledge/memory embedding）· MongoDB（simulator）</span>
+      <span>部署：<b>EC2 systemd</b> · <code>deploy/update.sh</code>（前端）· <code>java-update.sh</code>（Java+sidecar）</span>
+    </div>
+  </div>
+</section>
+
+<!-- 2 Agents -->
+<section id="agents">
+  <div class="wrap">
+    <div class="kicker">Section 2</div>
+    <h2><span class="num">2</span>Agents 分工</h2>
+    <p class="lede">執行組織是 <b>code 資產</b>：改動走 git → deploy → gate，一般 user 不直接編輯。每個 Agent 只做窄任務，「下一步做什麼」由 graph 決定，不塞進 prompt。</p>
+
+    <div class="tblwrap"><table>
+      <tr><th>Agent</th><th>職責</th><th>關鍵設計</th></tr>
+      <tr><td><b>Planner</b></td><td>把需求拆成 phase 計畫（goal_plan / replan）</td><td>block-agnostic，只寫 intent 不綁 block</td></tr>
+      <tr><td><b>Builder</b></td><td>選 block、填參數、組 DAG（agentic_phase_loop）</td><td>每 phase 有 round 預算；空回應守門避免鬼打牆</td></tr>
+      <tr><td><b>Repair</b></td><td>卡關時三路對齊診斷、修 canvas</td><td>需求 × canvas × 結構化拒因；明確移除壞節點</td></tr>
+      <tr><td><b>Verifier</b></td><td>結構 + 實測驗收</td><td><b>零 LLM，純確定性</b> — 拒因可單測、可信</td></tr>
+      <tr><td><b>Chat orchestrator</b></td><td>對話路由（v2, LangGraph）</td><td>intent_classifier + intent_completeness 皆 graph node</td></tr>
+      <tr><td><b>Supervisor</b></td><td>平台 SRE + 知識策展人（見第 6 節）</td><td>只有提案權，落地一律經人簽核</td></tr>
+    </table></div>
+
+    <div class="principle">
+      <b>核心原則 — flow 寫 graph，不寫 prompt</b>：任何「下一步該做什麼／呼叫哪個 tool」的決策禁止塞進 LLM system prompt。理由：LLM 的自由意志會違抗 prompt 規則（已多次證實）；graph node 是 pure function、可單測；出錯時 graph 知道是哪個 node fail，prompt-flow 只能猜「LLM 又走偏了」。LLM 在每個 node 內只做思考型工作（分類／抽參／寫答），不決定下一步。
+    </div>
+
+    <h3>Verifier 為什麼零 LLM</h3>
+    <div class="before-after">
+      <div class="ba-box ba-before">若驗收也用 LLM 判斷 → 不穩定、無法單測、每個 case 都可能飄</div>
+      <div class="ba-arrow">→</div>
+      <div class="ba-box ba-after">結構檢查（param schema / port 相容）+ 實測（跑一次看 rows）都是確定性程式碼 → 拒因結構化、可回饋給 Builder 下一 round 精準修正</div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 Knowledge -->
+<section id="knowledge">
+  <div class="wrap">
+    <div class="kicker">Section 3</div>
+    <h2><span class="num">3</span>知識與規則</h2>
+    <p class="lede">工作手冊是 <b>data 資產</b>：改動走 UI → DB，維護者是人（PE / IT_ADMIN）與受治理的 Agent 寫入。核心原則：<b>文件是 LLM 的唯一來源</b>。</p>
+
+    <div class="tblwrap"><table>
+      <tr><th>類別</th><th>用途</th><th>維護</th><th>使用者</th></tr>
+      <tr><td><b>Directives</b></td><td>每次回覆必掛的硬規則</td><td>IT_ADMIN</td><td>chat agent（every turn）</td></tr>
+      <tr><td><b>Knowledge</b></td><td>領域知識，RAG 按相關性取用（plan / execute 分層 + always_on）</td><td>人 + Agent 寫入（經治理）</td><td>Planner、Builder</td></tr>
+      <tr><td><b>Lexicon</b></td><td>行話 → 標準詞改寫</td><td>PE</td><td>chat 前處理</td></tr>
+      <tr><td><b>Examples</b></td><td>回答風格示範（few-shot）</td><td>PE</td><td>chat agent</td></tr>
+      <tr><td><b>Block docs</b></td><td>block 的<b>唯一文件來源</b></td><td>人終審</td><td>Builder LLM、Block Advisor</td></tr>
+      <tr><td><b>MCP description</b></td><td>外部資料源的<b>唯一文件來源</b></td><td>IT_ADMIN</td><td>orchestrator、生成器</td></tr>
+    </table></div>
+
+    <div class="principle">
+      <b>禁止 hardcode 文件到 prompt</b>：LLM 需要了解某個 block／MCP 時，一律從 DB 動態讀 <code>description</code> + <code>input_schema</code>。理由：若 block 行為改了但 prompt 的 hardcode 沒跟著改，LLM 會產生錯誤的 code。單一來源（DB）才能保證前端、Agent、文件抽屜三邊一致。
+    </div>
+
+    <div class="principle">
+      <b>禁止把 case-specific rule 塞進 prompt</b>：某個 case 失敗 → 不是「再加一條規則」，而是問根因原則。每條 case rule 六個月後都會被新變形繞過。正確做法：抽象成一句原則寫 prompt、或移到 graph node 做確定性檢查、或改 schema。
+    </div>
+  </div>
+</section>
+
+<!-- 4 Memory -->
+<section id="memory">
+  <div class="wrap">
+    <div class="kicker">Section 4</div>
+    <h2><span class="num">4</span>記憶重構 — 三級信任階梯</h2>
+    <p class="lede">Agent 在戰場上留下三種筆記，<b>可信度遞減、生效門檻遞增</b>。訊號來源決定生效速度。這是這輪最核心的架構決策。</p>
+
+    <div class="card">
+      <div class="tier">
+        <span class="tier-badge c-purple">W1</span>
+        <div><b>偏好（Planner 寫）</b> — user <b>親手</b>修改 plan（例：SPC 圖要附 UCL/LCL）。全系統可信度最高的訊號，因為是 user 本人的動作。<span class="chip c-green">立即生效</span> 個人 scope，<code>/me 我的偏好</code> 可自助管理。</div>
+      </div>
+      <div class="tier">
+        <span class="tier-badge c-amber">W2</span>
+        <div><b>文件便利貼（Builder 寫）</b> — agent 踩坑後的自述（例：block_unnest 的 limit 型別易誤）。改的是全域共用文件，錯了污染所有人。<span class="chip c-amber">進待審佇列</span> agent 不准直接改 block docs。</div>
+      </div>
+      <div class="tier">
+        <span class="tier-badge c-red" style="color:#fbfbf9;background:#b42318;">W3</span>
+        <div><b>修正（Repair 寫）</b> — agent 從一次修復推廣的通則，可能只是巧合。<span class="chip" style="color:#b42318;background:#fdf0ee;border:1px solid #f3c6bf;">draft，不參與檢索</span> 等同這筆知識還不存在，需 Supervisor 找旁證轉正。</div>
+      </div>
+    </div>
+
+    <h3>生命週期與索引（V75 新增）</h3>
+    <div class="grid2">
+      <div class="card">
+        <b style="font-size:13px;">狀態機</b>
+        <p style="margin:8px 0 0;color:var(--muted);"><code>draft → active → stale → archived</code></p>
+        <ul style="margin-top:8px;">
+          <li>draft 逾 <b>30 天</b>未轉正 → 自動 archived</li>
+          <li>episodic 逾 <b>90 天</b> → stale</li>
+          <li>preference 零召回 <b>180 天</b> → 提 PRUNE</li>
+          <li>domain/procedure <b>年審</b>（review_at）</li>
+        </ul>
+        <p style="margin:8px 0 0;font-size:12px;color:var(--faint);">確定性 janitor 每日跑（Java scheduler），非策展判斷。</p>
+      </div>
+      <div class="card">
+        <b style="font-size:13px;">索引 + 檢索權重</b>
+        <p style="margin:8px 0 0;color:var(--muted);"><b>subject 索引</b>：每筆記憶掛 <code>subject_kind</code>（block/tool/skill/request_class）— 讓「按 block 聚合」查案成為可能。</p>
+        <p style="margin:8px 0 0;color:var(--muted);"><b>權重檢索</b>（flag，預設 OFF）：<code>cosine × priority × 180天半衰期</code> + 每類名額（preference ≤1、episodic ≤1）防單一類洗版。</p>
+        <p style="margin:8px 0 0;font-size:12px;color:var(--faint);">關鍵擔憂「久了只是一堆 memory」→ 由代謝（PRUNE/MERGE）+ 名額回答。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 i18n -->
+<section id="i18n">
+  <div class="wrap">
+    <div class="kicker">Section 5</div>
+    <h2><span class="num">5</span>多語系支援</h2>
+    <p class="lede">四語系：<b>繁中 / 簡中 / English / 日本語</b>。核心決策：<b>介面殼翻譯、資料不翻（source is truth）、對話交給 LLM</b>。</p>
+
+    <div class="grid3">
+      <div class="card">
+        <b style="font-size:13px;color:var(--blue);">介面殼</b>
+        <p style="font-size:13px;margin:8px 0 0;color:var(--muted);">next-intl v4，<b>cookie-based 無 URL routing</b>（內部工具不需 SEO）。14 個 namespace，繁中為源語言。GLOSSARY 術語約束（OOC/Cpk 保留英文）。<code>check-i18n-literals</code> 防回歸。</p>
+      </div>
+      <div class="card">
+        <b style="font-size:13px;color:var(--green);">資料值</b>
+        <p style="font-size:13px;margin:8px 0 0;color:var(--muted);">tool_id、chart、DB 的 block/skill 描述、記憶內容<b>一律原貌</b>。source is truth — 生成物保持生成時語言，不回溯翻譯。</p>
+      </div>
+      <div class="card">
+        <b style="font-size:13px;color:var(--purple);">LLM 對話</b>
+        <p style="font-size:13px;margin:8px 0 0;color:var(--muted);">回覆跟隨 user 語系（<code>locale_directive</code> 注入 prompt）。繁中回空字串保持 prompt byte-identical（不影響基線/cache）。日文用です・ます体。</p>
+      </div>
+    </div>
+
+    <div class="principle">
+      <b>設計優勢</b>：wire 上送「code + 結構化參數」、顯示層才翻譯（同 event-wrapper 原則）。因此 Java / sidecar <b>完全不用知道有幾種語言</b> — 加一個語系只動前端 catalog。<code>users.locale</code> 存跨裝置偏好，cookie 是本機快取。
+    </div>
+  </div>
+</section>
+
+<!-- 6 Governance -->
+<section id="governance">
+  <div class="wrap">
+    <div class="kicker">Section 6</div>
+    <h2><span class="num">6</span>治理閉環 — Supervisor</h2>
+    <p class="lede">Supervisor 是平台的 <b>SRE 兼知識策展人</b>：監督執行體系的健康與知識體系的品質，產出<b>有證據的提案</b>。硬規則：<b>只有提案權，落地一律經人簽核</b>。</p>
+
+    <h3>三個監督面</h3>
+    <div class="grid3">
+      <div class="card"><span class="chip c-blue">S1</span> <b style="font-size:13px;"> 執行健康</b><p style="font-size:13px;margin:8px 0 0;color:var(--muted);">build 成功率、rounds、拒因分布、退步偵測 → 診斷 + 調參提案</p></div>
+      <div class="card"><span class="chip c-purple">S2</span> <b style="font-size:13px;"> 知識品質</b><p style="font-size:13px;margin:8px 0 0;color:var(--muted);">召回命中、W1–W3 佇列、零召回事件 → PRUNE/PROMOTE/MERGE/DOC_REVISE</p></div>
+      <div class="card"><span class="chip c-cyan">S3</span> <b style="font-size:13px;"> 成本資源</b><p style="font-size:13px;margin:8px 0 0;color:var(--muted);">花費、cache、provider 品質（空回應率）→ 異常警報 + 設定調整提案</p></div>
+    </div>
+
+    <h3>查案（Case Lesson Learned）— 這輪的旗艦能力</h3>
+    <p>Supervisor 自己翻失敗紀錄找根因：把「開發者人肉盯 trace」自動化。<b>防垃圾記憶是硬規則</b>：</p>
+    <ul>
+      <li>單一 case 熱點 → <b>什麼都不留</b>（不值得任何記憶）</li>
+      <li>知識提案必須 <b>≥3 個不同 request 的同型失敗</b> + 泛化聲明</li>
+      <li><b>修文件優先於加記憶</b>（改一次蓋住所有未來 case）</li>
+      <li>成本閘：每次 ≤3 個 LLM 深挖、去重在 LLM 之前、選案/彙整/回寫零 LLM → <b>一次巡檢約 7–17k tokens ≈ 幾美分</b>，比一個 user build 還省</li>
+    </ul>
+
+    <h3>簽核路由 — 信任階梯</h3>
+    <div class="tblwrap"><table>
+      <tr><th>來源</th><th>誰批</th><th>為什麼</th></tr>
+      <tr><td>ON_DUTY 現場人員（教它/回報）</td><td><span class="chip c-purple">PE</span></td><td>驗證現場經驗的領域正確性</td></tr>
+      <tr><td>Agent 提的（策展、增量/可復原）</td><td><span class="chip c-green">Supervisor 自動核</span></td><td>agent 提的由 Supervisor 同意即可；全程 audit</td></tr>
+      <tr><td>Supervisor 查出來的（forensics）+ 設定/PRUNE 刪除</td><td><span class="chip c-ink">IT_ADMIN</span></td><td>平台級決策 + 刪除永遠留人</td></tr>
+    </table></div>
+
+    <h3>提案的生命週期</h3>
+    <div class="card">
+      <p style="margin:0;font-size:14px;"><b>提案</b> <span style="color:var(--ghost);">→</span> <b>簽核</b> <span style="color:var(--ghost);">→</span> <b>落地</b> <span style="color:var(--ghost);">→</span> <b>成效回寫</b></p>
+      <p style="margin:10px 0 0;color:var(--muted);">每個提案是<b>案情四段</b>（發生了什麼 / 觀察到的問題 / 影響對象 / 提議）+ 證據鏈（<span class="mono">▣</span> 系統事實 · <span class="mono">△</span> 自述 · <span class="mono">◆</span> 記憶，可點回原始 build 紀錄）。落地滿 7 天 Supervisor 自動回寫成效（「拒因 X n→m」）。手動觸發時有<b>阻擋式進度罩</b>（共 N 筆、檢查到第 X 筆），activity-id 防重複，舊提案自動 supersede。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7 Ops -->
+<section id="ops">
+  <div class="wrap">
+    <div class="kicker">Section 7</div>
+    <h2><span class="num">7</span>運維速查</h2>
+    <p class="lede">給值班 DevOps 的最小操作集。</p>
+    <div class="grid2">
+      <div class="card">
+        <b style="font-size:13px;">部署</b>
+        <ul>
+          <li><code>deploy/update.sh</code> — 前端 + simulator（自動 restart aiops-app、ontology-simulator）</li>
+          <li><code>deploy/java-update.sh</code> — Java + sidecar（rebuild jar + venv，restart 兩者）</li>
+          <li>⚠ <code>update.sh</code> <b>不</b>重啟 sidecar/Java；改 sidecar 或 Java 要跑 <code>java-update.sh</code></li>
+        </ul>
+      </div>
+      <div class="card">
+        <b style="font-size:13px;">DB migration</b>
+        <ul>
+          <li>Flyway <b>在 prod 停用</b> — 新 <code>V**.sql</code> 要 SSH EC2 手動 <code>psql -f</code></li>
+          <li>System MCP 每次啟動自動 sync（canonical 在 main.py）</li>
+          <li>pgvector 欄位禁用 JPA save，走 native <code>CAST(:vec AS vector)</code></li>
+        </ul>
+      </div>
+      <div class="card">
+        <b style="font-size:13px;">排程</b>
+        <ul>
+          <li>記憶 janitor：Java scheduler，每日 03:20（生命週期歸檔）</li>
+          <li>Supervisor forensics：crontab 每日 03:40（<code>/var/log/supervisor-forensics.log</code>）</li>
+          <li>Auto-Patrol：event/schedule 觸發</li>
+        </ul>
+      </div>
+      <div class="card">
+        <b style="font-size:13px;">Stack 版本（須跨檔一致）</b>
+        <ul>
+          <li>Java <b>Temurin 17</b> · Spring Boot 3.5.14 · Maven</li>
+          <li>Python <b>3.11</b> · Node.js <b>20.18</b></li>
+          <li>Frontend <code>output: "standalone"</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <b>AIOps 平台改造總覽</b> · 2026 H2 · 給 DevOps 團隊<br>
+    設計語彙與 Supervisor 工作台、記憶效應 Console 共用（<span class="mono">▣ 系統事實 · △ 自述 · ◆ 記憶</span>，全文無 emoji）。<br>
+    延伸：<a class="inline" href="SUPERVISOR_WALKTHROUGH.html">Supervisor 運作說明</a>（三個 Agent 的筆記與治理，product-owner 敘事版）· 部署細節見 <span class="mono">deploy/</span> 與各服務 README。
+  </div>
+</footer>
+
+</body>
+</html>
