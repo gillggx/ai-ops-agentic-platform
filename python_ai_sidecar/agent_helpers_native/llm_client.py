@@ -302,19 +302,31 @@ class AnthropicLLMClient(BaseLLMClient):
 
         # 2026-07-07 model-tuning knobs (env-driven, default OFF so the Haiku
         # default path is byte-identical):
-        #   ANTHROPIC_THINKING_BUDGET=N  → extended thinking with N budget
-        #     tokens. Claude 4+ deliberate-reasoning is gated behind this; the
-        #     Sonnet bake-offs ran with it off (fast-answer mode) while GLM's
-        #     reasoning is on by default — an unfair comparison.
-        #   ANTHROPIC_TEMPERATURE=x      → sampling temp (thinking-OFF only;
-        #     the API rejects temperature != 1 when thinking is enabled).
+        #   ANTHROPIC_THINKING_EFFORT=low|medium|high — Claude 5 family
+        #     (claude-sonnet-5 / fable): adaptive thinking + output effort.
+        #     The 400 from thinking.type=enabled told us: Claude 5 replaced
+        #     the budget API with adaptive+effort.
+        #   ANTHROPIC_THINKING_BUDGET=N — Claude 4 family (haiku-4-5 etc.):
+        #     extended thinking with N budget tokens.
+        #   ANTHROPIC_TEMPERATURE=x — sampling temp (thinking-OFF only; the
+        #     API rejects temperature != 1 with thinking on).
+        # Both thinking envs go through extra_body so older SDK typed kwargs
+        # never reject them client-side.
+        _think_effort = os.environ.get("ANTHROPIC_THINKING_EFFORT", "").strip().lower()
         _think_budget = 0
         try:
             _think_budget = int(os.environ.get("ANTHROPIC_THINKING_BUDGET", "0") or 0)
         except ValueError:
             _think_budget = 0
-        if _think_budget > 0:
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": _think_budget}
+        if _think_effort in ("low", "medium", "high"):
+            kwargs["extra_body"] = {
+                "thinking": {"type": "adaptive"},
+                "output_config": {"effort": _think_effort},
+            }
+        elif _think_budget > 0:
+            kwargs["extra_body"] = {
+                "thinking": {"type": "enabled", "budget_tokens": _think_budget},
+            }
             # max_tokens must exceed the thinking budget (thinking bills as output)
             if max_tokens <= _think_budget:
                 kwargs["max_tokens"] = _think_budget + max_tokens
