@@ -115,6 +115,16 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         not block_id
         or snap_status in {"validation_error", "failed", "error"}
     ):
+        # 2026-07-06: preview can fail (status=failed, rows=null) WITHOUT the
+        # executor emitting an error string — e.g. a chart block whose upstream
+        # produced 0 rows. The old fallback "(no error message captured)" gave
+        # the agent nothing to act on, so it looped blind (p5 3-metric compare
+        # thrashed 25 rounds). When snap_error is empty, synthesize an
+        # actionable diagnostic from exec_trace: name the empty/failed upstream
+        # nodes. Generic (no per-block/per-case rule) — it only reports state.
+        _reason = (snap_error or "")[:300] or _synthesize_failure_reason(
+            state=state, block_id=block_id, snap_status=snap_status, rows=rows,
+        )
         return _emit_reject(
             state=state,
             cur_phase=cur_phase,
@@ -122,7 +132,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             covers=[],
             rows=None,
             result=snap_status or "validation_error",
-            error_message=(snap_error or "")[:300] or "(no error message captured)",
+            error_message=_reason,
             missing_for_phase=[
                 f"fix {block_id or 'block'} params (look at error_message) "
                 f"or pick a different block"
@@ -385,6 +395,46 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
 # ─────────────────────────────────────────────────────────────────────
 # Reject emission — single path for all three blockers.
 # ─────────────────────────────────────────────────────────────────────
+
+
+def _synthesize_failure_reason(
+    *,
+    state: BuildGraphState,
+    block_id: str | None,
+    snap_status: str,
+    rows: int | None,
+) -> str:
+    """Build an actionable reject reason when the executor gave no error text.
+
+    A preview that fails with rows=null and no error string starves the agent
+    of feedback. Rather than emit "(no error message captured)", inspect
+    exec_trace and name upstream nodes that produced 0 rows — the single most
+    common cause of a downstream block failing to render. Deterministic, reads
+    only state (no LLM, no per-case rule)."""
+    parts: list[str] = [
+        f"block {block_id or 'node'} preview 失敗"
+        f"（status={snap_status or 'failed'}, rows={rows}）"
+        "，executor 未回傳錯誤字串。"
+    ]
+    exec_trace = state.get("exec_trace") or {}
+    empty_ups: list[str] = []
+    for nid, snap in exec_trace.items():
+        if not isinstance(snap, dict):
+            continue
+        r = snap.get("rows")
+        if r in (0, None) and nid != state.get("v30_last_mutated_logical_id"):
+            empty_ups.append(f"{nid}({snap.get('block_id') or '?'}) rows={r}")
+    if empty_ups:
+        parts.append(
+            "上游有節點產出 0 筆資料：" + "、".join(empty_ups[:5])
+            + " — 先 inspect 這些節點的輸出欄位/參數，確認它們有回資料再接下游。"
+        )
+    else:
+        parts.append(
+            "常見原因：上游資料為空、或欄位/型別與此 block 需求不符。"
+            "請 inspect 上游 node 的輸出欄位，或改用相容的 block。"
+        )
+    return "".join(parts)[:400]
 
 
 def _emit_reject(

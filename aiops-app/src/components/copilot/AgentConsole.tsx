@@ -89,6 +89,7 @@ export interface ConsoleUsage {
   inputTokens: number;
   outputTokens: number;
   cacheRead: number;
+  latencyMs: number;
 }
 
 // ── reducer state (owned by the host panel via useConsoleStore) ────────────
@@ -201,6 +202,7 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
         inputTokens: Number(ev.input_tokens ?? 0),
         outputTokens: Number(ev.output_tokens ?? 0),
         cacheRead: Number(ev.cache_read ?? 0),
+        latencyMs: Number(ev.latency_ms ?? 0),
       }});
     } else if (kind === "memory_recall") {
       const mems = Array.isArray(p.recalled) ? (p.recalled as RecalledMem[]) : [];
@@ -581,18 +583,25 @@ export function AgentConsole({
   // ── cost ──
   const cost = useMemo(() => {
     const per: Record<string, { tok: number; cache: number }> = {};
-    let total = 0, cacheHit = 0, cacheDen = 0;
+    let total = 0, cacheHit = 0, cacheDen = 0, latency = 0;
     usage.forEach((u) => {
       const k = u.agent in AGD ? u.agent : "builder";
       const p = per[k] ?? (per[k] = { tok: 0, cache: 0 });
       const t = u.inputTokens + u.outputTokens;
       p.tok += t; p.cache += u.cacheRead;
       total += t; cacheHit += u.cacheRead; cacheDen += u.inputTokens;
+      latency += u.latencyMs;
     });
     // cache_read tokens are NOT included in input_tokens (provider
     // convention) — the hit rate denominator is fresh + cached input.
     const den = cacheHit + cacheDen;
-    return { per, total, cachePct: den > 0 ? Math.round((cacheHit / den) * 100) : 0 };
+    // calls = one usage event per LLM call; avgMs = mean per-call latency
+    // (null until the first call lands) — surfaces "叫太多次" vs "每次都慢".
+    const calls = usage.length;
+    return {
+      per, total, cachePct: den > 0 ? Math.round((cacheHit / den) * 100) : 0,
+      calls, avgMs: calls > 0 ? latency / calls : null,
+    };
   }, [usage]);
 
   // auto-scroll (pause when user scrolled up)
@@ -984,6 +993,9 @@ export function AgentConsole({
           <span style={{ fontFamily: M, fontSize: 10, color: "#55534d", whiteSpace: "nowrap" }}>
             {(cost.total / 1000).toFixed(1)}k tok · ${(cost.total * USD_PER_TOKEN).toFixed(3)}
             {cost.cachePct > 0 ? ` · cache ${cost.cachePct}%` : ""}
+            {cost.calls > 0
+              ? ` · ${cost.calls} calls · avg ${(cost.avgMs! / 1000).toFixed(1)}s`
+              : ""}
           </span>
           <span style={{ fontSize: 9, color: "#b3b0a8" }}>{costOpen ? "▴" : "▾"}</span>
         </div>

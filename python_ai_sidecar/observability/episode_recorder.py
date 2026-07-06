@@ -112,6 +112,14 @@ class EpisodeRecorder:
     def take_phase_rejects(self, phase_id: str) -> list[dict[str, Any]]:
         return self._phase_rejects.pop(phase_id, [])
 
+    def last_reject(self, phase_id: str) -> Optional[dict[str, Any]]:
+        """Most recent structured verifier reject for a phase, WITHOUT
+        consuming it. graph.py's repair delegate uses this as a fallback when
+        state's v30_last_verifier_reject was already reset by a phase advance —
+        otherwise the W3 correction memo records an empty '拒因:{}'."""
+        rejects = self._phase_rejects.get(phase_id) or []
+        return rejects[-1] if rejects else None
+
     # ── sync, hot-path safe ────────────────────────────────────────────
     def record(
         self,
@@ -139,11 +147,18 @@ class EpisodeRecorder:
             "ts": _now_iso(),
         })
         if event_type == "llm_usage":
-            c = self._cost.setdefault(who, {"input": 0, "output": 0, "cache_read": 0, "calls": 0})
+            c = self._cost.setdefault(
+                who,
+                {"input": 0, "output": 0, "cache_read": 0, "calls": 0, "latency_ms": 0},
+            )
             c["input"] += input_tokens or 0
             c["output"] += output_tokens or 0
             c["cache_read"] += cache_read or 0
             c["calls"] += 1
+            # 2026-07-06: accumulate total latency so finalize's cost_json can
+            # carry avg-time-per-call (total_latency_ms / calls) without relying
+            # on per-step rows, which may be dropped on flush failure.
+            c["latency_ms"] += latency_ms or 0
         if event_type in CONSOLE_MIRROR_TYPES:
             entry: dict[str, Any] = {
                 "kind": event_type,
@@ -156,6 +171,7 @@ class EpisodeRecorder:
                 entry["input_tokens"] = input_tokens or 0
                 entry["output_tokens"] = output_tokens or 0
                 entry["cache_read"] = cache_read or 0
+                entry["latency_ms"] = latency_ms or 0
             self._console_mirror.append(entry)
 
     def drain_console_events(self) -> list[dict[str, Any]]:

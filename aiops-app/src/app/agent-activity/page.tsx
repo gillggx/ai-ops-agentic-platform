@@ -227,9 +227,28 @@ function metaResult(status: string | null | undefined): { label: string; fg: str
     return { label: "成功", fg: "#059669", bg: "#ecfdf5" };
   if (s === "failed" || s === "error" || s === "handover" || s === "aborted")
     return { label: "失敗", fg: "#dc2626", bg: "#fef2f2" };
+  // interrupted = janitor swept an orphaned 'running' row (sidecar died
+  // mid-build). Distinct from 失敗 — the build never got to fail, it was cut.
+  if (s === "interrupted")
+    return { label: "中斷", fg: "#92400e", bg: "#fffbeb" };
   if (s === "running" || s === "in_progress")
     return { label: "進行中", fg: "#b45309", bg: "#fffbeb" };
   return { label: status ?? "—", fg: "#6b7280", bg: "#f3f4f6" };
+}
+
+/** Aggregate LLM-call stats across agents from cost_json. calls comes from the
+ *  recorder's per-agent rollup; latency_ms is the summed per-call latency, so
+ *  avg = total latency / calls. Returns null avg when there were no calls. */
+function llmStats(cost: Record<string, unknown> | null): { calls: number; avgMs: number | null } {
+  if (!cost || typeof cost !== "object") return { calls: 0, avgMs: null };
+  let calls = 0, latency = 0;
+  for (const v of Object.values(cost)) {
+    if (v && typeof v === "object") {
+      calls += Number((v as Record<string, unknown>).calls ?? 0);
+      latency += Number((v as Record<string, unknown>).latency_ms ?? 0);
+    }
+  }
+  return { calls, avgMs: calls > 0 ? latency / calls : null };
 }
 
 function MetaBar({ episodeKey }: { episodeKey: string }) {
@@ -262,6 +281,7 @@ function MetaBar({ episodeKey }: { episodeKey: string }) {
   const result = metaResult(d.status);
   const phases = d.phase_count != null ? String(d.phase_count) : "—";
   const trigger = deriveTrigger(d);
+  const { calls, avgMs } = llmStats(d.cost);
 
   return (
     <div style={{
@@ -279,6 +299,9 @@ function MetaBar({ episodeKey }: { episodeKey: string }) {
       </MetaCell>
       <MetaCell label="階段數" value={phases} />
       <MetaCell label="觸發來源" value={trigger} />
+      <MetaCell label="LLM 呼叫" value={calls > 0 ? `${calls} 次` : "—"} />
+      <MetaCell label="平均每次耗時"
+        value={avgMs != null ? `${(avgMs / 1000).toFixed(1)}s` : "—"} />
     </div>
   );
 }

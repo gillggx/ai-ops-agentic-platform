@@ -690,7 +690,13 @@ def build_graph():
                 # Supervisor reviews + promotes drafts (Phase 5).
                 mw = get_current_memory_writer()
                 if mw is not None and pid and result == "retry":
+                    # state's reject may have been reset by a phase advance
+                    # before repair ran → fall back to the recorder's last
+                    # structured reject for this phase so the W3 memo records a
+                    # real reason instead of an empty '拒因:{}' (2026-07-06).
                     _rej = state.get("v30_last_verifier_reject") or {}
+                    if not _rej and rec is not None:
+                        _rej = rec.last_reject(pid) or {}
                     # W2 governance: link the draft to the block involved when
                     # the reject payload carries one; else omit the subject.
                     _rej_blk = str(_rej.get("block_id") or "") or None
