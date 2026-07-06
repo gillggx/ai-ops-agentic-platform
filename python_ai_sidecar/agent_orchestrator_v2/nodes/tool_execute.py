@@ -647,15 +647,16 @@ async def _execute_build_pipeline_live(
             "status": "plan_confirm_pending",
             "build_session_id": plan_pause.get("session_id") or sid,
             "n_phases": len(plan_pause.get("phases") or []),
-            "note": (
-                # 2026-07-06: the BUILD PLAN card itself has the confirm button
-                # + footnote, so a chat bubble repeating「計畫已 ready 請確認」is
-                # pure noise (user feedback). Tell the LLM to stay SILENT.
-                "Build paused at the plan-confirm gate — the user already sees "
-                "the plan card with its own review/edit/confirm controls. Do "
-                "NOT write any reply text (the card is self-explanatory) and "
-                "do NOT call build_pipeline_live again. Return an empty answer."
-            ),
+            # 2026-07-06 v2: the plan card has its own confirm controls, so no
+            # chat bubble is wanted here. v1 told the LLM "return an empty
+            # answer" — the LLM obeyed, but llm_call's empty-output guard
+            # treated the obedient empty reply as a provider failure (2 retries
+            # → user saw「LLM 呼叫失敗 (empty_output)」). Per flow-in-graph-not-
+            # prompt: skip llm_call entirely via _force_synthesis; an empty
+            # AIMessage is injected in the tool-message loop so synthesis ends
+            # the turn silently.
+            "_force_synthesis": True,
+            "note": "plan-confirm gate: turn ends here (card is self-explanatory).",
         }
 
     # v19: if we hit intent_confirm pause, return clarify_pending tool result
@@ -1528,6 +1529,14 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             tool_messages.append(AIMessage(
                 content="我已寫下要建的內容（見上方卡片），請確認 ✅ 後我會開始建。",
             ))
+
+        # 2026-07-06: plan-confirm gate ends the turn silently — the BUILD PLAN
+        # card carries its own review/edit/confirm controls, so any bubble here
+        # is noise. Empty AIMessage = synthesis emits nothing (same convention
+        # as intent_completeness._FORCE_SYNTH_REPLY).
+        if (isinstance(result, dict)
+                and result.get("status") == "plan_confirm_pending"):
+            tool_messages.append(AIMessage(content=""))
 
     # Collect flat_data/ui_config from pipeline or query_data results
     _state_flat_data = None
