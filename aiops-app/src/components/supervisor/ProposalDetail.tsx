@@ -15,7 +15,7 @@ import { useTranslations } from "next-intl";
 import {
   TOK, LIFE_STYLE, LifeState, Proposal,
   typeChip, statusChip, signerOf, canSign as canSignFn,
-  proposalTitle, isSuperseded, supersededBy, fmtWhen, metaSource,
+  proposalTitle, isSuperseded, supersededBy, fmtWhen, metaSource, agentsOf,
 } from "./model";
 import { NarrativeCard } from "./NarrativeCard";
 import { statusLabelKey } from "./ProposalList";
@@ -23,7 +23,11 @@ import { statusLabelKey } from "./ProposalList";
 /** Types with a typeDesc.* i18n entry — unknown types skip the desc line. */
 const DESCRIBED_TYPES = new Set(["MERGE", "CORRECT", "PRUNE", "PROMOTE", "DOC_REVISE"]);
 
-export function ProposalDetail({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: {
+export interface EpisodeMetaLite {
+  status?: string | null; started_at?: string | null;
+  finished_at?: string | null; user_id?: number | null;
+}
+export function ProposalDetail({ p, roles, busy, onApprove, onReject, onShelve, onGoto, episodeMeta }: {
   p: Proposal | null;
   roles: string[];
   busy: boolean;
@@ -31,6 +35,7 @@ export function ProposalDetail({ p, roles, busy, onApprove, onReject, onShelve, 
   onReject: (id: number, reason: string) => void;
   onShelve: () => void;
   onGoto: (id: number) => void;
+  episodeMeta?: Record<string, EpisodeMetaLite>;
 }) {
   const t = useTranslations("sup");
 
@@ -45,15 +50,17 @@ export function ProposalDetail({ p, roles, busy, onApprove, onReject, onShelve, 
     );
   }
   return <DetailInner key={p.id} p={p} roles={roles} busy={busy}
-    onApprove={onApprove} onReject={onReject} onShelve={onShelve} onGoto={onGoto} />;
+    onApprove={onApprove} onReject={onReject} onShelve={onShelve} onGoto={onGoto}
+    episodeMeta={episodeMeta ?? {}} />;
 }
 
-function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: {
+function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto, episodeMeta }: {
   p: Proposal; roles: string[]; busy: boolean;
   onApprove: (id: number) => void;
   onReject: (id: number, reason: string) => void;
   onShelve: () => void;
   onGoto: (id: number) => void;
+  episodeMeta: Record<string, EpisodeMetaLite>;
 }) {
   const t = useTranslations("sup");
   const [reason, setReason] = useState("");
@@ -116,6 +123,13 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
             font: `600 9.5px ${TOK.mono}`, color: "#0e7490", background: "#e9f5f8",
             border: "1px solid #bfe0e9", borderRadius: 4, padding: "1px 6px",
           }}>{t(`source.${metaSource(p)}`)}</span>
+          {metaSource(p) === "curation" && agentsOf(p).length > 0 && (
+            <span style={{ font: `600 9.5px ${TOK.mono}`, color: "#6d28d9" }}>
+              {agentsOf(p).length > 1
+                ? t("source.agentByMulti", { agent: agentsOf(p)[0] })
+                : t("source.agentBy", { agent: agentsOf(p)[0] })}
+            </span>
+          )}
           <span style={{
             font: `600 10.5px ${TOK.mono}`, color: sc.fg, background: sc.bg,
             border: `1px solid ${sc.bd}`, borderRadius: 999, padding: "1px 8px",
@@ -158,7 +172,18 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
                       ? `/agent-activity?episode=${encodeURIComponent(id)}`
                       : `/admin/build-traces?trace=${encodeURIComponent(id)}`, "_blank");
                   }}
-                  title={id}
+                  title={(() => {
+                    const em = episodeMeta[id];
+                    if (!em) return id;
+                    const dur = em.started_at && em.finished_at
+                      ? `${Math.max(1, Math.round((Date.parse(em.finished_at) - Date.parse(em.started_at)) / 1000))}s`
+                      : em.finished_at ? "" : "進行中";
+                    const who = em.user_id != null ? `#${em.user_id}` : "—";
+                    const when = em.started_at ? new Date(em.started_at).toLocaleString() : "—";
+                    const done = /fail|handover/i.test(String(em.status)) ? "失敗"
+                      : /finish|success|done/i.test(String(em.status)) ? "成功" : String(em.status ?? "—");
+                    return `${who} · ${when} · ${dur} · ${done}`;
+                  })()}
                   style={{ cursor: "pointer", font: `600 10px ${TOK.mono}`, color: "#475569",
                            border: "1px solid #d7dee7", borderRadius: 4, padding: "1px 6px",
                            maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

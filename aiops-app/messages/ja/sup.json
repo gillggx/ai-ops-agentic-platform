@@ -105,6 +105,17 @@
     "subject": "影響対象",
     "action": "提議"
   },
+  "docrev": {
+    "toggleShow": "ドキュメント比較を表示",
+    "toggleHide": "ドキュメント比較を隠す",
+    "currentDoc": "現在のドキュメント",
+    "proposed": "提案する修正・追加段落",
+    "note": "これは追加・修正を提案する段落です。承認後に上のドキュメントへ統合されます。全面的な書き換えではありません。",
+    "docUnavailable": "（現在のドキュメントを読み込めません）",
+    "loading": "ドキュメントを読み込み中…",
+    "docEmpty": "（現在のドキュメントは空です）",
+    "draftEmpty": "（修正案がありません）"
+  },
   "digest": {
     "empty": "Supervisor レポートは未生成です",
     "hint": "定期レポート（週報 / 日報）は W2 スケジューラーが生成し、ここに表示されます"
@@ -138,10 +149,12 @@
     "daysTip": "調査対象のデータ期間"
   },
   "source": {
-    "forensics": "調査",
-    "curation": "整理",
-    "forensicsTip": "Supervisor のトレース調査（失敗/ループ）による提案",
-    "curationTip": "Supervisor のナレッジ整理による提案"
+    "forensics": "Case 学習",
+    "curation": "Agent 提案",
+    "forensicsTip": "Supervisor が失敗/ループのトレースから抽出した教訓",
+    "curationTip": "agent が蓄積したメモリを集約し Supervisor が提出",
+    "agentBy": "{agent} が提案",
+    "agentByMulti": "{agent} ほかが提案"
   },
   "progress": {
     "titleForensics": "調査実行中",

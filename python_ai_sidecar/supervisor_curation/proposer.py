@@ -118,6 +118,86 @@ def _k_label(idx: dict[int, dict], kid: Any) -> str:
     return title[:120] if title else f"knowledge #{kid}"
 
 
+# ── originating-agent attribution (deterministic) ────────────────────────
+#
+# Each curation proposal targets some knowledge rows; those rows record which
+# RoleAgent wrote them via `written_by` (planner|builder|repair|human|
+# supervisor|null). We surface the distinct authors on proposer_meta.agents,
+# MAIN one first, so the /supervisor UI can show "who this proposal is about".
+#
+# `written_by` is a top-level field on every knowledge row of the curation
+# input — see build_user_prompt's `kk` list and _fmt_rows which read it via
+# `row.get("written_by")`. If Java ever stops sending it the rows simply lack
+# the key, `row.get("written_by")` returns None, and we degrade to [] (logged
+# once below).
+
+_warned_no_written_by = False
+
+
+def _maybe_warn_no_written_by(knowledge_index: dict[int, dict]) -> None:
+    """Log ONCE per process if the input's knowledge rows never carry
+    `written_by` (Java not sending it yet) — attribution silently becomes []."""
+    global _warned_no_written_by
+    if _warned_no_written_by or not knowledge_index:
+        return
+    if not any("written_by" in row for row in knowledge_index.values()):
+        _warned_no_written_by = True
+        logger.info(
+            "supervisor curation: curation-input knowledge rows carry no "
+            "'written_by' field — agent attribution disabled (agents=[]).")
+
+
+def _written_by_ordered(kids: list[Any],
+                        knowledge_index: dict[int, dict]) -> list[str]:
+    """Distinct `written_by` authors of the given knowledge ids, MAIN-first:
+    most frequent first, ties broken by first-seen order. `null` is skipped;
+    `human` is kept as "human"."""
+    counts: dict[str, int] = {}
+    first_seen: list[str] = []
+    for kid in kids:
+        try:
+            row = knowledge_index.get(int(kid))
+        except (TypeError, ValueError):
+            row = None
+        if row is None:
+            continue
+        raw = row.get("written_by")
+        wb = str(raw).strip() if raw is not None else ""
+        if not wb:  # null / blank → mapped out
+            continue
+        if wb not in counts:
+            counts[wb] = 0
+            first_seen.append(wb)
+        counts[wb] += 1
+    # stable sort keeps first-seen order for frequency ties
+    return sorted(first_seen, key=lambda a: -counts[a])
+
+
+def agents_for_proposal(proposal_type: str, proposal: dict[str, Any],
+                        knowledge_index: dict[int, dict]) -> list[str]:
+    """Distinct originating agents for the knowledge rows THIS proposal targets,
+    MAIN one first. `proposal` is the full proposal dict (has `proposal` body +
+    `target_ids`). PROMOTE creates a NEW row and DOC_REVISE targets block-doc
+    memos (not agent_knowledge) → both return []."""
+    body = (proposal or {}).get("proposal") or {}
+    kids: list[Any] = []
+    if proposal_type == "MERGE":
+        keep = body.get("keep_id")
+        if keep is not None:
+            kids.append(keep)
+        kids.extend(body.get("remove_ids") or [])
+    elif proposal_type == "CORRECT":
+        tid = body.get("target_id")
+        if tid is not None:
+            kids.append(tid)
+    elif proposal_type == "PRUNE":
+        kids.extend(body.get("target_ids") or [])
+    else:
+        # PROMOTE (new row, no existing target) / DOC_REVISE (block-doc memos)
+        return []
+    return _written_by_ordered(kids, knowledge_index)
+
+
 def compose_narrative(p: dict[str, Any], cin: dict[str, Any]) -> dict[str, Any]:
     """四段敘事 {happened, observed, subject, action} — 純 deterministic 組裝，
     不再問 LLM。輸入是「已通過 validate_proposal 的提案」+ 當次 curation input
@@ -354,6 +434,8 @@ async def run_curation(java_base: str, internal_token: str,
         return res
 
     meta = {"source": "supervisor_curation", "model": res.llm_model, "input_rows": len(known_k) + len(known_m)}
+    kidx = _knowledge_index(cin)
+    _maybe_warn_no_written_by(kidx)
     async with httpx.AsyncClient(timeout=10.0) as http:
         for p in proposals[:MAX_PROPOSALS_PER_RUN]:
             err = validate_proposal(p if isinstance(p, dict) else {}, known_k, known_m)
@@ -371,7 +453,10 @@ async def run_curation(java_base: str, internal_token: str,
                 "narrative": json.dumps(compose_narrative(p, cin),
                                         ensure_ascii=False),
                 "rationale": str(p.get("rationale") or "")[:500],
-                "proposer_meta": meta,
+                "proposer_meta": {
+                    **meta,
+                    "agents": agents_for_proposal(p["action_type"], p, kidx),
+                },
             }
             try:
                 pr = await http.post(f"{java_base}/internal/supervisor/proposals",

@@ -62,6 +62,14 @@ interface Detail {
   cost: Record<string, unknown> | null;
   plan: Array<Record<string, unknown>> | null;
   steps: StepRow[];
+  // case-meta bar fields — Java ships these in a parallel workstream, so every
+  // one may be missing on older episodes. Read defensively.
+  user_id?: number | string | null;
+  username?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  phase_count?: number | null;
 }
 
 const AGENT_COLOR: Record<string, string> = {
@@ -160,6 +168,7 @@ export default function AgentActivityPage() {
             )
           )}
         </div>
+        {selected && <MetaBar key={selected} episodeKey={selected} />}
         {!selected ? (
           <div style={{ padding: 40, color: "#9ca3af" }}>左側選一個 build。</div>
         ) : tab === "trace" ? (
@@ -170,6 +179,98 @@ export default function AgentActivityPage() {
           <ScorecardTab key={selected} episodeKey={selected} />
         )}
       </main>
+    </div>
+  );
+}
+
+// ── case-meta bar (spec item #2 「一個 case 要有基本 meta」) ──────────────
+// NOTE: this page is not yet i18n'd — its strings are inline CJK like the rest
+// of the file. Migrating agent-activity to next-intl is a separate follow-up;
+// the new meta-bar strings below intentionally match the page's existing style.
+
+/** ms → "2m 14s" / "47s" / "1h 03m". null/negative → null (caller shows 進行中). */
+function humanizeDuration(ms: number | null | undefined): string | null {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+/** Best-effort 觸發來源 from the instruction prefix. Only "[resume:<kind>]"
+ *  gives a real source; "[intent_confirmed:…]" is stripped (the underlying
+ *  chat-vs-builder origin is not persisted), everything else → "—". */
+function deriveTrigger(instruction: string | null | undefined): string {
+  if (!instruction) return "—";
+  const resume = instruction.match(/^\s*\[resume:([^\]]+)\]/);
+  if (resume) return `resume · ${resume[1].trim()}`;
+  return "—";
+}
+
+function metaResult(status: string | null | undefined): { label: string; fg: string; bg: string } {
+  const s = (status ?? "").toLowerCase();
+  if (s === "finished" || s === "success" || s === "done")
+    return { label: "成功", fg: "#059669", bg: "#ecfdf5" };
+  if (s === "failed" || s === "error" || s === "handover" || s === "aborted")
+    return { label: "失敗", fg: "#dc2626", bg: "#fef2f2" };
+  if (s === "running" || s === "in_progress")
+    return { label: "進行中", fg: "#b45309", bg: "#fffbeb" };
+  return { label: status ?? "—", fg: "#6b7280", bg: "#f3f4f6" };
+}
+
+function MetaBar({ episodeKey }: { episodeKey: string }) {
+  const [d, setD] = useState<Detail | null>(null);
+  useEffect(() => {
+    getJson<Detail>(`/api/agent-activity/episodes/${encodeURIComponent(episodeKey)}`)
+      .then(setD)
+      .catch(() => setD(null)); // fail-open — bar just doesn't render
+  }, [episodeKey]);
+  if (!d) return null;
+
+  const who = d.username?.trim()
+    || (d.user_id != null && String(d.user_id) !== "" ? `#${d.user_id}` : null)
+    || "—";
+  const when = d.started_at ? new Date(d.started_at).toLocaleString() : "—";
+  const dur = humanizeDuration(d.duration_ms);
+  const running = (d.status ?? "").toLowerCase() === "running" || (!dur && !d.finished_at);
+  const duration = dur ?? (running ? "進行中" : "—");
+  const result = metaResult(d.status);
+  const phases = d.phase_count != null ? String(d.phase_count) : "—";
+  const trigger = deriveTrigger(d.instruction);
+
+  return (
+    <div style={{
+      display: "flex", flexWrap: "wrap", gap: 8, padding: "12px 20px",
+      borderBottom: "1px solid #e5e7eb", background: "#fafafa",
+    }}>
+      <MetaCell label="誰觸發" value={who} />
+      <MetaCell label="何時" value={when} />
+      <MetaCell label="花費多久" value={duration} />
+      <MetaCell label="結果">
+        <span style={{
+          fontSize: 12, fontWeight: 600, color: result.fg, background: result.bg,
+          borderRadius: 999, padding: "1px 10px",
+        }}>{result.label}</span>
+      </MetaCell>
+      <MetaCell label="階段數" value={phases} />
+      <MetaCell label="觸發來源" value={trigger} />
+    </div>
+  );
+}
+
+function MetaCell({ label, value, children }: { label: string; value?: string; children?: React.ReactNode }) {
+  return (
+    <div style={{
+      border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff",
+      padding: "6px 12px", minWidth: 96,
+    }}>
+      <div style={{ fontSize: 10.5, color: "#9ca3af", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>
+        {children ?? value ?? "—"}
+      </div>
     </div>
   );
 }

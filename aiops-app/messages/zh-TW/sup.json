@@ -105,6 +105,17 @@
     "subject": "影響對象",
     "action": "提議"
   },
+  "docrev": {
+    "toggleShow": "展開文件對照",
+    "toggleHide": "收合文件對照",
+    "currentDoc": "目前文件",
+    "proposed": "建議修訂 / 新增段落",
+    "note": "這是建議補入/修訂的段落，核准後併入上方文件；非整份重寫",
+    "docUnavailable": "（目前文件無法載入）",
+    "loading": "載入文件中…",
+    "docEmpty": "（目前文件為空）",
+    "draftEmpty": "（無修訂草案）"
+  },
   "digest": {
     "empty": "Supervisor 報告尚未生成",
     "hint": "定期報告（週報 / 日報）由 W2 排程產生，上線後會出現在這裡"
@@ -138,10 +149,12 @@
     "daysTip": "查案掃描的資料期間"
   },
   "source": {
-    "forensics": "查案",
-    "curation": "策展",
-    "forensicsTip": "Supervisor 從失敗案/迴圈 trace 取證產出",
-    "curationTip": "Supervisor 知識庫體檢產出"
+    "forensics": "Case 學習",
+    "curation": "Agent 提出",
+    "forensicsTip": "Supervisor 從失敗案/迴圈 trace 萃取的教訓（Case Lesson Learned）",
+    "curationTip": "由 agent 累積的記憶彙整而成，經 Supervisor 提出",
+    "agentBy": "{agent} 提出",
+    "agentByMulti": "{agent} 等提出"
   },
   "progress": {
     "titleForensics": "查案巡檢進行中",

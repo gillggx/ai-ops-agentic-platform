@@ -26,6 +26,7 @@ import {
   TOK, EV_STYLE, Proposal, NarrativeSubject,
   narrativeOf, proposalWhy, whatLines, targetChips, evidenceRows,
 } from "./model";
+import { DocRevisePreview } from "./DocRevisePreview";
 
 function subjectHref(s: NarrativeSubject): string | null {
   const kind = String(s.kind ?? "").toLowerCase();
@@ -41,6 +42,9 @@ function subjectHref(s: NarrativeSubject): string | null {
 export function NarrativeCard({ p, compact = false }: { p: Proposal; compact?: boolean }) {
   const t = useTranslations("sup");
   const narr = narrativeOf(p);
+  // DOC_REVISE proposals get a readable current-doc vs proposed-draft preview
+  // (collapsible) instead of leaving the draft as a raw JSON evidence dump.
+  const isDocRevise = p.action_type === "DOC_REVISE";
 
   const labelCell: React.CSSProperties = {
     font: `700 ${compact ? 10 : 10.5}px ${TOK.mono}`, color: TOK.muted, paddingTop: 2,
@@ -175,6 +179,7 @@ export function NarrativeCard({ p, compact = false }: { p: Proposal; compact?: b
           {narr.action?.trim() ? <div style={{ marginBottom: compact ? 3 : 5 }}>{narr.action}</div> : null}
           {bullets}
           {targetRow}
+          {isDocRevise && <DocRevisePreview p={p} />}
         </div>
       </div>
     );
@@ -188,6 +193,7 @@ export function NarrativeCard({ p, compact = false }: { p: Proposal; compact?: b
       <div style={{ ...bodyText, color: TOK.ink }}>
         {bullets}
         {targetRow}
+        {isDocRevise && <DocRevisePreview p={p} />}
       </div>
 
       <div style={labelCell}>{t("detail.why")}</div>

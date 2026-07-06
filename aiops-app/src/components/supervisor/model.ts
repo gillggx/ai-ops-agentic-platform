@@ -141,7 +141,9 @@ export interface LlmDailyRow {
 }
 
 // ── role / signer mapping ───────────────────────────────────────────────
-const PE_SIGNED = new Set(["PRUNE", "PROMOTE", "MERGE", "CORRECT", "DOC_REVISE"]);
+// 2026-07-06 政策：document（block 文件 = 系統的一部份）→ IT_ADMIN；
+// knowledge（PRUNE/PROMOTE/MERGE/CORRECT 操作 agent_knowledge）→ PE。
+const PE_SIGNED = new Set(["PRUNE", "PROMOTE", "MERGE", "CORRECT"]);
 
 export function signerOf(p: Proposal): "PE" | "IT_ADMIN" {
   return PE_SIGNED.has(p.action_type) ? "PE" : "IT_ADMIN";
@@ -167,6 +169,15 @@ export function metaSource(p: Proposal): "forensics" | "curation" {
   const m = p.proposer_meta as unknown;
   const raw = m && typeof m === "object" ? JSON.stringify(m) : String(m ?? "");
   return raw.includes("forensics") ? "forensics" : "curation";
+}
+
+/** curation（Agent 提出）提案的來源 agents（主要在前）；forensics 不帶。 */
+export function agentsOf(p: Proposal): string[] {
+  const m = p.proposer_meta as unknown;
+  const meta = m && typeof m === "object" ? m as Record<string, unknown>
+    : (() => { try { return JSON.parse(String(m ?? "{}")); } catch { return {}; } })();
+  const a = meta.agents;
+  return Array.isArray(a) ? a.map(String) : [];
 }
 
 /** "為什麼" — proposal.why, else rationale unless it was already the title. */
@@ -219,7 +230,7 @@ export function whatLines(p: Proposal): WhatLine[] {
         { key: "what.docBlock", params: { block: s(b.block_id) } },
         { key: "what.docMemos", params: { count: memoIds } },
       ];
-      if (str(b.revised_doc_draft)) out.push({ key: "what.docDraft" });
+      // 草稿內容改由 DocRevisePreview 呈現（可展開文件對照），此處不再放 what 行
       return out;
     }
     default: {
@@ -290,7 +301,9 @@ export function evidenceRows(p: Proposal): EvidenceRow[] {
   }
   // no structured evidence — render the raw proposal fields as one ▣ row
   const rest: Record<string, unknown> = {};
-  const skip = new Set(["title", "why", "evidence", "targets"]);
+  // display_title/revised_doc_draft/trace_refs 已由標題與 DocRevisePreview
+  // 呈現，evidence 原始 dump 不重複列。
+  const skip = new Set(["title", "display_title", "why", "evidence", "targets", "revised_doc_draft", "trace_refs"]);
   for (const [k, v] of Object.entries(obj(p))) if (!skip.has(k)) rest[k] = v;
   return [{ kind: "sys", label: null, labelKey: "evidence.raw", detail: compactJson(rest) || "—" }];
 }

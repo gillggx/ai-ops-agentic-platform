@@ -6,11 +6,14 @@ import com.aiops.api.domain.agentepisode.AgentEpisodeEntity;
 import com.aiops.api.domain.agentepisode.AgentEpisodeRepository;
 import com.aiops.api.domain.agentepisode.AgentStepEntity;
 import com.aiops.api.domain.agentepisode.AgentStepRepository;
+import com.aiops.api.domain.user.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.*;
 
 /**
@@ -26,12 +29,15 @@ public class AgentActivityService {
 
     private final AgentEpisodeRepository episodes;
     private final AgentStepRepository steps;
+    private final UserRepository users;
     private final ObjectMapper mapper;
 
     public AgentActivityService(AgentEpisodeRepository episodes,
-                                AgentStepRepository steps, ObjectMapper mapper) {
+                                AgentStepRepository steps,
+                                UserRepository users, ObjectMapper mapper) {
         this.episodes = episodes;
         this.steps = steps;
+        this.users = users;
         this.mapper = mapper;
     }
 
@@ -49,6 +55,8 @@ public class AgentActivityService {
             m.put("step_count", steps.countByEpisodeId(e.getId()));
             m.put("cost", JsonUtils.parseObject(mapper, e.getCostJson()));
             m.put("started_at", e.getStartedAt() == null ? null : e.getStartedAt().toString());
+            m.put("finished_at", e.getFinishedAt() == null ? null : e.getFinishedAt().toString());
+            m.put("user_id", e.getUserId());
             out.add(m);
         }
         return out;
@@ -67,6 +75,17 @@ public class AgentActivityService {
         out.put("user_feedback", JsonUtils.parseListOfObjects(mapper, e.getUserFeedback()));
         out.put("cost", JsonUtils.parseObject(mapper, e.getCostJson()));
         out.put("plan", JsonUtils.parseListOfObjects(mapper, e.getPlanJson()));
+        // Case-level metadata a reviewer needs (spec: agent-activity episode detail).
+        OffsetDateTime startedAt = e.getStartedAt();
+        OffsetDateTime finishedAt = e.getFinishedAt();
+        out.put("user_id", e.getUserId());
+        out.put("username", resolveUsername(e.getUserId()));
+        out.put("started_at", startedAt == null ? null : startedAt.toString());
+        out.put("finished_at", finishedAt == null ? null : finishedAt.toString());
+        out.put("duration_ms", (startedAt == null || finishedAt == null)
+                ? null : Duration.between(startedAt, finishedAt).toMillis());
+        // phase_count = number of phases in the plan array (0 when plan is absent).
+        out.put("phase_count", JsonUtils.parseListOfObjects(mapper, e.getPlanJson()).size());
         List<Map<String, Object>> stepList = new ArrayList<>();
         for (AgentStepEntity s : steps.findByEpisodeIdOrderByTsAsc(e.getId())) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -130,6 +149,13 @@ public class AgentActivityService {
         out.put("available", true);
         out.put("rounds", calls);
         return out;
+    }
+
+    /** Resolve the episode owner's username by user id (single-row PK lookup).
+     *  Null id or unknown user → null (the reviewer's card falls back to user_id). */
+    private String resolveUsername(Long userId) {
+        if (userId == null) return null;
+        return users.findById(userId).map(u -> u.getUsername()).orElse(null);
     }
 
     /** Normalized merge key: null/blank phase → "-", null/blank/"null" round → "0".

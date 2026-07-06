@@ -10,7 +10,7 @@
 import { useTranslations } from "next-intl";
 import {
   TOK, Proposal, typeChip, statusChip, signerOf, canSign,
-  proposalTitle, fmtWhen, metaSource,
+  proposalTitle, fmtWhen, metaSource, agentsOf,
 } from "./model";
 
 export function statusLabelKey(status: string): string {
@@ -71,6 +71,13 @@ export function ProposalList({ items, roles, selectedId, onSelect }: {
                 font: `600 9px ${TOK.mono}`, color: "#0e7490", background: "#e9f5f8",
                 border: "1px solid #bfe0e9", borderRadius: 4, padding: "0 5px",
               }}>{t(`source.${metaSource(p)}`)}</span>
+              {metaSource(p) === "curation" && agentsOf(p).length > 0 && (
+                <span style={{ font: `600 9px ${TOK.mono}`, color: "#6d28d9" }}>
+                  {agentsOf(p).length > 1
+                    ? t("source.agentByMulti", { agent: agentsOf(p)[0] })
+                    : t("source.agentBy", { agent: agentsOf(p)[0] })}
+                </span>
+              )}
               <span style={{ flex: 1 }} />
               <span style={{
                 font: `600 10.5px ${TOK.mono}`, color: sc.fg, background: sc.bg,

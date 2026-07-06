@@ -13,6 +13,7 @@ import pytest
 
 from python_ai_sidecar.supervisor_curation.proposer import (
     MAX_PROPOSALS_PER_RUN,
+    agents_for_proposal,
     build_user_prompt,
     compose_narrative,
     run_curation,
@@ -134,9 +135,12 @@ def _patch_java(monkeypatch, curation_input: dict, posted: list):
 
 
 CIN = {
-    "draft_corrections": [{"id": 20, "title": "d", "body": "b", "memo_class": "correction"}],
-    "live_preferences": [{"id": 10, "title": "p1", "body": "b"},
-                         {"id": 11, "title": "p1-dup", "body": "b"}],
+    "draft_corrections": [{"id": 20, "title": "d", "body": "b",
+                           "memo_class": "correction", "written_by": "planner"}],
+    "live_preferences": [{"id": 10, "title": "p1", "body": "b",
+                          "written_by": "builder"},
+                         {"id": 11, "title": "p1-dup", "body": "b",
+                          "written_by": "builder"}],
     "live_presentations": [],
     "pending_doc_memos": [{"id": 40, "block_id": "block_union", "memo": "m"}],
 }
@@ -161,6 +165,10 @@ def test_run_curation_validates_and_posts_only_good(monkeypatch):
     assert len(posted) == 2
     assert {p["action_type"] for p in posted} == {"MERGE", "DOC_REVISE"}
     assert posted[0]["proposer_meta"]["model"]
+    # attribution rides on every proposal's proposer_meta
+    by_type = {p["action_type"]: p["proposer_meta"]["agents"] for p in posted}
+    assert by_type["MERGE"] == ["builder"]   # rows 10 + 11 both builder-written
+    assert by_type["DOC_REVISE"] == []       # block-doc memos aren't agent knowledge
 
 
 def test_run_curation_caps_proposals(monkeypatch):
@@ -294,3 +302,64 @@ def test_build_user_prompt_contains_sections():
     p = build_user_prompt(CIN)
     assert "draft corrections" in p and "doc memos" in p
     assert "block_union" in p
+
+
+# ── agents_for_proposal (originating-agent attribution) ──────────────────
+
+# id → row (written_by is the only field the helper reads)
+KIDX = {
+    1: {"id": 1, "written_by": "builder"},
+    2: {"id": 2, "written_by": "planner"},
+    3: {"id": 3, "written_by": "builder"},
+    4: {"id": 4, "written_by": "repair"},
+    5: {"id": 5, "written_by": "human"},
+    6: {"id": 6, "written_by": None},        # null → mapped out
+    7: {"id": 7},                            # missing key → treated as null
+}
+
+
+def test_agents_merge_main_first_ordering():
+    # rows 1(builder), 2(planner), 3(builder) → builder x2 (main) then planner
+    agents = agents_for_proposal(
+        "MERGE", {"proposal": {"keep_id": 1, "remove_ids": [2, 3]}}, KIDX)
+    assert agents == ["builder", "planner"]
+
+
+def test_agents_merge_ties_broken_by_first_seen():
+    # planner(2) and repair(4) each once → tie → first-seen (keep_id first) wins
+    agents = agents_for_proposal(
+        "MERGE", {"proposal": {"keep_id": 2, "remove_ids": [4]}}, KIDX)
+    assert agents == ["planner", "repair"]
+
+
+def test_agents_correct_single():
+    assert agents_for_proposal(
+        "CORRECT", {"proposal": {"target_id": 4, "new_body": "x"}}, KIDX) == ["repair"]
+
+
+def test_agents_prune_dedupes():
+    # 1(builder) + 3(builder) + 2(planner) → dedupe builder, main-first
+    assert agents_for_proposal(
+        "PRUNE", {"proposal": {"target_ids": [1, 3, 2]}}, KIDX) == ["builder", "planner"]
+
+
+def test_agents_human_kept_null_mapped_out():
+    # 5(human) kept; 6(null) + 7(missing) dropped
+    assert agents_for_proposal(
+        "PRUNE", {"proposal": {"target_ids": [5, 6, 7]}}, KIDX) == ["human"]
+
+
+def test_agents_promote_and_doc_revise_are_empty():
+    assert agents_for_proposal(
+        "PROMOTE", {"target_ids": [1, 2],
+                    "proposal": {"memo_class": "domain", "title": "t", "body": "b"}},
+        KIDX) == []
+    assert agents_for_proposal(
+        "DOC_REVISE", {"proposal": {"block_id": "b", "memo_ids": [40],
+                                    "revised_doc_draft": "d"}}, KIDX) == []
+
+
+def test_agents_unknown_id_skipped():
+    # id 999 not in index → skipped, not crash
+    assert agents_for_proposal(
+        "PRUNE", {"proposal": {"target_ids": [999, 1]}}, KIDX) == ["builder"]

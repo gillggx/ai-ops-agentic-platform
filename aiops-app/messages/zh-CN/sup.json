@@ -105,6 +105,17 @@
     "subject": "影响对象",
     "action": "提议"
   },
+  "docrev": {
+    "toggleShow": "展开文档对照",
+    "toggleHide": "收合文档对照",
+    "currentDoc": "当前文档",
+    "proposed": "建议修订 / 新增段落",
+    "note": "这是建议补入/修订的段落，核准后并入上方文档；非整份重写",
+    "docUnavailable": "（当前文档无法加载）",
+    "loading": "加载文档中…",
+    "docEmpty": "（当前文档为空）",
+    "draftEmpty": "（无修订草案）"
+  },
   "digest": {
     "empty": "Supervisor 报告尚未生成",
     "hint": "定期报告（周报 / 日报）由 W2 排程产生，上线后会出现在这里"
@@ -138,10 +149,12 @@
     "daysTip": "查案扫描的数据期间"
   },
   "source": {
-    "forensics": "查案",
-    "curation": "策展",
-    "forensicsTip": "Supervisor 从失败案/循环 trace 取证产出",
-    "curationTip": "Supervisor 知识库体检产出"
+    "forensics": "Case 学习",
+    "curation": "Agent 提出",
+    "forensicsTip": "Supervisor 从失败案/循环 trace 萃取的教训（Case Lesson Learned）",
+    "curationTip": "由 agent 累积的记忆汇整而成，经 Supervisor 提出",
+    "agentBy": "{agent} 提出",
+    "agentByMulti": "{agent} 等提出"
   },
   "progress": {
     "titleForensics": "查案巡检进行中",

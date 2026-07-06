@@ -5,6 +5,8 @@ import com.aiops.api.domain.agentepisode.AgentEpisodeEntity;
 import com.aiops.api.domain.agentepisode.AgentEpisodeRepository;
 import com.aiops.api.domain.agentepisode.AgentStepEntity;
 import com.aiops.api.domain.agentepisode.AgentStepRepository;
+import com.aiops.api.domain.user.UserEntity;
+import com.aiops.api.domain.user.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,13 +35,15 @@ class AgentActivityServiceTest {
 
     private AgentEpisodeRepository episodes;
     private AgentStepRepository steps;
+    private UserRepository users;
     private AgentActivityService service;
 
     @BeforeEach
     void setUp() {
         episodes = mock(AgentEpisodeRepository.class);
         steps = mock(AgentStepRepository.class);
-        service = new AgentActivityService(episodes, steps, new ObjectMapper());
+        users = mock(UserRepository.class);
+        service = new AgentActivityService(episodes, steps, users, new ObjectMapper());
     }
 
     private AgentEpisodeEntity episode(String key, String traceFile) {
@@ -163,5 +167,71 @@ class AgentActivityServiceTest {
     void detail_unknownKeyThrowsNotFound() {
         when(episodes.findByEpisodeKey("nope")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.detail("nope")).isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void detail_includesCaseMetadata_withDurationAndPhaseCount() {
+        OffsetDateTime start = OffsetDateTime.parse("2026-07-01T10:00:00Z");
+        OffsetDateTime finish = start.plusSeconds(5); // 5000 ms
+        AgentEpisodeEntity e = episode("epM", null);
+        e.setUserId(7L);
+        e.setStartedAt(start);
+        e.setFinishedAt(finish);
+        e.setPlanJson("[{\"id\":\"p1\"},{\"id\":\"p2\"},{\"id\":\"p3\"}]");
+
+        UserEntity u = new UserEntity();
+        u.setUsername("pe_test");
+        when(users.findById(7L)).thenReturn(Optional.of(u));
+        when(episodes.findByEpisodeKey("epM")).thenReturn(Optional.of(e));
+        when(steps.findByEpisodeIdOrderByTsAsc(anyLong())).thenReturn(List.of());
+
+        Map<String, Object> out = service.detail("epM");
+
+        assertThat(out.get("user_id")).isEqualTo(7L);
+        assertThat(out.get("username")).isEqualTo("pe_test");
+        assertThat(out.get("started_at")).isEqualTo(start.toString());
+        assertThat(out.get("finished_at")).isEqualTo(finish.toString());
+        assertThat(out.get("duration_ms")).isEqualTo(5000L);
+        assertThat(out.get("phase_count")).isEqualTo(3);
+        // existing keys untouched
+        assertThat(out.get("episode_key")).isEqualTo("epM");
+        assertThat(out.get("status")).isEqualTo("success");
+    }
+
+    @Test
+    void detail_durationNull_whenFinishedAtNull() {
+        AgentEpisodeEntity e = episode("epN", null);
+        e.setUserId(null);                 // also exercise null user -> null username
+        e.setStartedAt(OffsetDateTime.parse("2026-07-01T10:00:00Z"));
+        e.setFinishedAt(null);
+        e.setPlanJson(null);               // null plan -> phase_count 0
+
+        when(episodes.findByEpisodeKey("epN")).thenReturn(Optional.of(e));
+        when(steps.findByEpisodeIdOrderByTsAsc(anyLong())).thenReturn(List.of());
+
+        Map<String, Object> out = service.detail("epN");
+
+        assertThat(out.get("finished_at")).isNull();
+        assertThat(out.get("duration_ms")).isNull();
+        assertThat(out.get("user_id")).isNull();
+        assertThat(out.get("username")).isNull();
+        assertThat(out.get("phase_count")).isEqualTo(0);
+    }
+
+    @Test
+    void list_rowIncludesUserIdAndFinishedAt() {
+        OffsetDateTime finish = OffsetDateTime.parse("2026-07-01T11:00:00Z");
+        AgentEpisodeEntity e = episode("epL", null);
+        e.setUserId(9L);
+        e.setFinishedAt(finish);
+        when(episodes.findAllByOrderByIdDesc(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(e));
+        when(steps.countByEpisodeId(anyLong())).thenReturn(4L);
+
+        List<Map<String, Object>> rows = service.list(10);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).get("user_id")).isEqualTo(9L);
+        assertThat(rows.get(0).get("finished_at")).isEqualTo(finish.toString());
     }
 }

@@ -48,6 +48,24 @@ export default function SupervisorPage() {
   const [busy, setBusy] = useState(false);
   const [healthTick, setHealthTick] = useState(0);
   const [startSignal, setStartSignal] = useState(0);
+  // case-meta（誰/何時/多久/結果）— episode 摘要 join，給提案的來源紀錄 chip hover
+  const [episodeMeta, setEpisodeMeta] = useState<Record<string, {
+    status?: string | null; started_at?: string | null;
+    finished_at?: string | null; user_id?: number | null;
+  }>>({});
+  useEffect(() => {
+    void (async () => {
+      try {
+        const rows = await api<Array<Record<string, unknown>>>("/api/agent-activity/episodes?limit=100");
+        const m: Record<string, { status?: string | null; started_at?: string | null; finished_at?: string | null; user_id?: number | null }> = {};
+        for (const r of rows) {
+          const k = String(r.episode_key ?? "");
+          if (k) m[k] = { status: r.status as string, started_at: r.started_at as string, finished_at: r.finished_at as string, user_id: r.user_id as number };
+        }
+        setEpisodeMeta(m);
+      } catch { /* fail-open：chip 仍可點，只是沒 hover 摘要 */ }
+    })();
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -205,6 +223,7 @@ export default function SupervisorPage() {
                 onReject={reject}
                 onShelve={() => setSelId(null)}
                 onGoto={(id) => { setTab("inbox"); setSelId(id); }}
+                episodeMeta={episodeMeta}
               />
             </div>
           )

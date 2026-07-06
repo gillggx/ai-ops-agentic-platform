@@ -105,6 +105,17 @@
     "subject": "Affected subject",
     "action": "Proposal"
   },
+  "docrev": {
+    "toggleShow": "Show doc comparison",
+    "toggleHide": "Hide doc comparison",
+    "currentDoc": "Current doc",
+    "proposed": "Proposed revision / addition",
+    "note": "This is the passage proposed to add/revise; on approval it merges into the doc above — not a full rewrite.",
+    "docUnavailable": "(current doc could not be loaded)",
+    "loading": "Loading doc…",
+    "docEmpty": "(current doc is empty)",
+    "draftEmpty": "(no revision draft)"
+  },
   "digest": {
     "empty": "Supervisor reports not generated yet",
     "hint": "Periodic reports (weekly / daily) are produced by the W2 scheduler and will appear here"
@@ -138,10 +149,12 @@
     "daysTip": "Scan window for forensics"
   },
   "source": {
-    "forensics": "forensics",
-    "curation": "curation",
-    "forensicsTip": "Produced by Supervisor trace forensics (failures/loops)",
-    "curationTip": "Produced by Supervisor knowledge curation"
+    "forensics": "Case lesson",
+    "curation": "Agent-proposed",
+    "forensicsTip": "Lesson distilled by Supervisor from failure/loop traces",
+    "curationTip": "Aggregated from agent-written memories, surfaced by Supervisor",
+    "agentBy": "by {agent}",
+    "agentByMulti": "by {agent} et al."
   },
   "progress": {
     "titleForensics": "Forensics run in progress",
