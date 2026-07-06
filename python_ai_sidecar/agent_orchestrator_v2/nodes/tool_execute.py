@@ -648,11 +648,13 @@ async def _execute_build_pipeline_live(
             "build_session_id": plan_pause.get("session_id") or sid,
             "n_phases": len(plan_pause.get("phases") or []),
             "note": (
-                "Build paused at the plan-confirm gate — the user sees the "
-                "P1..PN plan card and can edit each phase before building "
-                "(same gate as Pipeline Builder). Generate a SHORT reply "
-                "telling the user to review/edit/confirm the plan card, "
-                "then stop. Do NOT call build_pipeline_live again."
+                # 2026-07-06: the BUILD PLAN card itself has the confirm button
+                # + footnote, so a chat bubble repeating「計畫已 ready 請確認」is
+                # pure noise (user feedback). Tell the LLM to stay SILENT.
+                "Build paused at the plan-confirm gate — the user already sees "
+                "the plan card with its own review/edit/confirm controls. Do "
+                "NOT write any reply text (the card is self-explanatory) and "
+                "do NOT call build_pipeline_live again. Return an empty answer."
             ),
         }
 
