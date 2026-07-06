@@ -19,7 +19,9 @@
     "s3Cost": "本日のコスト",
     "s3Cache": "cache hit",
     "s3Empty": "LLM 空応答率",
-    "s3Note": "W2 バックエンド待ち — プレースホルダー"
+    "s3Calls": "本日の LLM calls",
+    "s3CacheRead": "cache read トークン",
+    "s3Note": "本日 · 全モデル合算"
   },
   "tabs": {
     "inbox": "提案受信箱",
@@ -96,6 +98,12 @@
   "evidence": {
     "raw": "proposal 原文"
   },
+  "narr": {
+    "happened": "何が起きたか",
+    "observed": "観察された問題",
+    "subject": "影響対象",
+    "action": "提議"
+  },
   "digest": {
     "empty": "Supervisor レポートは未生成です",
     "hint": "定期レポート（週報 / 日報）は W2 スケジューラーが生成し、ここに表示されます"
@@ -107,6 +115,7 @@
     "colLand": "反映",
     "colVerify": "Supervisor 検証",
     "lifecycle": "1 行 1 案件 · 提案 → 承認 → 反映 → 検証 の 4 段ライフサイクル",
-    "empty": "承認履歴はまだありません"
+    "empty": "承認履歴はまだありません",
+    "rejectReason": "却下理由：{reason}"
   }
 }

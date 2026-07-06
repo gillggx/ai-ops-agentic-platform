@@ -19,7 +19,9 @@
     "s3Cost": "cost today",
     "s3Cache": "cache hit",
     "s3Empty": "LLM empty-response rate",
-    "s3Note": "pending W2 backend — placeholder"
+    "s3Calls": "LLM calls today",
+    "s3CacheRead": "cache read tokens",
+    "s3Note": "today · aggregated across models"
   },
   "tabs": {
     "inbox": "Proposal inbox",
@@ -96,6 +98,12 @@
   "evidence": {
     "raw": "raw proposal"
   },
+  "narr": {
+    "happened": "What happened",
+    "observed": "Observed problem",
+    "subject": "Affected subject",
+    "action": "Proposal"
+  },
   "digest": {
     "empty": "Supervisor reports not generated yet",
     "hint": "Periodic reports (weekly / daily) are produced by the W2 scheduler and will appear here"
@@ -107,6 +115,7 @@
     "colLand": "Landed",
     "colVerify": "Supervisor verify",
     "lifecycle": "One row per case · propose → sign-off → land → verify lifecycle",
-    "empty": "No sign-off records yet"
+    "empty": "No sign-off records yet",
+    "rejectReason": "Reject reason: {reason}"
   }
 }

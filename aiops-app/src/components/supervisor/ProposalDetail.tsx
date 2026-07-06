@@ -3,9 +3,9 @@
 /**
  * Detail pane (right side of the master-detail inbox, design 1a).
  *
- * 三段式 body: 提案 (what) / 為什麼 (why) / 依據 (evidence), parsed
- * defensively from the proposal JSON — missing fields render "—".
- * target_ids show as purple ◆ chips linking into the knowledge workshop.
+ * Body = shared NarrativeCard: 案情四段 (發生了什麼 / 觀察到的問題 /
+ * 影響對象 / 提議) when the W2 narrative field is present, else the
+ * legacy 三段式 (提案 / 為什麼 / 依據) — all parsed defensively.
  * Approve = black button; reject requires a non-empty reason; 擱置 just
  * deselects. Geometric marks (✓ ● ○ ▣ △ ◆ ↗ ·) stay in JSX, not i18n.
  */
@@ -13,16 +13,12 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
-  TOK, EV_STYLE, LIFE_STYLE, LifeState, Proposal,
+  TOK, LIFE_STYLE, LifeState, Proposal,
   typeChip, statusChip, signerOf, canSign as canSignFn,
-  proposalTitle, proposalWhy, whatLines, targetChips, evidenceRows,
-  isSuperseded, supersededBy, fmtWhen,
+  proposalTitle, isSuperseded, supersededBy, fmtWhen,
 } from "./model";
+import { NarrativeCard } from "./NarrativeCard";
 import { statusLabelKey } from "./ProposalList";
-
-const labelCell: React.CSSProperties = {
-  font: `700 10.5px ${TOK.mono}`, color: TOK.muted, paddingTop: 2,
-};
 
 /** Types with a typeDesc.* i18n entry — unknown types skip the desc line. */
 const DESCRIBED_TYPES = new Set(["MERGE", "CORRECT", "PRUNE", "PROMOTE", "DOC_REVISE"]);
@@ -69,16 +65,22 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
   const superseded = isSuperseded(p);
   const supersederId = supersededBy(p);
   const signable = canSignFn(p, roles) && p.status === "proposed" && !superseded;
-  const why = proposalWhy(p);
-  const targets = targetChips(p);
 
+  // W2 lifecycle write-back — landed_at/landed_by + verify_result/verify_at
+  // may be missing on old rows → those stages fall back to todo / "—".
+  const landed = p.landed_at != null && p.landed_at !== "";
+  const verified = (p.verify_result ?? "") !== "" || (p.verify_at != null && p.verify_at !== "");
   const lifeStages: { labelKey: string; st: LifeState; note: string }[] = [
     { labelKey: "life.propose", st: "done", note: fmtWhen(p.created_at) },
     p.status === "proposed"
       ? { labelKey: "life.sign", st: "current", note: t("life.waitSigner", { signer }) }
       : { labelKey: "life.sign", st: "done", note: `#${p.reviewed_by ?? "?"} ${fmtWhen(p.reviewed_at)}` },
-    { labelKey: "life.land", st: "todo", note: "—" },   // W2 — lifecycle beyond 簽核 not tracked yet
-    { labelKey: "life.verify", st: "todo", note: "—" },
+    landed
+      ? { labelKey: "life.land", st: "done", note: `${p.landed_by != null ? `#${p.landed_by} ` : ""}${fmtWhen(p.landed_at)}` }
+      : { labelKey: "life.land", st: p.status === "approved" ? "current" : "todo", note: "—" },
+    verified
+      ? { labelKey: "life.verify", st: "done", note: `${p.verify_result ?? ""} ${fmtWhen(p.verify_at)}`.trim() }
+      : { labelKey: "life.verify", st: "todo", note: "—" },
   ];
 
   const submitReject = () => {
@@ -126,75 +128,9 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
         )}
       </div>
 
-      {/* 三段式 body */}
-      <div style={{
-        padding: "14px 18px", display: "grid", gridTemplateColumns: "64px 1fr",
-        rowGap: 14, columnGap: 14,
-      }}>
-        <div style={labelCell}>{t("detail.what")}</div>
-        <div style={{ fontSize: 13, lineHeight: 1.7 }}>
-          {whatLines(p).map((ln, i) => (
-            <div key={i} style={{ display: "flex", gap: 8 }}>
-              <span style={{ color: TOK.fainter }}>·</span>
-              <span style={"text" in ln
-                ? { fontFamily: TOK.mono, fontSize: 12, wordBreak: "break-all" } : undefined}>
-                {"text" in ln
-                  ? ln.text
-                  : t(ln.key as Parameters<typeof t>[0], ln.params)}
-              </span>
-            </div>
-          ))}
-          {targets.length > 0 && (
-            <div style={{ display: "flex", marginTop: 9, flexWrap: "wrap", gap: 5, alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: TOK.muted, marginRight: 2 }}>target_ids</span>
-              {targets.map((tg) => (
-                <span
-                  key={tg.id}
-                  title={tg.short ?? undefined}
-                  onClick={() => {
-                    if (tg.numeric) window.open(`/agent-knowledge?id=${tg.id}`, "_blank");
-                  }}
-                  style={{
-                    cursor: tg.numeric ? "pointer" : "default",
-                    font: `600 10.5px ${TOK.mono}`, color: TOK.purple,
-                    background: TOK.purpleBg, border: `1px solid ${TOK.purpleBd}`,
-                    borderRadius: 4, padding: "2px 7px",
-                  }}
-                >◆ #{tg.id}{tg.short ? ` ${tg.short}` : ""}</span>
-              ))}
-              <span style={{ fontSize: 10.5, color: TOK.faint }}>{t("detail.targetHint")}</span>
-            </div>
-          )}
-        </div>
-
-        <div style={labelCell}>{t("detail.why")}</div>
-        <div style={{ fontSize: 13, lineHeight: 1.7, color: TOK.body }}>{why ?? "—"}</div>
-
-        <div style={labelCell}>{t("detail.evidence")}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {evidenceRows(p).map((ev, i) => {
-            const st = EV_STYLE[ev.kind];
-            return (
-              <div key={i} style={{
-                display: "flex", gap: 10, alignItems: "flex-start",
-                border: `1px ${st.line} ${st.bd}`, background: st.bg,
-                borderRadius: 7, padding: "7px 11px",
-              }}>
-                <span style={{ font: `700 12px ${TOK.mono}`, color: st.fg, width: 16 }}>{st.sig}</span>
-                <span style={{ font: `600 11.5px ${TOK.mono}`, color: TOK.secondary, minWidth: 110 }}>
-                  {ev.label ?? (ev.labelKey ? t(ev.labelKey as Parameters<typeof t>[0]) : "—")}
-                </span>
-                <span style={{
-                  fontSize: 12, color: TOK.body, lineHeight: 1.55, flex: 1,
-                  wordBreak: "break-word",
-                }}>{ev.detail}</span>
-              </div>
-            );
-          })}
-          <div style={{ fontSize: 10.5, color: TOK.faint, marginTop: 2 }}>
-            ▣ {t("detail.legendSys")} · △ {t("detail.legendSelf")} · ◆ {t("detail.legendMem")}
-          </div>
-        </div>
+      {/* 案情四段 body (narrative) — falls back to 三段式 on old rows */}
+      <div style={{ padding: "14px 18px" }}>
+        <NarrativeCard p={p} />
       </div>
 
       {/* lifecycle strip (提案 → 簽核 → 落地 → 驗證) */}

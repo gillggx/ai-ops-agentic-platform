@@ -32,7 +32,11 @@ public class InternalMemoryController {
                 s(body.get("applies_to")),
                 s(body.get("source")),
                 body.get("active") == null ? null : Boolean.valueOf(String.valueOf(body.get("active"))),
-                s(body.get("written_by"))));
+                s(body.get("written_by")),
+                // V75 governance: optional lifecycle status + subject index
+                s(body.get("status")),
+                s(body.get("subject_kind")),
+                s(body.get("subject_id"))));
     }
 
     @PostMapping("/doc-memos")

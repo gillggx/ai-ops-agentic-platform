@@ -36,6 +36,12 @@ public class MemoryWriteService {
             "domain", "preference", "presentation", "correction", "episodic", "procedure");
     private static final Set<String> APPLIES = Set.of("plan", "execute", "both");
     private static final Set<String> WRITERS = Set.of("planner", "builder", "repair", "human");
+    /** V75: sidecar may only mint these directly — stale/archived are
+     *  lifecycle outcomes, never a birth state. */
+    private static final Set<String> STATUS_WHITELIST = Set.of("draft", "active");
+    private static final Set<String> SUBJECT_KINDS = Set.of(
+            "block", "tool", "skill", "request_class", "general");
+    private static final int MAX_SUBJECT_ID_LEN = 80;
 
     private final AgentKnowledgeRepository knowledge;
     private final BlockDocMemoRepository memos;
@@ -56,6 +62,20 @@ public class MemoryWriteService {
     public Map<String, Object> createKnowledge(Long userId, String memoClass, String title,
                                                String body, String appliesTo, String source,
                                                Boolean active, String writtenBy) {
+        return createKnowledge(userId, memoClass, title, body, appliesTo, source,
+                active, writtenBy, null, null, null);
+    }
+
+    /** V75 governance overload — optional lifecycle {@code status} (whitelist
+     *  draft/active) + subject index. Status resolution when the body omits it:
+     *  active=false rows written by repair for a correction are W3 drafts
+     *  (status='draft'); any other active=false is an archive; live rows are
+     *  'active'. */
+    @Transactional
+    public Map<String, Object> createKnowledge(Long userId, String memoClass, String title,
+                                               String body, String appliesTo, String source,
+                                               Boolean active, String writtenBy,
+                                               String status, String subjectKind, String subjectId) {
         if (userId == null) throw ApiException.badRequest("user_id required");
         if (memoClass == null || !CLASSES.contains(memoClass)) {
             throw ApiException.badRequest("memo_class must be one of " + CLASSES);
@@ -77,8 +97,31 @@ public class MemoryWriteService {
         e.setMemoClass(memoClass);
         // V71 provenance: unknown/invalid → NULL (honest "unclassified") rather
         // than a guessed default. Callers (W1/W3) pass planner/repair explicitly.
-        e.setWrittenBy(writtenBy != null && WRITERS.contains(writtenBy) ? writtenBy : null);
-        e.setActive(active == null || active);  // E2-revised: caller decides; default live
+        String effectiveWrittenBy = writtenBy != null && WRITERS.contains(writtenBy) ? writtenBy : null;
+        e.setWrittenBy(effectiveWrittenBy);
+        boolean live = active == null || active;
+        e.setActive(live);                      // E2-revised: caller decides; default live
+        // V75 lifecycle status. Explicit body value wins (whitelisted);
+        // otherwise derive from active: repair-correction inactive rows are
+        // the W3 draft convention, any other inactive row is an archive.
+        if (status != null && STATUS_WHITELIST.contains(status)) {
+            e.setStatus(status);
+        } else if (!live) {
+            boolean repairCorrectionDraft = "repair".equals(effectiveWrittenBy)
+                    && "correction".equals(memoClass);
+            e.setStatus(repairCorrectionDraft ? "draft" : "archived");
+        } else {
+            e.setStatus("active");
+        }
+        // V75 subject index — whitelist protects the DB CHECK constraint;
+        // subject_id only makes sense alongside a valid kind.
+        if (subjectKind != null && SUBJECT_KINDS.contains(subjectKind)) {
+            e.setSubjectKind(subjectKind);
+            if (subjectId != null && !subjectId.isBlank()) {
+                e.setSubjectId(subjectId.length() > MAX_SUBJECT_ID_LEN
+                        ? subjectId.substring(0, MAX_SUBJECT_ID_LEN) : subjectId);
+            }
+        }
         e.setSource(source == null || source.isBlank() ? "agent_fast" : source);
         e = knowledge.save(e);              // embedding NULL → 30s backfill job embeds it
         return Map.of("id", e.getId(), "deduped", false);

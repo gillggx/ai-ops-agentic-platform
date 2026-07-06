@@ -85,7 +85,10 @@ class MemoryWriter:
     # ── W1 / W3: agent_knowledge fast-path ─────────────────────────────
     async def write_knowledge(self, *, memo_class: str, title: str, body: str,
                               applies_to: str = "both", active: bool = True,
-                              written_by: Optional[str] = None) -> bool:
+                              written_by: Optional[str] = None,
+                              subject_kind: Optional[str] = None,
+                              subject_id: Optional[str] = None,
+                              status: Optional[str] = None) -> bool:
         if self._dead or self._knowledge_written >= MAX_KNOWLEDGE_PER_BUILD:
             return False
         try:
@@ -98,6 +101,12 @@ class MemoryWriter:
                 "source": "agent_fast",
                 "active": active,
                 "written_by": written_by,  # V71: planner (W1) | repair (W3)
+                # W2 governance: what the memory is ABOUT (block/request_class/
+                # …) + lifecycle status (draft → Supervisor review). Java
+                # ignores unknown/null fields until its side lands.
+                "subject_kind": subject_kind,
+                "subject_id": subject_id,
+                "status": status,
             })
             self._knowledge_written += 1
             return True

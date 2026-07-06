@@ -68,12 +68,16 @@ public class InternalSupervisorController {
         @SuppressWarnings("unchecked")
         Map<String, Object> meta = body.get("proposer_meta") instanceof Map<?, ?> m2
                 ? (Map<String, Object>) m2 : null;
+        @SuppressWarnings("unchecked")
+        Map<String, Object> narrative = body.get("narrative") instanceof Map<?, ?> m3
+                ? (Map<String, Object>) m3 : null;
         return ApiResponse.ok(service.propose(
                 body.get("action_type") == null ? null : String.valueOf(body.get("action_type")),
                 targets instanceof List<?> l ? l : List.of(),
                 proposal,
                 body.get("rationale") == null ? null : String.valueOf(body.get("rationale")),
-                meta));
+                meta,
+                narrative));
     }
 
     private static List<Map<String, Object>> krows(List<AgentKnowledgeEntity> rows) {

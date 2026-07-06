@@ -579,6 +579,9 @@ def build_graph():
                                 ),
                                 applies_to="plan",
                                 written_by="planner",  # W1
+                                # W2 governance: plan-edit preferences are about
+                                # the request class, not a specific block.
+                                subject_kind="request_class",
                             )
                             if _w1_ok:
                                 rec.record("memory_write", agent="planner", payload={
@@ -688,6 +691,9 @@ def build_graph():
                 mw = get_current_memory_writer()
                 if mw is not None and pid and result == "retry":
                     _rej = state.get("v30_last_verifier_reject") or {}
+                    # W2 governance: link the draft to the block involved when
+                    # the reject payload carries one; else omit the subject.
+                    _rej_blk = str(_rej.get("block_id") or "") or None
                     _goal = ""
                     _phases = state.get("v30_phases") or []
                     _idx = state.get("v30_current_phase_idx") or 0
@@ -707,6 +713,9 @@ def build_graph():
                         ),
                         applies_to="execute",
                         written_by="repair",  # W3
+                        status="draft",  # explicit lifecycle for Supervisor
+                        subject_kind="block" if _rej_blk else None,
+                        subject_id=_rej_blk,
                     )
                     if _w3_ok:
                         rec.record("memory_write", agent="repair", phase_id=pid,

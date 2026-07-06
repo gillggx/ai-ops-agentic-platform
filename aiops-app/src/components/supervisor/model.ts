@@ -81,6 +81,20 @@ export const LIFE_STYLE: Record<LifeState, { mark: string; fg: string }> = {
 };
 
 // ── wire types ──────────────────────────────────────────────────────────
+
+/** 案情四段 narrative (W2) — every field may be missing on old rows. */
+export interface NarrativeSubject {
+  kind?: string | null;   // block | knowledge | preference | cfg | …
+  id?: string | null;
+  label?: string | null;
+}
+export interface Narrative {
+  happened?: string | null;
+  observed?: string | null;
+  subject?: NarrativeSubject | null;
+  action?: string | null;
+}
+
 export interface Proposal {
   id: number;
   action_type: string;
@@ -93,6 +107,37 @@ export interface Proposal {
   reviewed_by?: number | null;
   reviewed_at?: string | null;
   commit_result?: Record<string, unknown> | null;
+  // W2 additions — Java ships in a parallel workstream, all optional:
+  narrative?: Narrative | null;
+  reject_reason?: string | null;
+  landed_at?: string | null;
+  landed_by?: string | number | null;
+  verify_result?: string | null;
+  verify_at?: string | null;
+  superseded_by?: number | null;
+}
+
+/** Defensive narrative accessor — returns null unless at least one of the
+ *  four sections carries real text (old rows / partial writes → fallback
+ *  to the legacy 提案/為什麼/依據 layout). */
+export function narrativeOf(p: Proposal): Narrative | null {
+  const n = p.narrative;
+  if (!n || typeof n !== "object") return null;
+  const has = (v: unknown) => typeof v === "string" && v.trim() !== "";
+  if (has(n.happened) || has(n.observed) || has(n.action)) return n;
+  return null;
+}
+
+/** GET /api/supervisor/metrics/llm-daily row — defensive, all optional. */
+export interface LlmDailyRow {
+  day?: string | null;
+  model?: string | null;
+  calls?: number | null;
+  empty_calls?: number | null;
+  error_calls?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read?: number | null;
 }
 
 // ── role / signer mapping ───────────────────────────────────────────────
@@ -244,13 +289,15 @@ export function evidenceRows(p: Proposal): EvidenceRow[] {
 // ── supersede detection ─────────────────────────────────────────────────
 export function isSuperseded(p: Proposal): boolean {
   if (p.status === "expired" || p.status === "superseded") return true;
+  if (p.superseded_by != null) return true;   // W2 top-level column
   const b = obj(p);
   return b.superseded === true || b.superseded_by != null || b.superseded_by_id != null;
 }
 
 export function supersededBy(p: Proposal): number | null {
   const b = obj(p);
-  const v = b.superseded_by ?? b.superseded_by_id;
+  // W2 top-level column wins; legacy proposal-JSON fields as fallback
+  const v = p.superseded_by ?? b.superseded_by ?? b.superseded_by_id;
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }

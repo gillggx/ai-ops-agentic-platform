@@ -52,17 +52,21 @@ public final class Dtos {
     }
 
     public record KnowledgeDto(
-            Long id, String scopeType, String scopeValue,
+            Long id, Long userId, String scopeType, String scopeValue,
             String title, String body, String priority,
             Boolean active, String source,
             String memoClass, String writtenBy, String appliesTo, Boolean alwaysOn,
+            String status, String subjectKind, String subjectId,
+            OffsetDateTime reviewAt, OffsetDateTime expiresAt, Long supersededBy,
             Integer uses, OffsetDateTime lastUsedAt,
             OffsetDateTime createdAt, OffsetDateTime updatedAt
     ) {
         public static KnowledgeDto of(AgentKnowledgeEntity e) {
-            return new KnowledgeDto(e.getId(), e.getScopeType(), e.getScopeValue(),
+            return new KnowledgeDto(e.getId(), e.getUserId(), e.getScopeType(), e.getScopeValue(),
                     e.getTitle(), e.getBody(), e.getPriority(), e.getActive(), e.getSource(),
                     e.getMemoClass(), e.getWrittenBy(), e.getAppliesTo(), e.getAlwaysOn(),
+                    e.getStatus(), e.getSubjectKind(), e.getSubjectId(),
+                    e.getReviewAt(), e.getExpiresAt(), e.getSupersededBy(),
                     e.getUses(), e.getLastUsedAt(), e.getCreatedAt(), e.getUpdatedAt());
         }
     }

@@ -100,6 +100,99 @@ def validate_proposal(p: dict[str, Any], known_knowledge_ids: set[int],
     return None
 
 
+# ── narrative 四段 (deterministic — composed from validated proposal data) ─
+
+def _knowledge_index(cin: dict[str, Any]) -> dict[int, dict]:
+    """id → row for every knowledge row we sent to the LLM (label lookup)."""
+    idx: dict[int, dict] = {}
+    for sec in ("draft_corrections", "live_preferences", "live_presentations"):
+        for row in (cin.get(sec) or []):
+            if row.get("id") is not None:
+                idx[int(row["id"])] = row
+    return idx
+
+
+def _k_label(idx: dict[int, dict], kid: Any) -> str:
+    row = idx.get(kid) if isinstance(kid, int) else None
+    title = str((row or {}).get("title") or "").strip()
+    return title[:120] if title else f"knowledge #{kid}"
+
+
+def compose_narrative(p: dict[str, Any], cin: dict[str, Any]) -> dict[str, Any]:
+    """四段敘事 {happened, observed, subject, action} — 純 deterministic 組裝，
+    不再問 LLM。輸入是「已通過 validate_proposal 的提案」+ 當次 curation input
+    （查 title 當 label 用）。Java 存進 supervisor_actions.narrative (jsonb)。
+    """
+    t = p.get("action_type")
+    body = p.get("proposal") or {}
+    rationale = str(p.get("rationale") or "").strip()[:300]
+    idx = _knowledge_index(cin)
+
+    def _nar(happened: str, observed_fallback: str,
+             kind: str, sid: Optional[str], label: str, action: str) -> dict:
+        return {
+            "happened": happened[:300],
+            "observed": (rationale or observed_fallback)[:300],
+            "subject": {"kind": kind, "id": sid, "label": label[:150]},
+            "action": action[:300],
+        }
+
+    if t == "MERGE":
+        keep = body.get("keep_id")
+        removes = [int(x) for x in (body.get("remove_ids") or [])]
+        return _nar(
+            f"記憶庫中發現 {1 + len(removes)} 筆語意重複的記錄"
+            f"（保留 #{keep}，重複 {removes}）",
+            "多筆 preference/presentation 語意相同，召回時互相干擾",
+            "knowledge", str(keep), _k_label(idx, keep),
+            f"合併為單筆：保留 #{keep}，停用 {len(removes)} 筆重複記錄",
+        )
+    if t == "CORRECT":
+        tid = body.get("target_id")
+        promote = bool(body.get("promote"))
+        return _nar(
+            f"1 筆 draft correction（#{tid}）等待整理",
+            "失敗筆記原文未達可長期使用品質",
+            "knowledge", str(tid), _k_label(idx, tid),
+            "改寫為含 Why/How to apply 的乾淨教訓"
+            + ("並 promote 為 active" if promote else "，維持 draft 待審"),
+        )
+    if t == "PRUNE":
+        ids = [int(x) for x in (body.get("target_ids") or [])]
+        first = ids[0] if ids else None
+        label = _k_label(idx, first)
+        if len(ids) > 1:
+            label += f" 等 {len(ids)} 筆"
+        return _nar(
+            f"{len(ids)} 筆記憶（{ids}）被檢視為候選淘汰",
+            "內容含糊、過時或僅描述一次性狀況，無再利用價值",
+            "knowledge", str(first) if first is not None else None, label,
+            f"停用 {len(ids)} 筆記憶",
+        )
+    if t == "PROMOTE":
+        n_evidence = len(p.get("target_ids") or [])
+        title = str(body.get("title") or "").strip()
+        memo_class = str(body.get("memo_class") or "")
+        return _nar(
+            (f"跨 {n_evidence} 筆記錄" if n_evidence else "多筆記錄")
+            + "反覆出現同一穩定 pattern",
+            "重複出現的教訓尚未沉澱為可重用知識",
+            "knowledge", None, title or "(新知識)",
+            f"蒸餾為 1 筆 {memo_class} 知識：「{title[:80]}」",
+        )
+    if t == "DOC_REVISE":
+        blk = str(body.get("block_id") or "")
+        memo_ids = [int(x) for x in (body.get("memo_ids") or [])]
+        return _nar(
+            f"{len(memo_ids)} 筆 doc memo（{memo_ids}）指向 block {blk}",
+            "block 文件/param_schema 缺漏，建置時反覆踩同一坑",
+            "block", blk, blk,
+            f"以修訂草案更新 {blk} 的 block 文件",
+        )
+    # validate_proposal gates unknown types before we get here — defensive only.
+    return _nar("提案", "（無診斷）", "general", None, str(t), str(t))
+
+
 # ── prompts (principles only — no case rules) ────────────────────────────
 
 _SYSTEM_PROMPT = """\
@@ -268,10 +361,15 @@ async def run_curation(java_base: str, internal_token: str,
                 res.skipped_invalid += 1
                 logger.info("supervisor curation: skip invalid proposal (%s)", err)
                 continue
+            # W2 governance: `proposal` / `narrative` are stored by Java in
+            # jsonb columns — serialise with json.dumps (NOT str(dict)) so the
+            # stored string is valid JSON and round-trips via json.loads.
             body = {
                 "action_type": p["action_type"],
                 "target_ids": p.get("target_ids") or [],
-                "proposal": p["proposal"],
+                "proposal": json.dumps(p["proposal"], ensure_ascii=False),
+                "narrative": json.dumps(compose_narrative(p, cin),
+                                        ensure_ascii=False),
                 "rationale": str(p.get("rationale") or "")[:500],
                 "proposer_meta": meta,
             }

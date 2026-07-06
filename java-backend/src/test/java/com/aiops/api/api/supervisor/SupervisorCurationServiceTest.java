@@ -76,7 +76,7 @@ class SupervisorCurationServiceTest {
     void propose_queuesWithoutTouchingKnowledge() {
         when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(false);
         Map<String, Object> out = service.propose("PRUNE", List.of(1, 2),
-                Map.of("target_ids", List.of(1, 2)), "stale", Map.of("model", "haiku"));
+                Map.of("target_ids", List.of(1, 2)), "stale", Map.of("model", "haiku"), null);
         assertThat(out).containsEntry("deduped", false);
         verify(knowledge, never()).save(any());   // propose-only: no mutation
         verify(docMemos, never()).save(any());
@@ -86,15 +86,25 @@ class SupervisorCurationServiceTest {
     void propose_dedupsLiveProposals() {
         when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(true);
         Map<String, Object> out = service.propose("PRUNE", List.of(1),
-                Map.of("target_ids", List.of(1)), null, null);
+                Map.of("target_ids", List.of(1)), null, null, null);
         assertThat(out).containsEntry("deduped", true);
         verify(actions, never()).save(any());
     }
 
     @Test
     void propose_rejectsUnknownType() {
-        assertThatThrownBy(() -> service.propose("NUKE", List.of(), Map.of("x", 1), null, null))
+        assertThatThrownBy(() -> service.propose("NUKE", List.of(), Map.of("x", 1), null, null, null))
                 .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void propose_persistsNarrativeAsJson() {
+        when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(false);
+        service.propose("PRUNE", List.of(1), Map.of("target_ids", List.of(1)), null, null,
+                Map.of("happened", "spc-ooc build 反覆失敗", "action", "prune 30 preference"));
+        ArgumentCaptor<SupervisorActionEntity> cap = ArgumentCaptor.forClass(SupervisorActionEntity.class);
+        verify(actions).save(cap.capture());
+        assertThat(cap.getValue().getNarrative()).contains("happened");
     }
 
     // ── approve: per-type commits ───────────────────────────────────────
@@ -192,11 +202,34 @@ class SupervisorCurationServiceTest {
     void reject_stampsAuditWithoutMutation() {
         when(actions.findById(7L)).thenReturn(Optional.of(action(7L, "PRUNE",
                 "{\"target_ids\":[50]}")));
-        Map<String, Object> dto = service.reject(7L, 99L);
+        Map<String, Object> dto = service.reject(7L, 99L, null);
         assertThat(dto.get("status")).isEqualTo("rejected");
         assertThat(dto.get("reviewed_by")).isEqualTo(99L);
+        assertThat(dto.get("reject_reason")).isNull();   // optional body omitted
         verify(knowledge, never()).save(any());   // reject = DB untouched
         verify(knowledge, never()).findById(any());
+    }
+
+    @Test
+    void reject_storesReason() {
+        SupervisorActionEntity a = action(9L, "PRUNE", "{\"target_ids\":[50]}");
+        when(actions.findById(9L)).thenReturn(Optional.of(a));
+        Map<String, Object> dto = service.reject(9L, 99L, "站點慣例不同,此 preference 仍有效");
+        assertThat(dto.get("status")).isEqualTo("rejected");
+        assertThat(dto.get("reject_reason")).isEqualTo("站點慣例不同,此 preference 仍有效");
+        assertThat(a.getRejectReason()).isEqualTo("站點慣例不同,此 preference 仍有效");
+    }
+
+    @Test
+    void approve_stampsLandedLifecycle() {
+        when(actions.findById(10L)).thenReturn(Optional.of(action(10L, "PRUNE",
+                "{\"target_ids\":[30]}")));
+        when(knowledge.findById(30L)).thenReturn(Optional.of(krow(30, true)));
+
+        Map<String, Object> dto = service.approve(10L, 99L);
+
+        assertThat(dto.get("landed_by")).isEqualTo("99");   // VARCHAR(80) on the wire
+        assertThat(dto.get("landed_at")).isNotNull();       // stamped after successful commit
     }
 
     @Test
@@ -205,6 +238,6 @@ class SupervisorCurationServiceTest {
         done.setStatus("approved");
         when(actions.findById(8L)).thenReturn(Optional.of(done));
         assertThatThrownBy(() -> service.approve(8L, 99L)).isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.reject(8L, 99L)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.reject(8L, 99L, null)).isInstanceOf(ApiException.class);
     }
 }

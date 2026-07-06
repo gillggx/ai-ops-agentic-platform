@@ -111,11 +111,29 @@ public class AgentKnowledgeController {
 		return ApiResponse.ok(service.listDocMemos());
 	}
 
+	/** V75 review queue: ALL users' drafts (cross-user by design — the PE /
+	 *  IT_ADMIN reviewer is not the ON_DUTY submitter). DTO carries user_id
+	 *  so the frontend can show who submitted. */
+	@GetMapping("/agent-knowledge/drafts")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<List<Dtos.KnowledgeDto>> listDraftKnowledge(@AuthenticationPrincipal AuthPrincipal caller) {
+		return ApiResponse.ok(service.listDrafts(caller));
+	}
+
 	@PostMapping("/agent-knowledge")
 	@PreAuthorize(Authorities.ANY_ROLE)
 	public ApiResponse<Dtos.KnowledgeDto> createKnowledge(@RequestBody Dtos.CreateKnowledgeRequest req,
 	                                                       @AuthenticationPrincipal AuthPrincipal caller) {
 		return ApiResponse.ok(service.createKnowledge(req, caller));
+	}
+
+	/** V75 governance: draft → active. Same ADMIN_OR_PE tier as the
+	 *  Supervisor curation surface — ON_DUTY creates drafts, PE approves. */
+	@PostMapping("/agent-knowledge/{id}/approve")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<Dtos.KnowledgeDto> approveKnowledge(@PathVariable Long id,
+	                                                        @AuthenticationPrincipal AuthPrincipal caller) {
+		return ApiResponse.ok(service.approveKnowledge(id, caller));
 	}
 
 	@PatchMapping("/agent-knowledge/{id}")

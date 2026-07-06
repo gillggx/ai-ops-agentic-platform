@@ -62,6 +62,37 @@ def test_knowledge_cap_and_payload(monkeypatch):
     assert calls[0][1]["written_by"] == "planner"  # V71 provenance
 
 
+def test_knowledge_subject_and_status_passthrough(monkeypatch):
+    """W2 governance: subject_kind/subject_id/status kwargs ride the POST body."""
+    w = _w()
+    calls: list[dict] = []
+
+    async def _cap(path, body):
+        calls.append(body)
+
+    monkeypatch.setattr(w, "_post", _cap)
+    # W3 shape: draft correction linked to a block
+    ok = asyncio.run(w.write_knowledge(
+        memo_class="correction", title="t", body="b", applies_to="execute",
+        active=False, written_by="repair",
+        subject_kind="block", subject_id="block_filter", status="draft"))
+    assert ok is True
+    assert calls[0]["subject_kind"] == "block"
+    assert calls[0]["subject_id"] == "block_filter"
+    assert calls[0]["status"] == "draft"
+    assert calls[0]["active"] is False
+    # W1 shape: request_class subject, no id, immediate (no status)
+    asyncio.run(w.write_knowledge(memo_class="preference", title="t2", body="b",
+                                  subject_kind="request_class"))
+    assert calls[1]["subject_kind"] == "request_class"
+    assert calls[1]["subject_id"] is None
+    assert calls[1]["status"] is None
+    # defaults: keys always present (Java-side null-tolerant)
+    asyncio.run(w.write_knowledge(memo_class="domain", title="t3", body="b"))
+    assert {"subject_kind", "subject_id", "status"} <= set(calls[2])
+    assert calls[2]["subject_kind"] is None
+
+
 def test_doc_memo_cap_and_provenance(monkeypatch):
     w = _w()
     calls: list[dict] = []

@@ -473,6 +473,7 @@ export function AgentConsole({
   const [expanded, setExpanded] = React.useState<Record<number, boolean>>({});
   const [costOpen, setCostOpen] = React.useState(false);
   const [readonlyMem, setReadonlyMem] = React.useState<RecalledMem | null>(null);
+  const [reportSent, setReportSent] = React.useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const followRef = useRef(true);
 
@@ -668,11 +669,30 @@ export function AgentConsole({
                           borderTop: "1px solid #f0edfb", background: "#fcfbf7" }}>
               <span style={{ fontSize: 10.5, color: "#8a877e", flex: 1 }}>{tm("footerNote")}</span>
               <button
-                onClick={() => { setReadonlyMem(null); onTeach?.({}); }}
-                style={{ border: "1px solid #dcdad4", background: "#fff", color: "#55534d",
-                         borderRadius: 6, fontSize: 11, padding: "4px 10px", cursor: "pointer",
+                disabled={reportSent}
+                onClick={() => {
+                  const m = readonlyMem;
+                  if (!m) return;
+                  void fetch("/api/agent-knowledge", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      scope_type: "global",
+                      priority: "med",
+                      memo_class: m.memo_class || "domain",
+                      title: `[回報] #${String(m.id ?? "?")} ${String(m.title ?? "").slice(0, 120)}`, // i18n-exempt: 存 DB 的 draft 標題 marker（同 [教它] 慣例）
+                      body: `${tm("reportBody")}\n\n**Why:** \n**How to apply:** `,
+                    }),
+                  }).catch(() => {});
+                  setReportSent(true);
+                }}
+                style={{ border: "1px solid #dcdad4",
+                         background: reportSent ? "#eafaf3" : "#fff",
+                         color: reportSent ? "#047857" : "#55534d",
+                         borderRadius: 6, fontSize: 11, padding: "4px 10px",
+                         cursor: reportSent ? "default" : "pointer",
                          fontFamily: "inherit" }}>
-                {tm("reportIssue")}
+                {reportSent ? tm("reportSent") : tm("reportIssue")}
               </button>
             </div>
           </div>
@@ -916,7 +936,7 @@ export function AgentConsole({
                       if (mem.id == null) return;
                       // 稿 1d：非 PE 開唯讀浮卡（不離開 Console）；PE 進工房該筆
                       if (memoryEditable) onOpenMemory?.(mem.id);
-                      else setReadonlyMem(mem);
+                      else { setReadonlyMem(mem); setReportSent(false); }
                     }}
                     style={{ ...(isNew ? chipS("#7c3aed", "#fff")
                              : chipS("#efe8fc", "#6d28d9", "#ddd0f7")),

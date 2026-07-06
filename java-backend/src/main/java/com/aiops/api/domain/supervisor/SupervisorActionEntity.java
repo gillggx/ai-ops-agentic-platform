@@ -3,6 +3,8 @@ package com.aiops.api.domain.supervisor;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 
@@ -59,4 +61,37 @@ public class SupervisorActionEntity {
     /** What actually happened on approve (created row id, etc.) — JSON. */
     @Column(name = "commit_result", columnDefinition = "text")
     private String commitResult;
+
+    /** V75 案情四段 {happened, observed, subject:{kind,id,label}, action} —
+     *  raw JSON string passthrough. Column is real jsonb (unlike the TEXT
+     *  columns above), so Hibernate must bind it as JSON, not VARCHAR —
+     *  {@code @JdbcTypeCode(SqlTypes.JSON)} on a String field does exactly
+     *  that (Hibernate 6's JSON format mapper special-cases String.class as
+     *  the raw document; PG JdbcType handles the jsonb bind). NULL on
+     *  pre-V75 rows — frontend falls back to the old 3-part rendering. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "narrative", columnDefinition = "jsonb")
+    private String narrative;
+
+    /** V75: reviewer's stated reason on reject (audit trail). */
+    @Column(name = "reject_reason", columnDefinition = "text")
+    private String rejectReason;
+
+    /** V75 landing lifecycle: when/who committed the approved mutation. */
+    @Column(name = "landed_at")
+    private OffsetDateTime landedAt;
+
+    @Column(name = "landed_by", length = 80)
+    private String landedBy;
+
+    /** V75 post-landing verification outcome (free text). */
+    @Column(name = "verify_result", columnDefinition = "text")
+    private String verifyResult;
+
+    @Column(name = "verify_at")
+    private OffsetDateTime verifyAt;
+
+    /** V75: id of the supervisor_actions row that superseded this one. */
+    @Column(name = "superseded_by")
+    private Long supersededBy;
 }

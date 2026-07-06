@@ -21,10 +21,23 @@
  * no per-memo approve endpoint yet (memos are only promoted indirectly via
  * Supervisor DOC_REVISE proposals). Card actions render disabled with a
  * "W2 波後端接入" tooltip until that endpoint ships.
+ *
+ * W2 收件匣 upgrade (2026-07):
+ *  - Supervisor 提案 cards — PE-signed proposal types (MERGE/CORRECT/PRUNE/
+ *    PROMOTE/DOC_REVISE, status proposed) fetched from /api/supervisor/
+ *    proposals, rendered via the shared NarrativeCard (compact) with real
+ *    核准 / 駁回（必填理由）actions on the existing approve/reject proxies.
+ *  - ON_DUTY 草稿 cards — knowledge rows with status === "draft".
+ *    核准入庫 → POST /api/agent-knowledge/{id}/approve;
+ *    退回刪除 → DELETE with confirm.
+ *  - 手冊 table gains status chip / review_at / subject columns (all W2
+ *    columns may be missing on old rows → derived / "—" fallbacks).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
+import { Proposal, proposalTitle, signerOf } from "@/components/supervisor/model";
+import { NarrativeCard } from "@/components/supervisor/NarrativeCard";
 
 // ── Types (wire shapes unchanged — snake_case per Java Jackson config) ──
 
@@ -49,6 +62,21 @@ interface Knowledge {
   written_by?: string | null; // planner|builder|repair|supervisor|human|null
   applies_to?: "plan" | "execute" | "both" | null;
   always_on?: boolean;
+  // W2 governance columns — may be missing on old rows (Java parallel work):
+  status?: KnowledgeStatus | string | null; // draft|active|stale|archived
+  subject_kind?: string | null;
+  subject_id?: string | null;
+  review_at?: string | null;
+}
+
+type KnowledgeStatus = "draft" | "active" | "stale" | "archived";
+
+/** W2 status with pre-W2 fallback: rows without the column derive from
+ *  the legacy active flag so the chip column stays informative. */
+function statusOf(k: Knowledge): KnowledgeStatus {
+  const s = String(k.status ?? "").toLowerCase();
+  if (s === "draft" || s === "active" || s === "stale" || s === "archived") return s;
+  return k.active ? "active" : "archived";
 }
 
 interface DocMemo {
@@ -112,7 +140,11 @@ const C = {
   amber: "#9a6700",
   amberBg: "#faf3e2",
   amberBorder: "#ecd9a8",
+  green: "#1a7f4e",
+  greenBg: "#eaf5ee",
+  greenBorder: "#bfe0cd",
   red: "#b42318",
+  redBg: "#fdf0ee",
   redBorder: "#f0c1b8",
   inputBorder: "#ddd8cb",
   pillTrack: "#efece3",
@@ -122,10 +154,25 @@ const C = {
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
-// grid template for the Knowledge manual table (per design)
-const KB_GRID = "64px 92px 1fr 110px 90px 130px 96px";
+// grid template for the Knowledge manual table (per design; W2 adds
+// 狀態 + 複審 columns and folds 來源+subject into one column for width)
+const KB_GRID = "56px 84px 1fr 76px 64px 70px 70px 150px";
 const LEX_GRID = "64px 1fr 1fr 1fr 90px";
 const EX_GRID = "64px 1fr 110px 90px";
+
+// W2 status chip palette — draft amber / active green / stale grey / archived dim
+const STATUS_CHIP: Record<KnowledgeStatus, { fg: string; bg: string; bd: string; dim?: boolean }> = {
+  draft:    { fg: C.amber, bg: C.amberBg, bd: C.amberBorder },
+  active:   { fg: C.green, bg: C.greenBg, bd: C.greenBorder },
+  stale:    { fg: C.mutedStrong, bg: C.headBg, bd: C.line },
+  archived: { fg: C.ghost, bg: "transparent", bd: C.lineSoft, dim: true },
+};
+
+// PE-signed Supervisor proposal types surfaced in the workshop inbox
+// (mirrors signerOf() in supervisor/model.ts — filter client-side)
+function isPeProposal(p: Proposal): boolean {
+  return p.status === "proposed" && signerOf(p) === "PE";
+}
 
 // written_by values that count as「Supervisor 蒸餾」
 const DISTILLED_WRITERS = new Set(["planner", "builder", "repair", "supervisor"]);
@@ -195,7 +242,10 @@ export function AgentKnowledgePanel() {
   const [lexicon, setLexicon] = useState<Lexicon[]>([]);
   const [examples, setExamples] = useState<Example[]>([]);
   const [docMemos, setDocMemos] = useState<DocMemo[]>([]);
+  const [supProposals, setSupProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [inboxBusy, setInboxBusy] = useState(false);
+  const [inboxErr, setInboxErr] = useState<string | null>(null);
 
   const [editingK, setEditingK] = useState<Knowledge | "new" | null>(null);
   const [editingL, setEditingL] = useState<Lexicon | "new" | null>(null);
@@ -204,16 +254,57 @@ export function AgentKnowledgePanel() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [ks, ls, es, dm] = await Promise.all([
+      const [ks, ls, es, dm, sp, dr] = await Promise.all([
         api<Knowledge[]>("/api/agent-knowledge"),
         api<Lexicon[]>("/api/agent-lexicon").catch(() => [] as Lexicon[]),
         api<Example[]>("/api/agent-examples").catch(() => [] as Example[]),
         api<DocMemo[]>("/api/agent-knowledge/doc-memos").catch(() => [] as DocMemo[]),
+        // Supervisor proposals — endpoint is admin/PE surface; fail-open so
+        // the manual tables never break when it 403s / is unreachable.
+        api<Proposal[]>("/api/supervisor/proposals").catch(() => [] as Proposal[]),
+        // W2 — cross-user drafts（PE/IT_ADMIN 收件匣）；ON_DUTY 403 → fail-open。
+        api<Knowledge[]>("/api/agent-knowledge/drafts").catch(() => [] as Knowledge[]),
       ]);
       setKnowledge(ks); setLexicon(ls); setExamples(es); setDocMemos(dm);
+      setSupProposals(Array.isArray(sp) ? sp.filter(isPeProposal) : []);
+      setCrossDrafts(Array.isArray(dr) ? dr : []);
     } finally { setLoading(false); }
   };
   useEffect(() => { void loadAll(); }, []);
+
+  // ON_DUTY 草稿 — W2 起走跨 user 端點 /api/agent-knowledge/drafts
+  // （PE/IT_ADMIN 才 200；ON_DUTY 403 → crossDrafts 為空）。與 caller-scoped
+  // 清單裡自己的 draft 去重合併。
+  const [crossDrafts, setCrossDrafts] = useState<Knowledge[]>([]);
+  const drafts = useMemo(() => {
+    const own = knowledge.filter((k) => String(k.status ?? "").toLowerCase() === "draft");
+    const seen = new Set(crossDrafts.map((k) => k.id));
+    return [...crossDrafts, ...own.filter((k) => !seen.has(k.id))];
+  }, [knowledge, crossDrafts]);
+
+  // ── 收件匣 actions (Supervisor proposals + ON_DUTY drafts) ───────────
+  const inboxAct = async (fn: () => Promise<unknown>) => {
+    setInboxBusy(true);
+    setInboxErr(null);
+    try {
+      await fn();
+      await loadAll();
+    } catch (e) {
+      setInboxErr(t("inbox.actionError", { msg: String((e as Error).message || e) }));
+    } finally { setInboxBusy(false); }
+  };
+  const approveProposal = (id: number) =>
+    inboxAct(() => api(`/api/supervisor/proposals/${id}/approve`, { method: "POST" }));
+  const rejectProposal = (id: number, reason: string) =>
+    inboxAct(() => api(`/api/supervisor/proposals/${id}/reject`, {
+      method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ reason }),
+    }));
+  const approveDraft = (id: number) =>
+    inboxAct(() => api(`/api/agent-knowledge/${id}/approve`, { method: "POST" }));
+  const returnDraft = (id: number) => {
+    if (!confirm(t("inbox.returnConfirm"))) return;
+    void inboxAct(() => api(`/api/agent-knowledge/${id}`, { method: "DELETE" }));
+  };
 
   // ?id=N — auto-open that entry's editor once the list is in.
   const openedRef = useRef(false);
@@ -374,18 +465,49 @@ export function AgentKnowledgePanel() {
               <span style={{
                 font: `700 11px ${MONO}`, color: C.amber, background: C.amberBg,
                 border: `1px solid ${C.amberBorder}`, borderRadius: 999, padding: "1px 9px",
-              }}>{docMemos.length}</span>
-              <span style={{ fontSize: 11, color: C.muted }}>{t("inbox.breakdown", { count: docMemos.length })}</span>
+              }}>{supProposals.length + drafts.length + docMemos.length}</span>
+              <span style={{ fontSize: 11, color: C.muted }}>
+                {t("inbox.breakdown3", { sup: supProposals.length, draft: drafts.length, memo: docMemos.length })}
+              </span>
               <span style={{ flex: 1 }}/>
             </div>
 
-            {docMemos.length === 0 ? (
+            {inboxErr && (
+              <div style={{
+                marginBottom: 10, padding: "8px 12px", borderRadius: 8, fontSize: 12,
+                color: C.red, background: C.redBg, border: `1px solid ${C.redBorder}`,
+              }}>{inboxErr}</div>
+            )}
+
+            {supProposals.length + drafts.length + docMemos.length === 0 ? (
               <div style={{ padding: "22px 0", textAlign: "center", fontSize: 12, color: C.faint }}>
                 {loading ? t("loading") : t("inbox.empty")}
               </div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
-                {docMemos.map((m) => <DocMemoCard key={m.id} t={t} m={m}/>)}
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {supProposals.length > 0 && (
+                  <InboxSection label={t("inbox.secSup")}>
+                    {supProposals.map((p) => (
+                      <SupProposalCard key={p.id} t={t} p={p} busy={inboxBusy}
+                        onApprove={approveProposal} onReject={rejectProposal}/>
+                    ))}
+                  </InboxSection>
+                )}
+                {/* drafts by other users may be invisible (caller-scoped list,
+                    Java follow-up) — only render the section when non-empty */}
+                {drafts.length > 0 && (
+                  <InboxSection label={t("inbox.secDrafts")}>
+                    {drafts.map((k) => (
+                      <DraftCard key={k.id} t={t} k={k} busy={inboxBusy}
+                        onApprove={approveDraft} onReturn={returnDraft}/>
+                    ))}
+                  </InboxSection>
+                )}
+                {docMemos.length > 0 && (
+                  <InboxSection label={t("inbox.secMemos")}>
+                    {docMemos.map((m) => <DocMemoCard key={m.id} t={t} m={m}/>)}
+                  </InboxSection>
+                )}
               </div>
             )}
           </div>
@@ -461,18 +583,26 @@ function KnowledgeTable({ t, items, onRowClick }: {
     <div>
       <TableHead grid={KB_GRID} cols={[
         t("manual.colId"), t("manual.colClass"), t("manual.colText"),
-        t("manual.colUses"), t("manual.colLast"), t("manual.colSrc"), "",
+        t("manual.colStatus"), t("manual.colUsesShort"), t("manual.colLast"),
+        t("manual.colReview"), t("manual.colSrcSub"),
       ]}/>
       {items.length === 0 && <EmptyRow text={t("manual.empty")}/>}
       {items.map((k) => {
         const src = srcKindOf(k);
+        const st = statusOf(k);
+        const chip = STATUS_CHIP[st];
+        // subject (W2) — kind:id in mono, "—" when the columns are missing
+        const subject = k.subject_kind || k.subject_id
+          ? [k.subject_kind, k.subject_id].filter(Boolean).join(":")
+          : null;
         return (
           <div key={k.id}
             onClick={() => onRowClick(k)}
             style={{
               display: "grid", gridTemplateColumns: KB_GRID, padding: "9px 16px",
               borderBottom: `1px solid ${C.lineSoft}`, alignItems: "center",
-              background: "#fff", cursor: "pointer", opacity: k.active ? 1 : 0.55,
+              background: "#fff", cursor: "pointer",
+              opacity: chip.dim || !k.active ? 0.55 : 1,
             }}>
             <span style={{ font: `700 11px ${MONO}`, color: C.purple }}>◆ #{k.id}</span>
             <span>
@@ -498,13 +628,26 @@ function KnowledgeTable({ t, items, onRowClick }: {
                 }}>{t("manual.disabled")}</span>
               )}
             </span>
+            {/* status chip values are wire tokens — kept English, not i18n */}
+            <span>
+              <span style={{
+                font: `700 9.5px ${MONO}`, padding: "1px 7px", borderRadius: 999,
+                color: chip.fg, background: chip.bg, border: `1px solid ${chip.bd}`,
+              }}>{st}</span>
+            </span>
             <span style={{ font: `600 12px ${MONO}`, color: (k.uses ?? 0) > 0 ? C.ink : C.ghost }}>
               {k.uses ?? 0}
             </span>
             <span style={{ font: `500 11px ${MONO}`, color: C.muted }}>{fmtShortDate(k.last_used_at)}</span>
-            <span style={{ fontSize: 11, color: C.muted }}>{t(`src.${src}`)}</span>
-            {/* 擬處置 flag — placeholder until W2 wires supervisor proposals */}
-            <span style={{ fontSize: 11, textAlign: "right", color: C.ghost }}>—</span>
+            <span style={{ font: `500 11px ${MONO}`, color: C.muted }}>{fmtShortDate(k.review_at)}</span>
+            <span style={{ fontSize: 11, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {t(`src.${src}`)}
+              {subject && (
+                <span style={{ font: `500 10px ${MONO}`, color: C.faint, marginLeft: 6 }} title={subject}>
+                  {subject}
+                </span>
+              )}
+            </span>
           </div>
         );
       })}
@@ -566,6 +709,138 @@ function ExamplesTable({ t, items, onRowClick }: {
           <span style={{ font: `600 12px ${MONO}`, color: (e.uses ?? 0) > 0 ? C.ink : C.ghost }}>{e.uses ?? 0}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── 收件匣 sections + cards ─────────────────────────────────────────────
+
+function InboxSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{
+        font: `700 10.5px ${MONO}`, color: C.mutedStrong, letterSpacing: ".05em",
+        marginBottom: 8,
+      }}>{label}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Supervisor 提案 card — PE-signed proposal rendered via the shared
+ *  NarrativeCard (compact). 核准 / 駁回（必填理由）hit the existing
+ *  supervisor approve/reject proxies; the page reloads on success. */
+function SupProposalCard({ t, p, busy, onApprove, onReject }: {
+  t: Translator; p: Proposal; busy: boolean;
+  onApprove: (id: number) => void;
+  onReject: (id: number, reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [reasonErr, setReasonErr] = useState(false);
+  const submitReject = () => {
+    if (reason.trim() === "") { setReasonErr(true); return; }
+    setReasonErr(false);
+    onReject(p.id, reason.trim());
+  };
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 10, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "11px 14px 9px", borderBottom: `1px solid ${C.cardHeadLine}` }}>
+        <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 5 }}>
+          <span style={{
+            font: `700 10.5px ${MONO}`, color: C.purple, background: C.purpleBg,
+            border: `1px solid ${C.purpleBorder}`, borderRadius: 4, padding: "1px 6px",
+          }}>{t("inbox.chipSup")}</span>
+          <span style={{ font: `700 10.5px ${MONO}`, color: C.purple }}>{p.action_type}</span>
+          <span style={{ font: `600 11px ${MONO}`, color: C.faint }}>#{p.id}</span>
+          <span style={{ flex: 1 }}/>
+          <span style={{
+            font: `600 10.5px ${MONO}`, borderRadius: 999, padding: "1px 8px",
+            color: C.amber, background: C.amberBg, border: `1px solid ${C.amberBorder}`,
+          }}>{t("inbox.pending")}</span>
+        </div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.45 }}>{proposalTitle(p)}</div>
+      </div>
+
+      <div style={{ padding: "10px 14px", flex: 1 }}>
+        <NarrativeCard p={p} compact/>
+      </div>
+
+      <div style={{
+        display: "flex", gap: 6, padding: "9px 14px", borderTop: `1px solid ${C.cardHeadLine}`,
+        background: C.cardFoot, borderRadius: "0 0 10px 10px", flexWrap: "wrap", alignItems: "center",
+      }}>
+        <button disabled={busy} onClick={() => onApprove(p.id)} style={{
+          background: C.ink, color: C.paper, border: "none", borderRadius: 6,
+          padding: "6px 14px", fontSize: 11.5, fontWeight: 700,
+          cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+        }}>{busy ? t("inbox.working") : t("inbox.approve")}</button>
+        <input
+          value={reason}
+          onChange={(e) => { setReason(e.target.value); if (reasonErr) setReasonErr(false); }}
+          placeholder={reasonErr ? t("inbox.rejectReasonRequired") : t("inbox.rejectPlaceholder")}
+          style={{
+            border: `1px solid ${reasonErr ? C.redBorder : C.inputBorder}`,
+            borderRadius: 6, padding: "5px 10px", fontSize: 11, flex: 1, minWidth: 120,
+            background: "#fff", color: C.ink, fontFamily: "inherit", outline: "none",
+          }}/>
+        <button disabled={busy} onClick={submitReject} style={{
+          background: "#fff", color: C.red, border: `1px solid ${C.redBorder}`, borderRadius: 6,
+          padding: "6px 12px", fontSize: 11.5, fontWeight: 600,
+          cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+        }}>{t("inbox.reject")}</button>
+      </div>
+    </div>
+  );
+}
+
+/** ON_DUTY 草稿 card — knowledge row with status "draft".
+ *  核准入庫 → POST /api/agent-knowledge/{id}/approve (draft → active);
+ *  退回刪除 → DELETE with confirm (simplest reject path today). */
+function DraftCard({ t, k, busy, onApprove, onReturn }: {
+  t: Translator; k: Knowledge; busy: boolean;
+  onApprove: (id: number) => void;
+  onReturn: (id: number) => void;
+}) {
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 10, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "11px 14px 9px", borderBottom: `1px solid ${C.cardHeadLine}` }}>
+        <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 5 }}>
+          <span style={{
+            font: `700 10.5px ${MONO}`, color: C.amber, background: C.amberBg,
+            border: `1px solid ${C.amberBorder}`, borderRadius: 4, padding: "1px 6px",
+          }}>{t("inbox.chipDraft")}</span>
+          <span style={{ font: `600 11px ${MONO}`, color: C.faint }}>◆ #{k.id}</span>
+          <span style={{ flex: 1 }}/>
+          <span style={{ font: `500 10px ${MONO}`, color: C.ghost }}>
+            {k.scope_value ? `${k.scope_type}:${k.scope_value}` : k.scope_type} · {fmtShortDate(k.created_at)}
+          </span>
+        </div>
+        <div style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.45 }}>{k.title}</div>
+      </div>
+
+      <div style={{ padding: "10px 14px", fontSize: 11.5, lineHeight: 1.6, color: C.bodyInk, flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        {k.body}
+      </div>
+
+      <div style={{
+        display: "flex", gap: 6, padding: "9px 14px", borderTop: `1px solid ${C.cardHeadLine}`,
+        background: C.cardFoot, borderRadius: "0 0 10px 10px", alignItems: "center",
+      }}>
+        <button disabled={busy} onClick={() => onApprove(k.id)} style={{
+          background: C.ink, color: C.paper, border: "none", borderRadius: 6,
+          padding: "6px 14px", fontSize: 11.5, fontWeight: 700,
+          cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+        }}>{busy ? t("inbox.working") : t("inbox.approveStore")}</button>
+        <button disabled={busy} onClick={() => onReturn(k.id)} style={{
+          background: "#fff", color: C.red, border: `1px solid ${C.redBorder}`, borderRadius: 6,
+          padding: "6px 12px", fontSize: 11.5, fontWeight: 600,
+          cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+        }}>{t("inbox.returnDelete")}</button>
+        <span style={{ flex: 1 }}/>
+        <span style={{ fontSize: 10, color: C.faint }}>{t("inbox.signNote")}</span>
+      </div>
     </div>
   );
 }

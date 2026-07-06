@@ -163,7 +163,62 @@ class BaseLLMClient:
             yield ""
 
 
-def _observe_llm_usage(resp: "LLMResponse") -> "LLMResponse":
+def _post_llm_usage_rollup(payload: Dict[str, Any]) -> None:
+    """S3 empty-rate rollup (W2 governance): fire-and-forget POST to Java
+    `POST /internal/llm-usage/increment`.
+
+    HARD RULES: fail-open (a Java outage must never break an LLM call — every
+    failure is swallowed with a debug log) and zero added latency on the
+    completion path (the POST runs as a detached asyncio task; no running
+    loop → silently skipped).
+    """
+    try:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # Sync context (e.g. offline CLI without a loop) — skip, never raise.
+        logger.debug("llm-usage rollup skipped: no running event loop")
+        return
+    except Exception as ex:  # noqa: BLE001 — rollup never breaks the call
+        logger.debug("llm-usage rollup skipped: %s", ex)
+        return
+
+    async def _send() -> None:
+        try:
+            import httpx
+
+            from python_ai_sidecar.config import CONFIG
+
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(
+                    f"{CONFIG.java_api_url}/internal/llm-usage/increment",
+                    json=payload,
+                    headers={"X-Internal-Token": CONFIG.java_internal_token},
+                )
+        except Exception as ex:  # noqa: BLE001 — fail-open by design
+            logger.debug("llm-usage rollup POST failed (fail-open): %s", ex)
+
+    try:
+        loop.create_task(_send())
+    except Exception as ex:  # noqa: BLE001
+        logger.debug("llm-usage rollup task not scheduled: %s", ex)
+
+
+def _report_llm_exception(model: str) -> None:
+    """Rollup row for a raised provider call (caller-side bounded retry will
+    re-attempt; each failed attempt counts one error). Fail-open."""
+    _post_llm_usage_rollup({
+        "model": model,
+        "empty": False,
+        "error": True,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read": 0,
+    })
+
+
+def _observe_llm_usage(resp: "LLMResponse", model: str = "") -> "LLMResponse":
     """Agent-observability hook (docs/MULTI_AGENT_OBSERVABILITY_SPEC.md §2).
 
     Attributes per-call token usage to the current RoleAgent (planner/builder/
@@ -184,6 +239,29 @@ def _observe_llm_usage(resp: "LLMResponse") -> "LLMResponse":
                 cache_read=resp.cache_read_input_tokens,
             )
     except Exception:  # noqa: BLE001 — observability never breaks the call
+        pass
+    # S3 empty-rate rollup (independent try — recorder failure must not skip
+    # it and vice versa). "empty" = model stopped normally but produced
+    # neither text nor tool calls; "error" = raw provider finish_reason error.
+    try:
+        has_tool_use = any(
+            isinstance(c, dict) and c.get("type") == "tool_use"
+            for c in (resp.content or [])
+        )
+        is_empty = (
+            resp.finish_reason in ("stop", "end_turn")
+            and not (resp.text or "").strip()
+            and not has_tool_use
+        )
+        _post_llm_usage_rollup({
+            "model": model,
+            "empty": is_empty,
+            "error": resp.finish_reason == "error",
+            "input_tokens": resp.input_tokens,
+            "output_tokens": resp.output_tokens,
+            "cache_read": resp.cache_read_input_tokens,
+        })
+    except Exception:  # noqa: BLE001
         pass
     return resp
 
@@ -217,7 +295,11 @@ class AnthropicLLMClient(BaseLLMClient):
         if tools:
             kwargs["tools"] = tools
 
-        resp = await self._client.messages.create(**kwargs)
+        try:
+            resp = await self._client.messages.create(**kwargs)
+        except Exception:
+            _report_llm_exception(self._model)  # S3 rollup — fail-open
+            raise
 
         # Extract first text block (skips ThinkingBlocks)
         text = ""
@@ -267,7 +349,7 @@ class AnthropicLLMClient(BaseLLMClient):
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
             cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0 if usage else 0,
             cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0 if usage else 0,
-        ))
+        ), model=self._model)
 
     async def stream(
         self,
@@ -517,7 +599,11 @@ class OllamaLLMClient(BaseLLMClient):
             ]
             kwargs["tool_choice"] = "auto"
 
-        resp = await self._client.chat.completions.create(**kwargs)
+        try:
+            resp = await self._client.chat.completions.create(**kwargs)
+        except Exception:
+            _report_llm_exception(self._model)  # S3 rollup — fail-open
+            raise
         choice = resp.choices[0]
 
         # Normalise OpenAI finish_reason → Anthropic stop_reason convention
@@ -612,7 +698,7 @@ class OllamaLLMClient(BaseLLMClient):
             output_tokens=completion_tokens,
             cache_read_input_tokens=cached_tokens,
             reasoning_content=str(_reasoning or "")[:12000],
-        ))
+        ), model=self._model)
 
     async def stream(
         self,

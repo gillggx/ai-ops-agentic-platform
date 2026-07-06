@@ -8,5 +8,7 @@
   "footerNote": "Your role is read-only — entries are maintained by PE in the Knowledge Workshop",
   "reportIssue": "Report an issue → PE inbox",
   "removed": "Entry has been removed",
-  "close": "Close"
+  "close": "Close",
+  "reportSent": "Sent → PE inbox",
+  "reportBody": "ON_DUTY report: this entry may be wrong or insufficient — please review."
 }

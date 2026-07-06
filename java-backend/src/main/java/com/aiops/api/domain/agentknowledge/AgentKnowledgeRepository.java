@@ -10,6 +10,11 @@ import java.util.List;
 public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEntity, Long> {
     List<AgentKnowledgeEntity> findByUserIdOrderByCreatedAtDesc(Long userId);
 
+    /** V75 review queue — deliberately CROSS-USER: ON_DUTY drafts live under
+     *  the submitter's user_id, and the reviewing PE / IT_ADMIN is a different
+     *  user. Callers must role-gate (AgentKnowledgeService.listDrafts). */
+    List<AgentKnowledgeEntity> findByStatusOrderByCreatedAtDesc(String status);
+
     /** Curation input (V72): agent-written rows by class+active, e.g. draft
      *  corrections (active=false) or live preference/presentation dupes. */
     List<AgentKnowledgeEntity> findTop100ByMemoClassAndActiveOrderByIdDesc(
@@ -47,6 +52,7 @@ public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEn
     @Query(value = """
             SELECT * FROM agent_knowledge
             WHERE user_id = :userId AND active = true
+              AND status = 'active'
               AND embedding IS NOT NULL
               AND (CAST(:layer AS text) IS NULL
                    OR applies_to = :layer OR applies_to = 'both')

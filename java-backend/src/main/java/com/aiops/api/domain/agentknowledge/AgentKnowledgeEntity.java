@@ -70,6 +70,31 @@ public class AgentKnowledgeEntity {
     @Column(name = "active", nullable = false)
     private Boolean active = true;
 
+    /** V75 lifecycle: draft | active | stale | archived. Retrieval paths
+     *  (searchByEmbedding / highPriorityKnowledge) only serve 'active'.
+     *  ON_DUTY-created rows and W3 repair corrections land as 'draft' until
+     *  a PE / IT_ADMIN approves. */
+    @Column(name = "status", nullable = false, length = 12)
+    private String status = "active";
+
+    /** V75 C1 subject index: block | tool | skill | request_class | general. */
+    @Column(name = "subject_kind", length = 16)
+    private String subjectKind;
+
+    @Column(name = "subject_id", length = 80)
+    private String subjectId;
+
+    /** V75 C2: annual-review due date for domain/procedure rows. */
+    @Column(name = "review_at")
+    private OffsetDateTime reviewAt;
+
+    @Column(name = "expires_at")
+    private OffsetDateTime expiresAt;
+
+    /** V75: id of the agent_knowledge row that replaced this one. */
+    @Column(name = "superseded_by")
+    private Long supersededBy;
+
     @Column(name = "source", nullable = false, length = 20)
     private String source = "manual";
 

@@ -2,8 +2,10 @@
 
 /**
  * 簽核紀錄 tab — one row per case, 4-stage lifecycle columns
- * (提案 → 簽核 → 落地 → 驗證). Only 提案/簽核 carry real data today;
- * 落地/驗證 render "—" until the W2 lifecycle write-back lands (per spec).
+ * (提案 → 簽核 → 落地 → 驗證). 落地 fills from landed_at/landed_by and
+ * 驗證 from verify_result/verify_at (W2 write-back); old rows without
+ * those columns render "—". Rejected rows carry reject_reason as a
+ * hover title on the sign cell.
  */
 
 import { useTranslations } from "next-intl";
@@ -44,8 +46,21 @@ export function AuditTable({ items }: { items: Proposal[] }) {
         const sign = approved || rejected
           ? `${approved ? "✓" : "✕"} #${p.reviewed_by ?? "?"} ${fmtWhen(p.reviewed_at)}`
           : "—";
+        // reject_reason surfaces on hover only (rejected rows, W2 column)
+        const rejectTitle = rejected && (p.reject_reason ?? "").trim() !== ""
+          ? t("audit.rejectReason", { reason: p.reject_reason as string })
+          : undefined;
+        // 落地 / 驗證 — W2 write-back columns; "—" when missing (old rows)
+        const landed = p.landed_at != null && p.landed_at !== "";
+        const land = landed
+          ? `✓ ${p.landed_by != null ? `#${p.landed_by} ` : ""}${fmtWhen(p.landed_at)}`
+          : "—";
+        const verified = (p.verify_result ?? "") !== "" || (p.verify_at != null && p.verify_at !== "");
+        const verify = verified
+          ? `${p.verify_result ?? ""} ${fmtWhen(p.verify_at)}`.trim()
+          : "—";
         return (
-          <div key={p.id} style={{
+          <div key={p.id} title={rejectTitle} style={{
             display: "grid", gridTemplateColumns: GRID, padding: "10px 16px",
             borderBottom: `1px solid ${TOK.borderRow}`, alignItems: "start",
           }}>
@@ -56,10 +71,9 @@ export function AuditTable({ items }: { items: Proposal[] }) {
               </span>
             </div>
             <div style={{ fontSize: 11.5, color: TOK.secondary }}>{fmtWhen(p.created_at)}</div>
-            <div style={{ fontSize: 11.5, color: signFg }}>{sign}</div>
-            {/* 落地 / 驗證 — W2 lifecycle write-back not built yet */}
-            <div style={{ fontSize: 11.5, color: TOK.fainter }}>—</div>
-            <div style={{ fontSize: 11.5, color: TOK.fainter }}>—</div>
+            <div style={{ fontSize: 11.5, color: signFg }} title={rejectTitle}>{sign}</div>
+            <div style={{ fontSize: 11.5, color: landed ? TOK.green : TOK.fainter }}>{land}</div>
+            <div style={{ fontSize: 11.5, color: verified ? TOK.secondary : TOK.fainter }}>{verify}</div>
           </div>
         );
       })}

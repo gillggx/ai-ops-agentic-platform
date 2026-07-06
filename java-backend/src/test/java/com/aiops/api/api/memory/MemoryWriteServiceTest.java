@@ -118,6 +118,36 @@ class MemoryWriteServiceTest {
         assertThat(cap.getValue().getActive()).isFalse();   // draft until Supervisor promotes
     }
 
+    // ── V75 lifecycle status derivation ─────────────────────────────────
+
+    @Test
+    void createKnowledge_v75StatusDerivation() {
+        when(knowledge.findFirstByUserIdAndMemoClassAndTitle(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
+
+        // W3 convention: repair-written inactive correction → draft
+        service.createKnowledge(1L, "correction", "t1", "b", null, null, false, "repair",
+                null, null, null);
+        // other inactive rows → archived
+        service.createKnowledge(1L, "preference", "t2", "b", null, null, false, "planner",
+                null, null, null);
+        // explicit whitelisted status wins
+        service.createKnowledge(1L, "domain", "t3", "b", null, null, null, "planner",
+                "draft", null, null);
+        // non-whitelisted status ignored → live default 'active'
+        service.createKnowledge(1L, "domain", "t4", "b", null, null, null, "planner",
+                "stale", "block", "block_bar_chart");
+
+        verify(knowledge, times(4)).save(cap.capture());
+        assertThat(cap.getAllValues().get(0).getStatus()).isEqualTo("draft");
+        assertThat(cap.getAllValues().get(1).getStatus()).isEqualTo("archived");
+        assertThat(cap.getAllValues().get(2).getStatus()).isEqualTo("draft");
+        assertThat(cap.getAllValues().get(3).getStatus()).isEqualTo("active");
+        assertThat(cap.getAllValues().get(3).getSubjectKind()).isEqualTo("block");
+        assertThat(cap.getAllValues().get(3).getSubjectId()).isEqualTo("block_bar_chart");
+    }
+
     @Test
     void createDocMemo_writesPendingWithProvenance() {
         when(memos.existsByBlockIdAndParamAndFromEpisode(anyString(), any(), any()))

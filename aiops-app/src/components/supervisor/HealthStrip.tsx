@@ -5,13 +5,16 @@
  *
  * S1 computed client-side from GET /api/agent-activity/episodes (success
  * rate, avg LLM calls, divergence count). S2 from proposal counts + doc
- * memo queue length. S3 is a W2 placeholder — the visual slot is kept per
- * design but values stay "—" until the cost backend lands (never fabricate).
+ * memo queue length. S3 from GET /api/supervisor/metrics/llm-daily?days=7:
+ * today's calls, empty-rate (aggregated across all models, red when > 10%)
+ * and cache_read tokens. Pricing is not wired yet so the cost cell stays
+ * "—" (never fabricate); old backends without the endpoint fail-open to
+ * placeholders.
  */
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { TOK, api } from "./model";
+import { TOK, LlmDailyRow, api } from "./model";
 
 interface EpisodeRow {
   status: string | null;
@@ -21,20 +24,29 @@ interface EpisodeRow {
 
 interface S1 { successRate: string; avgCalls: string; divergence: string }
 interface S2 { pending: string; docMemos: string }
+interface S3 { calls: string; emptyRate: string; emptyHot: boolean; cacheRead: string }
 
 const EPISODE_WINDOW = 50;
+const EMPTY_RATE_RED_PCT = 10;
 const DASH = "—";
+
+/** 12345678 → "12.3M", 45210 → "45.2k" — mono metric stays short. */
+function fmtCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
 
 const cardStyle: React.CSSProperties = {
   background: TOK.card, border: `1px solid ${TOK.border}`, borderRadius: 10,
   padding: "12px 16px",
 };
 
-function Metric({ value, label }: { value: string; label: string }) {
+function Metric({ value, label, hot }: { value: string; label: string; hot?: boolean }) {
   return (
     <div>
-      <div style={{ font: `700 20px ${TOK.mono}`, color: TOK.ink }}>{value}</div>
-      <div style={{ fontSize: 10.5, color: TOK.muted }}>{label}</div>
+      <div style={{ font: `700 20px ${TOK.mono}`, color: hot ? TOK.red : TOK.ink }}>{value}</div>
+      <div style={{ fontSize: 10.5, color: hot ? TOK.red : TOK.muted }}>{label}</div>
     </div>
   );
 }
@@ -56,6 +68,7 @@ export function HealthStrip({ refreshKey }: { refreshKey: number }) {
   const t = useTranslations("sup");
   const [s1, setS1] = useState<S1>({ successRate: DASH, avgCalls: DASH, divergence: DASH });
   const [s2, setS2] = useState<S2>({ pending: DASH, docMemos: DASH });
+  const [s3, setS3] = useState<S3>({ calls: DASH, emptyRate: DASH, emptyHot: false, cacheRead: DASH });
   const [updatedAt, setUpdatedAt] = useState<string>(DASH);
 
   useEffect(() => {
@@ -91,6 +104,29 @@ export function HealthStrip({ refreshKey }: { refreshKey: number }) {
       .then((memos) => { if (alive && Array.isArray(memos)) setS2((s) => ({ ...s, docMemos: String(memos.length) })); })
       .catch(() => {});
 
+    // S3 — daily LLM metrics (W2). "Today" = the newest day in the window;
+    // aggregate across all models. Endpoint may not exist yet → fail-open.
+    api<LlmDailyRow[]>("/api/supervisor/metrics/llm-daily?days=7")
+      .then((rows) => {
+        if (!alive || !Array.isArray(rows) || rows.length === 0) return;
+        const days = rows.map((r) => r.day ?? "").filter(Boolean);
+        if (days.length === 0) return;
+        const today = days.sort().at(-1);
+        const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+        const t3 = rows.filter((r) => (r.day ?? "") === today);
+        const calls = t3.reduce((a, r) => a + num(r.calls), 0);
+        const empty = t3.reduce((a, r) => a + num(r.empty_calls), 0);
+        const cacheRead = t3.reduce((a, r) => a + num(r.cache_read), 0);
+        const pct = calls > 0 ? (empty / calls) * 100 : null;
+        setS3({
+          calls: String(calls),
+          emptyRate: pct == null ? DASH : `${pct.toFixed(1)}%`,
+          emptyHot: pct != null && pct > EMPTY_RATE_RED_PCT,
+          cacheRead: fmtCompact(cacheRead),
+        });
+      })
+      .catch(() => { /* fail-open — S3 keeps placeholders */ });
+
     setUpdatedAt(new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }));
     return () => { alive = false; };
   }, [refreshKey]);
@@ -125,10 +161,11 @@ export function HealthStrip({ refreshKey }: { refreshKey: number }) {
         <div style={cardStyle}>
           <CardHead tag="S3" tagColor={TOK.cyan} title={t("health.s3Title")} note={t("health.s3Note")} />
           <div style={{ display: "flex", gap: 22 }}>
-            {/* W2 cost backend not wired yet — keep the design slots, show "—" */}
+            {/* tokens are on the wire but pricing is not — cost stays "—" */}
             <Metric value={DASH} label={t("health.s3Cost")} />
-            <Metric value={DASH} label={t("health.s3Cache")} />
-            <Metric value={DASH} label={t("health.s3Empty")} />
+            <Metric value={s3.calls} label={t("health.s3Calls")} />
+            <Metric value={s3.emptyRate} hot={s3.emptyHot} label={t("health.s3Empty")} />
+            <Metric value={s3.cacheRead} label={t("health.s3CacheRead")} />
           </div>
         </div>
       </div>

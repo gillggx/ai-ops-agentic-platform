@@ -146,6 +146,8 @@ public class InternalAgentKnowledgeService {
 		final String layerFilter = (layer == null || layer.isBlank()) ? null : layer;
 		return knowledgeRepo.findAll().stream()
 				.filter(e -> e.getActive() != null && e.getActive())
+				// V75 lifecycle: drafts / stale / archived rows never reach prompts
+				.filter(e -> "active".equals(e.getStatus()))
 				.filter(e -> "high".equalsIgnoreCase(e.getPriority()))
 				.filter(e -> "global".equals(e.getScopeType())
 				          || (e.getUserId() != null && e.getUserId().equals(userId)))

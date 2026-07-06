@@ -8,5 +8,7 @@
   "footerNote": "你的角色為唯讀 — 條目由 PE 在知識工房維護",
   "reportIssue": "回報問題 → PE 收件匣",
   "removed": "條目已移除",
-  "close": "關閉"
+  "close": "關閉",
+  "reportSent": "已送出 → PE 收件匣",
+  "reportBody": "ON_DUTY 回報：此條目可能有問題或不足，請 PE 檢視。"
 }

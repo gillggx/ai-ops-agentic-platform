@@ -1,6 +1,7 @@
 package com.aiops.api.api.agentknowledge;
 
 import com.aiops.api.auth.AuthPrincipal;
+import com.aiops.api.auth.Role;
 import com.aiops.api.common.ApiException;
 import com.aiops.api.domain.agentknowledge.*;
 import lombok.RequiredArgsConstructor;
@@ -173,8 +174,46 @@ public class AgentKnowledgeService {
 		e.setBody(req.body());
 		e.setPriority(req.priority() != null ? req.priority() : "med");
 		e.setWrittenBy("human");   // V71: manual UI create is human-authored
+		// V75 governance: ON_DUTY-only callers create DRAFTS (invisible to
+		// retrieval) — a PE / IT_ADMIN approves via approveKnowledge. Fail
+		// closed: null / empty roles are treated as ON_DUTY.
+		if (canPublishKnowledge(caller)) {
+			e.setStatus("active");
+		} else {
+			e.setStatus("draft");
+			e.setActive(false);
+		}
 		// embedding will be filled in by sidecar's _backfill_embeddings (async)
 		return Dtos.KnowledgeDto.of(knowledgeRepo.save(e));
+	}
+
+	/** V75 review queue — ALL users' drafts, cross-user by design: ON_DUTY
+	 *  submits under their own user_id and a (different) PE / IT_ADMIN
+	 *  reviews. The role gate IS the authorization here. */
+	@Transactional(readOnly = true)
+	public List<Dtos.KnowledgeDto> listDrafts(AuthPrincipal caller) {
+		requireReviewerRole(caller);
+		return knowledgeRepo.findByStatusOrderByCreatedAtDesc("draft")
+				.stream().map(Dtos.KnowledgeDto::of).toList();
+	}
+
+	/** V75 approve path: draft → active. This is the ONLY way a draft goes
+	 *  live — the PATCH active toggle refuses drafts (see patchKnowledge).
+	 *  Cross-user on purpose (no owner check): the reviewing PE / IT_ADMIN is
+	 *  not the ON_DUTY submitter — the role gate IS the authorization. */
+	@Transactional
+	public Dtos.KnowledgeDto approveKnowledge(Long id, AuthPrincipal caller) {
+		requireReviewerRole(caller);
+		AgentKnowledgeEntity e = knowledgeRepo.findById(id)
+				.orElseThrow(() -> ApiException.notFound("knowledge"));
+		if (!"draft".equals(e.getStatus())) {
+			throw ApiException.badRequest(
+					"knowledge " + id + " is '" + e.getStatus() + "' — only drafts can be approved");
+		}
+		e.setStatus("active");
+		e.setActive(true);
+		e.setUpdatedAt(OffsetDateTime.now());
+		return Dtos.KnowledgeDto.of(e);
 	}
 
 	@Transactional
@@ -191,7 +230,7 @@ public class AgentKnowledgeService {
 		if (req.title() != null)    e.setTitle(req.title());
 		if (req.body() != null)     { e.setBody(req.body()); bodyChanged = true; }
 		if (req.priority() != null) { validatePriority(req.priority()); e.setPriority(req.priority()); }
-		if (req.active() != null)   e.setActive(req.active());
+		if (req.active() != null)   applyActiveToggle(e, req.active());
 		e.setUpdatedAt(OffsetDateTime.now());
 		// Invalidation goes through native SQL — the `embedding` column is
 		// JPA-readonly (insertable/updatable=false) because Hibernate binds
@@ -260,6 +299,51 @@ public class AgentKnowledgeService {
 				.orElseThrow(() -> ApiException.notFound("example"));
 		ensureOwner(e.getUserId(), caller);
 		exampleRepo.deleteById(id);
+	}
+
+	// ══════════════════════════════════════════════════════════════════════
+	// V75 lifecycle helpers
+	// ══════════════════════════════════════════════════════════════════════
+
+	/** PE / IT_ADMIN publish directly; anyone else (ON_DUTY, or no roles at
+	 *  all — fail closed) only produces drafts. */
+	private static boolean canPublishKnowledge(AuthPrincipal caller) {
+		return caller.roles() != null
+				&& (caller.roles().contains(Role.PE) || caller.roles().contains(Role.IT_ADMIN));
+	}
+
+	/** Review-flow gate (listDrafts / approveKnowledge): same PE / IT_ADMIN
+	 *  authority as publishing — defense-in-depth behind the controller's
+	 *  ADMIN_OR_PE @PreAuthorize, and fail-closed on null / empty roles. */
+	private static void requireReviewerRole(AuthPrincipal caller) {
+		if (!canPublishKnowledge(caller)) {
+			throw ApiException.forbidden("PE or IT_ADMIN role required to review knowledge drafts");
+		}
+	}
+
+	/** Keep the V75 {@code status} column coherent with the legacy
+	 *  {@code active} toggle:
+	 *  <ul>
+	 *    <li>disable → status 'archived' ONLY if currently 'active'
+	 *        (draft/stale keep their lifecycle state);</li>
+	 *    <li>enable → status 'active', EXCEPT drafts: enabling a draft must go
+	 *        through {@link #approveKnowledge} — the toggle refuses so a draft
+	 *        can never silently go live.</li>
+	 *  </ul> */
+	private static void applyActiveToggle(AgentKnowledgeEntity e, boolean enable) {
+		if (enable) {
+			if ("draft".equals(e.getStatus())) {
+				throw ApiException.badRequest(
+						"knowledge " + e.getId() + " is a draft — use the approve endpoint, not the active toggle");
+			}
+			e.setActive(true);
+			e.setStatus("active");
+		} else {
+			e.setActive(false);
+			if ("active".equals(e.getStatus())) {
+				e.setStatus("archived");
+			}
+		}
 	}
 
 	// ══════════════════════════════════════════════════════════════════════

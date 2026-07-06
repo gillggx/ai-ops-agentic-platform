@@ -66,7 +66,8 @@ public class SupervisorCurationService {
     @Transactional
     public Map<String, Object> propose(String actionType, List<?> targetIds,
                                        Map<String, Object> proposal, String rationale,
-                                       Map<String, Object> proposerMeta) {
+                                       Map<String, Object> proposerMeta,
+                                       Map<String, Object> narrative) {
         if (actionType == null || !TYPES.contains(actionType)) {
             throw ApiException.badRequest("action_type must be one of " + TYPES);
         }
@@ -83,6 +84,10 @@ public class SupervisorCurationService {
         a.setProposal(JsonUtils.safeWrite(mapper, proposal));
         a.setRationale(rationale);
         a.setProposerMeta(JsonUtils.safeWrite(mapper, proposerMeta));
+        // V75 案情敘事 — optional; NULL keeps the old 3-part frontend rendering
+        if (narrative != null && !narrative.isEmpty()) {
+            a.setNarrative(JsonUtils.safeWrite(mapper, narrative));
+        }
         a = actions.save(a);
         return Map.of("id", a.getId(), "deduped", false);
     }
@@ -125,16 +130,22 @@ public class SupervisorCurationService {
             case "DOC_REVISE" -> commitDocRevise(p, reviewerId);
             default -> throw ApiException.badRequest("unknown action_type " + a.getActionType());
         };
+        OffsetDateTime now = OffsetDateTime.now();
         a.setStatus("approved");
         a.setReviewedBy(reviewerId);
-        a.setReviewedAt(OffsetDateTime.now());
+        a.setReviewedAt(now);
+        // V75 landing lifecycle: the per-type commit above succeeded (it
+        // throws otherwise), so the change has landed — stamp when/who.
+        a.setLandedAt(now);
+        a.setLandedBy(String.valueOf(reviewerId));
         a.setCommitResult(JsonUtils.safeWrite(mapper, result));
         actions.save(a);
         return toDto(a);
     }
 
+    /** Reject with an optional human-stated reason (V75 audit trail). */
     @Transactional
-    public Map<String, Object> reject(Long id, Long reviewerId) {
+    public Map<String, Object> reject(Long id, Long reviewerId, String reason) {
         SupervisorActionEntity a = actions.findById(id)
                 .orElseThrow(() -> ApiException.notFound("proposal " + id));
         if (!"proposed".equals(a.getStatus())) {
@@ -143,6 +154,9 @@ public class SupervisorCurationService {
         a.setStatus("rejected");
         a.setReviewedBy(reviewerId);
         a.setReviewedAt(OffsetDateTime.now());
+        if (reason != null && !reason.isBlank()) {
+            a.setRejectReason(reason);
+        }
         actions.save(a);
         return toDto(a);
     }
@@ -273,6 +287,16 @@ public class SupervisorCurationService {
         m.put("reviewed_by", a.getReviewedBy());
         m.put("reviewed_at", a.getReviewedAt() == null ? null : a.getReviewedAt().toString());
         m.put("commit_result", JsonUtils.parseObject(mapper, a.getCommitResult()));
+        // V75 narrative + landing lifecycle. narrative stays null (not {})
+        // for pre-V75 rows so the frontend can fall back to 3-part rendering.
+        m.put("narrative", a.getNarrative() == null ? null
+                : JsonUtils.parseObject(mapper, a.getNarrative()));
+        m.put("reject_reason", a.getRejectReason());
+        m.put("landed_at", a.getLandedAt() == null ? null : a.getLandedAt().toString());
+        m.put("landed_by", a.getLandedBy());
+        m.put("verify_result", a.getVerifyResult());
+        m.put("verify_at", a.getVerifyAt() == null ? null : a.getVerifyAt().toString());
+        m.put("superseded_by", a.getSupersededBy());
         return m;
     }
 

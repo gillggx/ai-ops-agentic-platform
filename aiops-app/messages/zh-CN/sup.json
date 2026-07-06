@@ -19,7 +19,9 @@
     "s3Cost": "今日花费",
     "s3Cache": "cache hit",
     "s3Empty": "LLM 空响应率",
-    "s3Note": "待 W2 后端 — 显示占位"
+    "s3Calls": "今日 LLM calls",
+    "s3CacheRead": "cache read tokens",
+    "s3Note": "今日 · 全模型汇总"
   },
   "tabs": {
     "inbox": "提案收件箱",
@@ -96,6 +98,12 @@
   "evidence": {
     "raw": "proposal 原文"
   },
+  "narr": {
+    "happened": "发生了什么",
+    "observed": "观察到的问题",
+    "subject": "影响对象",
+    "action": "提议"
+  },
   "digest": {
     "empty": "Supervisor 报告尚未生成",
     "hint": "定期报告（周报 / 日报）由 W2 排程产生，上线后会出现在这里"
@@ -107,6 +115,7 @@
     "colLand": "落地",
     "colVerify": "Supervisor 验证",
     "lifecycle": "一行一案 · 提案 → 签核 → 落地 → 验证 四段生命周期",
-    "empty": "尚无签核记录"
+    "empty": "尚无签核记录",
+    "rejectReason": "驳回理由：{reason}"
   }
 }
