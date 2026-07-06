@@ -124,7 +124,11 @@ async def stream_graph_build(
         set_current_memory_writer,
         set_current_recorder,
     )
-    recorder = make_recorder(session_id=sid, instruction=instruction, user_id=user_id)
+    _trigger_source = ("schedule" if trigger_payload else
+                       "skill" if skill_step_mode else
+                       "chat" if skip_confirm else "builder")
+    recorder = make_recorder(session_id=sid, instruction=instruction,
+                             user_id=user_id, trigger_source=_trigger_source)
     set_current_recorder(recorder)
     set_current_memory_writer(make_memory_writer(episode_key=sid, user_id=user_id))
 

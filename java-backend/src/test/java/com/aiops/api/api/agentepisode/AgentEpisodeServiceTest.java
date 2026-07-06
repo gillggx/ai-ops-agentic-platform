@@ -52,19 +52,19 @@ class AgentEpisodeServiceTest {
     @Test
     void upsert_isIdempotentByKey() {
         when(episodes.findByEpisodeKey("s1")).thenReturn(Optional.empty());
-        AgentEpisodeEntity created = service.upsert("s1", 7L, "查 xbar", null);
+        AgentEpisodeEntity created = service.upsert("s1", 7L, "查 xbar", null, "chat");
         assertThat(created.getEpisodeKey()).isEqualTo("s1");
         assertThat(created.getUserId()).isEqualTo(7L);
 
         when(episodes.findByEpisodeKey("s1")).thenReturn(Optional.of(created));
-        AgentEpisodeEntity again = service.upsert("s1", null, null, null);
+        AgentEpisodeEntity again = service.upsert("s1", null, null, null, null);
         assertThat(again.getId()).isEqualTo(created.getId());
         assertThat(again.getInstruction()).isEqualTo("查 xbar"); // not clobbered
     }
 
     @Test
     void upsert_requiresKey() {
-        assertThatThrownBy(() -> service.upsert(" ", null, null, null))
+        assertThatThrownBy(() -> service.upsert(" ", null, null, null, null))
                 .isInstanceOf(ApiException.class);
     }
 

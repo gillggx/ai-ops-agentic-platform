@@ -44,7 +44,8 @@ public class InternalAgentEpisodeController {
                 s(body.get("episode_key")),
                 l(body.get("user_id")),
                 s(body.get("instruction")),
-                s(body.get("started_at")));
+                s(body.get("started_at")),
+                s(body.get("trigger_source")));
         return ApiResponse.ok(Map.of("id", ep.getId(), "episode_key", ep.getEpisodeKey()));
     }
 

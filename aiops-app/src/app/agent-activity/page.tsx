@@ -66,6 +66,7 @@ interface Detail {
   // one may be missing on older episodes. Read defensively.
   user_id?: number | string | null;
   username?: string | null;
+  trigger_source?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
   duration_ms?: number | null;
@@ -137,8 +138,11 @@ export default function AgentActivityPage() {
             onClick={() => setSelected(e.episode_key)}
             style={{
               display: "block", width: "100%", textAlign: "left", cursor: "pointer",
-              padding: "10px 16px", border: "none", borderBottom: "1px solid #f3f4f6",
+              padding: "10px 16px 10px 13px", border: "none",
+              borderBottom: "1px solid #f3f4f6",
+              borderLeft: e.episode_key === selected ? "3px solid #2563eb" : "3px solid transparent",
               background: e.episode_key === selected ? "#eff6ff" : "#fff",
+              fontWeight: e.episode_key === selected ? 600 : 400,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
@@ -203,9 +207,16 @@ function humanizeDuration(ms: number | null | undefined): string | null {
 /** Best-effort 觸發來源 from the instruction prefix. Only "[resume:<kind>]"
  *  gives a real source; "[intent_confirmed:…]" is stripped (the underlying
  *  chat-vs-builder origin is not persisted), everything else → "—". */
-function deriveTrigger(instruction: string | null | undefined): string {
-  if (!instruction) return "—";
-  const resume = instruction.match(/^\s*\[resume:([^\]]+)\]/);
+const TRIGGER_LABEL: Record<string, string> = {
+  chat: "對話", builder: "Builder", skill: "Skill", schedule: "排程",
+};
+/** 觸發來源：優先用 episode 記錄的 trigger_source（V76）；舊 episode 無值時
+ *  退回 instruction 前綴推導（resume:… 才有意義）。 */
+function deriveTrigger(d: { trigger_source?: string | null; instruction?: string | null }): string {
+  const src = (d.trigger_source ?? "").trim();
+  if (src) return TRIGGER_LABEL[src] ?? src;
+  const inst = d.instruction ?? "";
+  const resume = inst.match(/^\s*\[resume:([^\]]+)\]/);
   if (resume) return `resume · ${resume[1].trim()}`;
   return "—";
 }
@@ -224,11 +235,22 @@ function metaResult(status: string | null | undefined): { label: string; fg: str
 function MetaBar({ episodeKey }: { episodeKey: string }) {
   const [d, setD] = useState<Detail | null>(null);
   useEffect(() => {
+    let alive = true;            // 忽略過期回應：切換 episode 後舊 fetch 不覆蓋
+    setD(null);                  // 立即清空，避免上一筆 meta 疊到下一筆
     getJson<Detail>(`/api/agent-activity/episodes/${encodeURIComponent(episodeKey)}`)
-      .then(setD)
-      .catch(() => setD(null)); // fail-open — bar just doesn't render
+      .then((r) => { if (alive) setD(r); })
+      .catch(() => { if (alive) setD(null); });
+    return () => { alive = false; };
   }, [episodeKey]);
-  if (!d) return null;
+  // 載入中顯示骨架列（而非整條消失）→ 給「已選取、正在載入」的提示
+  if (!d) {
+    return (
+      <div style={{ padding: "12px 20px", borderBottom: "1px solid #e5e7eb",
+                    background: "#fafafa", color: "#9ca3af", fontSize: 12.5 }}>
+        載入 case 詳情…
+      </div>
+    );
+  }
 
   const who = d.username?.trim()
     || (d.user_id != null && String(d.user_id) !== "" ? `#${d.user_id}` : null)
@@ -239,7 +261,7 @@ function MetaBar({ episodeKey }: { episodeKey: string }) {
   const duration = dur ?? (running ? "進行中" : "—");
   const result = metaResult(d.status);
   const phases = d.phase_count != null ? String(d.phase_count) : "—";
-  const trigger = deriveTrigger(d.instruction);
+  const trigger = deriveTrigger(d);
 
   return (
     <div style={{

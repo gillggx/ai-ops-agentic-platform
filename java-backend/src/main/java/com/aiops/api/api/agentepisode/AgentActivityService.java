@@ -70,6 +70,7 @@ public class AgentActivityService {
         out.put("episode_key", e.getEpisodeKey());
         out.put("instruction", e.getInstruction());
         out.put("status", e.getStatus());
+        out.put("trigger_source", e.getTriggerSource());
         out.put("divergence", e.isDivergence());
         out.put("self_assessment", JsonUtils.parseObject(mapper, e.getSelfAssessment()));
         out.put("user_feedback", JsonUtils.parseListOfObjects(mapper, e.getUserFeedback()));

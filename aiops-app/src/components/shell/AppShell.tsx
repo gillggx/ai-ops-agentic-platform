@@ -80,7 +80,7 @@ const KNOWLEDGE_ITEMS = [
 const ADMIN_ITEMS = [
   { href: "/agent-activity",          labelKey: "agentActivity",    icon: "◎" },
   { href: "/supervisor",              labelKey: "supervisor",       icon: "◈" },
-  { href: "/admin/build-traces",      labelKey: "buildTraces",      icon: "📜" },
+  // 2026-07-06 sunset — build traces superseded by /agent-activity（頁面保留不連）
   { href: "/admin/block-docs",        labelKey: "blockDocs",        icon: "📖" },
   { href: "/system/data-sources",     labelKey: "dataSources",      icon: "🗄️" },
   { href: "/system/event-registry",   labelKey: "eventRegistry",    icon: "📋" },

@@ -43,7 +43,8 @@ public class AgentEpisodeService {
     /** Idempotent create-or-update by episode_key. */
     @Transactional
     public AgentEpisodeEntity upsert(String episodeKey, Long userId,
-                                     String instruction, String startedAtIso) {
+                                     String instruction, String startedAtIso,
+                                     String triggerSource) {
         if (episodeKey == null || episodeKey.isBlank()) {
             throw ApiException.badRequest("episode_key required");
         }
@@ -55,6 +56,10 @@ public class AgentEpisodeService {
         }
         if (userId != null) ep.setUserId(userId);
         if (instruction != null && !instruction.isBlank()) ep.setInstruction(instruction);
+        // 只在首次（尚無值）寫入 — resume 呼叫不清掉原始來源
+        if (triggerSource != null && !triggerSource.isBlank() && ep.getTriggerSource() == null) {
+            ep.setTriggerSource(triggerSource);
+        }
         return episodes.save(ep);
     }
 

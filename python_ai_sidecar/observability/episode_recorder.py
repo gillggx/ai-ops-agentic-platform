@@ -69,14 +69,16 @@ def reset_current_agent(token: contextvars.Token) -> None:
 
 
 def make_recorder(
-    *, session_id: str, instruction: str, user_id: Optional[int]
+    *, session_id: str, instruction: str, user_id: Optional[int],
+    trigger_source: Optional[str] = None,
 ) -> Optional["EpisodeRecorder"]:
     """Factory — returns None when the flag is off (all call sites no-op)."""
     from python_ai_sidecar.feature_flags import is_agent_episodes_enabled
 
     if not is_agent_episodes_enabled():
         return None
-    return EpisodeRecorder(session_id=session_id, instruction=instruction, user_id=user_id)
+    return EpisodeRecorder(session_id=session_id, instruction=instruction,
+                           user_id=user_id, trigger_source=trigger_source)
 
 
 def _now_iso() -> str:
@@ -84,9 +86,11 @@ def _now_iso() -> str:
 
 
 class EpisodeRecorder:
-    def __init__(self, *, session_id: str, instruction: str, user_id: Optional[int]):
+    def __init__(self, *, session_id: str, instruction: str, user_id: Optional[int],
+                 trigger_source: Optional[str] = None):
         self.episode_key = session_id
         self._instruction = instruction
+        self._trigger_source = trigger_source
         self._user_id = user_id
         self._buffer: list[dict[str, Any]] = []
         self._created = False
@@ -222,6 +226,7 @@ class EpisodeRecorder:
             "episode_key": self.episode_key,
             "user_id": self._user_id,
             "instruction": self._instruction,
+            "trigger_source": self._trigger_source,
             "started_at": _now_iso(),
         })
         self._created = True

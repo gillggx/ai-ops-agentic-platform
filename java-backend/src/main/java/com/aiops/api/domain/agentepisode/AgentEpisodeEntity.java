@@ -64,6 +64,10 @@ public class AgentEpisodeEntity {
     @Column(name = "trace_file", columnDefinition = "text")
     private String traceFile;
 
+    /** V76: 觸發來源 chat|builder|skill|schedule；null = 舊 episode。 */
+    @Column(name = "trigger_source", length = 16)
+    private String triggerSource;
+
     @Column(name = "started_at", nullable = false)
     private OffsetDateTime startedAt;
 
