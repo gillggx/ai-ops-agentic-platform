@@ -141,12 +141,16 @@ export interface LlmDailyRow {
 }
 
 // ── role / signer mapping ───────────────────────────────────────────────
-// 2026-07-06 政策：document（block 文件 = 系統的一部份）→ IT_ADMIN；
-// knowledge（PRUNE/PROMOTE/MERGE/CORRECT 操作 agent_knowledge）→ PE。
-const PE_SIGNED = new Set(["PRUNE", "PROMOTE", "MERGE", "CORRECT"]);
+// 2026-07-06 信任階梯：策展類（agent 提的）由 Supervisor 自動核，不會出現在
+// 人工佇列；因此凡是「還在待審、到得了人」的 Supervisor 提案一律 IT_ADMIN
+// （PRUNE 刪除 + 所有 forensics + CFG/ISSUE）。PE 只在知識工房審 ON_DUTY 草稿。
+export function signerOf(_p: Proposal): "PE" | "IT_ADMIN" {
+  return "IT_ADMIN";
+}
 
-export function signerOf(p: Proposal): "PE" | "IT_ADMIN" {
-  return PE_SIGNED.has(p.action_type) ? "PE" : "IT_ADMIN";
+/** reviewed_by === 0 = Supervisor 自動核（SUPERVISOR_AUTO_REVIEWER）。 */
+export function isAutoApproved(p: Proposal): boolean {
+  return p.reviewed_by === 0 || String(p.reviewed_by) === "0";
 }
 
 export function canSign(p: Proposal, roles: string[]): boolean {

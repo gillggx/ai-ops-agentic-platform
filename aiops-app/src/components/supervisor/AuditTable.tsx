@@ -43,7 +43,10 @@ export function AuditTable({ items }: { items: Proposal[] }) {
         const approved = p.status === "approved";
         const rejected = p.status === "rejected";
         const signFg = approved ? TOK.green : rejected ? TOK.red : TOK.muted;
-        const sign = approved || rejected
+        const auto = approved && (p.reviewed_by === 0 || String(p.reviewed_by) === "0");
+        const sign = auto
+          ? `✓ ${t("audit.autoBySupervisor")} ${fmtWhen(p.reviewed_at)}`
+          : approved || rejected
           ? `${approved ? "✓" : "✕"} #${p.reviewed_by ?? "?"} ${fmtWhen(p.reviewed_at)}`
           : "—";
         // reject_reason surfaces on hover only (rejected rows, W2 column)

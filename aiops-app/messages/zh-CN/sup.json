@@ -55,7 +55,8 @@
     "supersedePost": "取代（同主题、证据较新）。不留僵尸提案。",
     "supersedeNoRef": "此提案已过期 — 已被更新的提案取代，仅供追溯",
     "lifecycleNote": "核准后为“待人执行”中间态；Supervisor 验证结果回写此行",
-    "activityIds": "来源记录"
+    "activityIds": "来源记录",
+    "autoReviewedNote": "此案由 Supervisor 自动核（agent 提出、增量动作）· {status} {time}"
   },
   "life": {
     "propose": "提案",
@@ -128,7 +129,8 @@
     "colVerify": "Supervisor 验证",
     "lifecycle": "一行一案 · 提案 → 签核 → 落地 → 验证 四段生命周期",
     "empty": "尚无签核记录",
-    "rejectReason": "驳回理由：{reason}"
+    "rejectReason": "驳回理由：{reason}",
+    "autoBySupervisor": "Supervisor 自动核"
   },
   "issue": {
     "manualNote": "已批准 — 请人工创建 GitHub issue（Supervisor 不自动落地），创建后由 admin 回填落地记录",

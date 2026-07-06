@@ -100,11 +100,15 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto, ep
   let noActionNote: string | null = null;
   if (superseded) noActionNote = t("detail.expiredNote");
   else if (p.status !== "proposed") {
-    noActionNote = t("detail.reviewedNote", {
-      status: t(statusLabelKey(p.status)),
-      reviewer: p.reviewed_by ?? "?",
-      time: fmtWhen(p.reviewed_at),
-    });
+    noActionNote = (p.reviewed_by === 0 || String(p.reviewed_by) === "0")
+      ? t("detail.autoReviewedNote", {
+          status: t(statusLabelKey(p.status)), time: fmtWhen(p.reviewed_at),
+        })
+      : t("detail.reviewedNote", {
+          status: t(statusLabelKey(p.status)),
+          reviewer: p.reviewed_by ?? "?",
+          time: fmtWhen(p.reviewed_at),
+        });
   } else if (!canSignFn(p, roles)) {
     noActionNote = t("detail.readOnly", { signer, role: roles.join(" / ") || "—" });
   }

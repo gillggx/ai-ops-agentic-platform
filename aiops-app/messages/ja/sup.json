@@ -55,7 +55,8 @@
     "supersedePost": "に置き換えられました（同一テーマ・より新しい証拠）。ゾンビ提案は残しません。",
     "supersedeNoRef": "この提案は期限切れです — より新しい提案に置き換えられました（監査用のみ）",
     "lifecycleNote": "承認後は「人の実行待ち」の中間状態になります。Supervisor が検証結果をこの行に書き戻します",
-    "activityIds": "ソース記録"
+    "activityIds": "ソース記録",
+    "autoReviewedNote": "Supervisor による自動承認（agent 由来・追加のみ）· {status} {time}"
   },
   "life": {
     "propose": "提案",
@@ -128,7 +129,8 @@
     "colVerify": "Supervisor 検証",
     "lifecycle": "1 行 1 案件 · 提案 → 承認 → 反映 → 検証 の 4 段ライフサイクル",
     "empty": "承認履歴はまだありません",
-    "rejectReason": "却下理由：{reason}"
+    "rejectReason": "却下理由：{reason}",
+    "autoBySupervisor": "Supervisor 自動承認"
   },
   "issue": {
     "manualNote": "承認済み — GitHub issue は手動で作成してください（Supervisor は自動で反映しません）。作成後、admin が反映記録を記入します",

@@ -88,6 +88,48 @@ class SupervisorCurationServiceTest {
     }
 
     @Test
+    void propose_curationPromote_autoApprovedBySupervisor() {
+        // agent-origin curation → Supervisor auto-approves (no human). id 77
+        // from the actions.save mock; findById(77) must return it for approve().
+        when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(false);
+        when(actions.findById(77L)).thenAnswer(inv -> {
+            SupervisorActionEntity a = action(77L, "PROMOTE",
+                    "{\"title\":\"t\",\"body\":\"b\",\"memo_class\":\"domain\",\"applies_to\":\"both\"}");
+            a.setStatus("proposed");
+            return Optional.of(a);
+        });
+        Map<String, Object> out = service.propose("PROMOTE", List.of(),
+                Map.of("title", "t", "body", "b", "memo_class", "domain", "applies_to", "both"),
+                "from agent memos",
+                Map.of("source", "supervisor_curation", "agents", List.of("repair")),
+                null, null);
+        assertThat(out).containsEntry("auto_approved", true);
+        verify(knowledge).save(any());   // landed: knowledge created
+    }
+
+    @Test
+    void propose_curationPrune_notAutoApproved_staysForAdmin() {
+        // deletion is never auto-approved even from curation
+        when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(false);
+        Map<String, Object> out = service.propose("PRUNE", List.of(1),
+                Map.of("target_ids", List.of(1)), "stale",
+                Map.of("source", "supervisor_curation"), null, null);
+        assertThat(out).doesNotContainKey("auto_approved");
+        verify(knowledge, never()).save(any());   // still pending, nothing landed
+    }
+
+    @Test
+    void propose_forensicsPromote_notAutoApproved() {
+        // Supervisor's own investigation → IT_ADMIN decides, not auto
+        when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(false);
+        Map<String, Object> out = service.propose("PROMOTE", List.of(),
+                Map.of("title", "t", "body", "b", "memo_class", "domain", "applies_to", "both"),
+                "from traces", Map.of("source", "supervisor_forensics"), null, null);
+        assertThat(out).doesNotContainKey("auto_approved");
+        verify(knowledge, never()).save(any());
+    }
+
+    @Test
     void propose_dedupsLiveProposals() {
         when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(true);
         Map<String, Object> out = service.propose("PRUNE", List.of(1),

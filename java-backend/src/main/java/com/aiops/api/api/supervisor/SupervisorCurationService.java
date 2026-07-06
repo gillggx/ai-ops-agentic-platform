@@ -16,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Supervisor curation (Phase 5, V72) — the memory layer's WRITE-BACK brain.
@@ -47,6 +49,8 @@ import java.util.*;
  */
 @Service
 public class SupervisorCurationService {
+
+    private static final Logger log = LoggerFactory.getLogger(SupervisorCurationService.class);
 
     private static final Set<String> TYPES =
             Set.of("MERGE", "CORRECT", "PRUNE", "PROMOTE", "DOC_REVISE", "CFG", "ISSUE");
@@ -124,7 +128,39 @@ public class SupervisorCurationService {
                         actions.save(old);
                     });
         }
+        // 2026-07-06 信任階梯：agent 提的（策展 = 彙整 agent 記憶）由 Supervisor
+        // 自己同意，免人工；Supervisor 自己查出來的（forensics）+ CFG/ISSUE 留
+        // IT_ADMIN。護欄：只自動核「增量/可復原」動作，PRUNE（刪除）永遠留人。
+        if (shouldAutoApprove(actionType, proposerMeta)) {
+            try {
+                Map<String, Object> r = approve(a.getId(), SUPERVISOR_AUTO_REVIEWER);
+                return Map.of("id", a.getId(), "deduped", false,
+                        "auto_approved", true, "commit_result", r);
+            } catch (RuntimeException ex) {
+                // Auto-commit failed — leave it 'proposed' for a human instead
+                // of losing the proposal. (approve() runs in its own tx.)
+                log.warn("supervisor auto-approve failed for #{} ({}): {}",
+                        a.getId(), actionType, ex.getMessage());
+            }
+        }
         return Map.of("id", a.getId(), "deduped", false);
+    }
+
+    /** id used as reviewer for Supervisor-auto-approved (agent-origin) proposals.
+     *  0 is never a real user id — the UI renders it as「Supervisor 自動核」. */
+    public static final long SUPERVISOR_AUTO_REVIEWER = 0L;
+
+    /** Additive/reversible curation types Supervisor may land on its own.
+     *  PRUNE (deletion) is deliberately excluded — a human decides deletions. */
+    private static final Set<String> AUTO_APPROVE_TYPES =
+            Set.of("PROMOTE", "DOC_REVISE", "MERGE", "CORRECT");
+
+    private static boolean shouldAutoApprove(String actionType, Map<String, Object> meta) {
+        if (!AUTO_APPROVE_TYPES.contains(actionType)) return false;
+        String source = meta == null ? "" : String.valueOf(meta.getOrDefault("source", ""));
+        // Only curation (aggregating agent-written memories) auto-approves;
+        // forensics (Supervisor's own investigation) always goes to IT_ADMIN.
+        return "supervisor_curation".equals(source);
     }
 
     // ── list / review (user-facing) ─────────────────────────────────────

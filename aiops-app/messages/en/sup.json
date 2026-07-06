@@ -55,7 +55,8 @@
     "supersedePost": "(same topic, newer evidence). No zombie proposals.",
     "supersedeNoRef": "This proposal is expired — superseded by a newer proposal; audit only",
     "lifecycleNote": "Approval enters a waiting-for-human state; the Supervisor writes verification results back to this row",
-    "activityIds": "Source records"
+    "activityIds": "Source records",
+    "autoReviewedNote": "Auto-approved by Supervisor (agent-origin, additive) · {status} {time}"
   },
   "life": {
     "propose": "Propose",
@@ -128,7 +129,8 @@
     "colVerify": "Supervisor verify",
     "lifecycle": "One row per case · propose → sign-off → land → verify lifecycle",
     "empty": "No sign-off records yet",
-    "rejectReason": "Reject reason: {reason}"
+    "rejectReason": "Reject reason: {reason}",
+    "autoBySupervisor": "auto-approved by Supervisor"
   },
   "issue": {
     "manualNote": "Approved — create the GitHub issue manually (Supervisor never lands changes); admin backfills the landing record afterwards",
