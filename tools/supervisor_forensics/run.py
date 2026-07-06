@@ -25,6 +25,9 @@ import asyncio
 import json
 import os
 import sys
+import pathlib
+# cron-safe bootstrap: repo root onto sys.path (tools/supervisor_forensics/run.py → root)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from pathlib import Path
 
 
