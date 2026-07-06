@@ -102,6 +102,12 @@ Pipeline Builder block 的 `description` / `param_schema` / `examples` 欄位是
 
 ---
 
+## Spec 產出規範（2026-07-06）
+
+出任何 Tech/Product Spec **必須**遵循 `.claude/skills/spec-template`（兩層式）：
+第一層 feature-first 對齊稿（無技術名詞、含 before→after 情境與 user 可自驗的
+驗收欄），user 對齊後才展開第二層實作細項。交付時逐條回報第一層驗收欄。
+
 ## Agent Behaviour Principles
 
 ### 流程（flow）由 graph 決定，LLM 只做 reasoning
