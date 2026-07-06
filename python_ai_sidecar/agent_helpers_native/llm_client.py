@@ -300,6 +300,32 @@ class AnthropicLLMClient(BaseLLMClient):
         if tools:
             kwargs["tools"] = tools
 
+        # 2026-07-07 model-tuning knobs (env-driven, default OFF so the Haiku
+        # default path is byte-identical):
+        #   ANTHROPIC_THINKING_BUDGET=N  → extended thinking with N budget
+        #     tokens. Claude 4+ deliberate-reasoning is gated behind this; the
+        #     Sonnet bake-offs ran with it off (fast-answer mode) while GLM's
+        #     reasoning is on by default — an unfair comparison.
+        #   ANTHROPIC_TEMPERATURE=x      → sampling temp (thinking-OFF only;
+        #     the API rejects temperature != 1 when thinking is enabled).
+        _think_budget = 0
+        try:
+            _think_budget = int(os.environ.get("ANTHROPIC_THINKING_BUDGET", "0") or 0)
+        except ValueError:
+            _think_budget = 0
+        if _think_budget > 0:
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": _think_budget}
+            # max_tokens must exceed the thinking budget (thinking bills as output)
+            if max_tokens <= _think_budget:
+                kwargs["max_tokens"] = _think_budget + max_tokens
+        else:
+            _temp_raw = os.environ.get("ANTHROPIC_TEMPERATURE", "").strip()
+            if _temp_raw:
+                try:
+                    kwargs["temperature"] = float(_temp_raw)
+                except ValueError:
+                    pass
+
         try:
             resp = await self._client.messages.create(**kwargs)
         except Exception:
@@ -327,7 +353,15 @@ class AnthropicLLMClient(BaseLLMClient):
                     "input": block.input,
                 })
             elif t == "thinking":
-                content.append({"type": "thinking", "thinking": getattr(block, "thinking", "")})
+                # `signature` MUST survive normalisation: tool-use loops replay
+                # the assistant content back to the API, and thinking blocks
+                # without their signature are rejected (400) when extended
+                # thinking is enabled.
+                content.append({
+                    "type": "thinking",
+                    "thinking": getattr(block, "thinking", ""),
+                    "signature": getattr(block, "signature", "") or "",
+                })
 
         usage = getattr(resp, "usage", None)
         # 2026-05-04 cache debug instrumentation: log per-call so we can spot
