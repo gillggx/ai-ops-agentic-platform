@@ -778,8 +778,10 @@ def test_run_cfg_pass_posts_and_dedupes(tmp_path, monkeypatch):
     assert body["proposer_meta"]["activity_ids"] == \
         ["llm-daily:2026-07-06:glm-5.2"]
     prop = json.loads(body["proposal"])
-    assert prop == {"model": "glm-5.2", "calls": 200,
-                    "empty_calls": 60, "empty_rate": 0.3}
+    assert prop["model"] == "glm-5.2" and prop["calls"] == 200
+    assert prop["empty_calls"] == 60 and prop["empty_rate"] == 0.3
+    # 掃讀用短標題（2026-07-06 UX 回饋）
+    assert prop["display_title"].startswith("[glm-5.2] 空回應率異常")
     nar = json.loads(body["narrative"])
     assert nar["happened"] == "glm-5.2 今日空回應率 30.0%（60/200）"
 

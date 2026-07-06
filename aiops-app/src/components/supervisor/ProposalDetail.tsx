@@ -15,7 +15,7 @@ import { useTranslations } from "next-intl";
 import {
   TOK, LIFE_STYLE, LifeState, Proposal,
   typeChip, statusChip, signerOf, canSign as canSignFn,
-  proposalTitle, isSuperseded, supersededBy, fmtWhen,
+  proposalTitle, isSuperseded, supersededBy, fmtWhen, metaSource,
 } from "./model";
 import { NarrativeCard } from "./NarrativeCard";
 import { statusLabelKey } from "./ProposalList";
@@ -112,6 +112,10 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
             border: `1px solid ${tc.bd}`, borderRadius: 4, padding: "2px 7px",
           }}>{p.action_type}</span>
           <span style={{ font: `600 12px ${TOK.mono}`, color: TOK.faint }}>#{p.id}</span>
+          <span title={t(`source.${metaSource(p)}Tip`)} style={{
+            font: `600 9.5px ${TOK.mono}`, color: "#0e7490", background: "#e9f5f8",
+            border: "1px solid #bfe0e9", borderRadius: 4, padding: "1px 6px",
+          }}>{t(`source.${metaSource(p)}`)}</span>
           <span style={{
             font: `600 10.5px ${TOK.mono}`, color: sc.fg, background: sc.bg,
             border: `1px solid ${sc.bd}`, borderRadius: 999, padding: "1px 8px",
@@ -146,7 +150,14 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
               <span style={{ fontSize: 10.5, color: TOK.muted }}>{t("detail.activityIds")}</span>
               {ids.slice(0, 8).map((id) => (
                 <span key={id}
-                  onClick={() => window.open(`/admin/build-traces?trace=${encodeURIComponent(id)}`, "_blank")}
+                  onClick={() => {
+                    // session_id（uuid 形）→ 新版 agent activity 自動展開；
+                    // legacy trace 檔名 → build-traces 頁。
+                    const isEpisode = /^[0-9a-f-]{32,36}$/.test(id);
+                    window.open(isEpisode
+                      ? `/agent-activity?episode=${encodeURIComponent(id)}`
+                      : `/admin/build-traces?trace=${encodeURIComponent(id)}`, "_blank");
+                  }}
                   title={id}
                   style={{ cursor: "pointer", font: `600 10px ${TOK.mono}`, color: "#475569",
                            border: "1px solid #d7dee7", borderRadius: 4, padding: "1px 6px",

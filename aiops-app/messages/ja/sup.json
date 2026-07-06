@@ -133,6 +133,14 @@
     "alreadyRunning": "すでに実行中です — 完了をお待ちください",
     "cleared": "未審査 {n} 件をクリアしました",
     "done": "実行完了：{summary}",
-    "failed": "実行失敗：{msg}"
+    "failed": "実行失敗：{msg}",
+    "daysOpt": "直近 {d} 日",
+    "daysTip": "調査対象のデータ期間"
+  },
+  "source": {
+    "forensics": "調査",
+    "curation": "整理",
+    "forensicsTip": "Supervisor のトレース調査（失敗/ループ）による提案",
+    "curationTip": "Supervisor のナレッジ整理による提案"
   }
 }

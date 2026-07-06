@@ -133,6 +133,14 @@
     "alreadyRunning": "已有巡检在进行 — 等它完成",
     "cleared": "已清场 {n} 件未审核",
     "done": "巡检完成：{summary}",
-    "failed": "巡检失败：{msg}"
+    "failed": "巡检失败：{msg}",
+    "daysOpt": "近 {d} 天",
+    "daysTip": "查案扫描的数据期间"
+  },
+  "source": {
+    "forensics": "查案",
+    "curation": "策展",
+    "forensicsTip": "Supervisor 从失败案/循环 trace 取证产出",
+    "curationTip": "Supervisor 知识库体检产出"
   }
 }

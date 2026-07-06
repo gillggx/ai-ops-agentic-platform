@@ -353,7 +353,7 @@ async def run_curation(java_base: str, internal_token: str,
         logger.warning("supervisor curation: bad LLM output: %s", resp.text[:300])
         return res
 
-    meta = {"model": res.llm_model, "input_rows": len(known_k) + len(known_m)}
+    meta = {"source": "supervisor_curation", "model": res.llm_model, "input_rows": len(known_k) + len(known_m)}
     async with httpx.AsyncClient(timeout=10.0) as http:
         for p in proposals[:MAX_PROPOSALS_PER_RUN]:
             err = validate_proposal(p if isinstance(p, dict) else {}, known_k, known_m)

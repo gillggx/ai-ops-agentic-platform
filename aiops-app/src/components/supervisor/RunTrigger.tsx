@@ -22,6 +22,7 @@ export function RunTrigger({ onFinished }: { onFinished: () => void }) {
   const t = useTranslations("sup");
   const [kind, setKind] = useState<"forensics" | "curation">("forensics");
   const [clearPending, setClearPending] = useState(false);
+  const [days, setDays] = useState(7);
   const [running, setRunning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -71,7 +72,7 @@ export function RunTrigger({ onFinished }: { onFinished: () => void }) {
       const r = await fetch("/api/supervisor/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, clear_pending: clearPending }),
+        body: JSON.stringify({ kind, days, clear_pending: clearPending }),
       });
       const j = await r.json().catch(() => ({}));
       if (r.status === 409 || j?.data?.running === true) {
@@ -106,6 +107,20 @@ export function RunTrigger({ onFinished }: { onFinished: () => void }) {
       >
         <option value="forensics">{t("runs.kindForensics")}</option>
         <option value="curation">{t("runs.kindCuration")}</option>
+      </select>
+      <select
+        value={days}
+        onChange={(e) => setDays(Number(e.target.value))}
+        disabled={running}
+        title={t("runs.daysTip")}
+        style={{
+          border: `1px solid ${TOK.btnBorder}`, borderRadius: 6, padding: "5px 8px",
+          fontSize: 11.5, background: "#fff", color: TOK.ink, fontFamily: "inherit",
+        }}
+      >
+        {[1, 3, 7, 14].map((d) => (
+          <option key={d} value={d}>{t("runs.daysOpt", { d })}</option>
+        ))}
       </select>
       <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 11.5, color: TOK.muted, cursor: "pointer" }}>
         <input

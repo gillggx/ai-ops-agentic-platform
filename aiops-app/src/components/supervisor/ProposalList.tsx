@@ -10,7 +10,7 @@
 import { useTranslations } from "next-intl";
 import {
   TOK, Proposal, typeChip, statusChip, signerOf, canSign,
-  proposalTitle, fmtWhen,
+  proposalTitle, fmtWhen, metaSource,
 } from "./model";
 
 export function statusLabelKey(status: string): string {
@@ -67,6 +67,10 @@ export function ProposalList({ items, roles, selectedId, onSelect }: {
                 border: `1px solid ${tc.bd}`, borderRadius: 4, padding: "1px 6px",
               }}>{p.action_type}</span>
               <span style={{ font: `600 11px ${TOK.mono}`, color: TOK.faint }}>#{p.id}</span>
+              <span title={t(`source.${metaSource(p)}Tip`)} style={{
+                font: `600 9px ${TOK.mono}`, color: "#0e7490", background: "#e9f5f8",
+                border: "1px solid #bfe0e9", borderRadius: 4, padding: "0 5px",
+              }}>{t(`source.${metaSource(p)}`)}</span>
               <span style={{ flex: 1 }} />
               <span style={{
                 font: `600 10.5px ${TOK.mono}`, color: sc.fg, background: sc.bg,

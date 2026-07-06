@@ -133,6 +133,14 @@
     "alreadyRunning": "A run is already in progress — wait for it",
     "cleared": "Cleared {n} pending items",
     "done": "Run finished: {summary}",
-    "failed": "Run failed: {msg}"
+    "failed": "Run failed: {msg}",
+    "daysOpt": "last {d}d",
+    "daysTip": "Scan window for forensics"
+  },
+  "source": {
+    "forensics": "forensics",
+    "curation": "curation",
+    "forensicsTip": "Produced by Supervisor trace forensics (failures/loops)",
+    "curationTip": "Produced by Supervisor knowledge curation"
   }
 }

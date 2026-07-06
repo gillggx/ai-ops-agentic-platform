@@ -100,7 +100,11 @@ export default function AgentActivityPage() {
     getJson<EpisodeRow[]>("/api/agent-activity/episodes?limit=40")
       .then((rows) => {
         setEpisodes(rows);
-        if (rows.length && !selected) setSelected(rows[0].episode_key);
+        // ?episode= deep link（Supervisor 提案的來源紀錄 chip）優先
+        const want = typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("episode") : null;
+        if (want && rows.some((r) => r.episode_key === want)) setSelected(want);
+        else if (rows.length && !selected) setSelected(rows[0].episode_key);
       })
       .catch((e) => setError(String(e.message || e)))
       .finally(() => setLoading(false));

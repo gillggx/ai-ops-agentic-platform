@@ -117,6 +117,9 @@ class TraceSignals:
     blocks_touched: list[str]
     started_at: Optional[str]
     mtime: float
+    # sidecar session_id == agent-activity episode_key（調閱鏈的 join key）；
+    # 放最後帶預設值 — 既有測試以位置參數建構。
+    session_id: Optional[str] = None
 
     @property
     def ref(self) -> str:
@@ -225,6 +228,7 @@ def extract_signals(trace: dict, path: str, mtime: float = 0.0) -> TraceSignals:
     return TraceSignals(
         path=path,
         build_id=trace.get("build_id"),
+        session_id=(str(trace.get("session_id")) if trace.get("session_id") else None),
         instruction=str(trace.get("instruction") or "").strip(),
         status=status,
         failed_ish=failed_ish,
@@ -319,6 +323,17 @@ class Hotspot:
     def trace_refs(self) -> list[str]:
         return [s.ref for s in self.signals]
 
+    @property
+    def activity_ids(self) -> list[str]:
+        """Agent-activity episode keys（= trace session_id）；legacy trace
+        沒有 session_id 時退回 trace basename。去重保序。"""
+        out: list[str] = []
+        for s in self.signals:
+            aid = s.session_id or s.ref
+            if aid not in out:
+                out.append(aid)
+        return out
+
     def stats(self) -> dict[str, Any]:
         return {
             "block": self.block,
@@ -410,6 +425,7 @@ generalization（一句可泛化的原則）。
  "diagnosis": "一段診斷（引用具體訊號）",
  "doc_revision_draft": "..."|null,
  "knowledge_draft": {"title": "...", "body": "...", "memo_class": "domain"|"procedure", "applies_to": "plan"|"execute"|"both"}|null,
+ "headline": "≤20 字的人話重點（給簽核者掃讀用，例：sigma_source 文件缺口）",
  "generalization": "..."|null}
 """
 
@@ -535,11 +551,14 @@ def decide_action(hotspot: Hotspot, diagnosis: dict) -> Optional[dict[str, Any]]
     diag_text = str(diagnosis.get("diagnosis") or "").strip()
     trace_refs = hotspot.trace_refs
 
+    headline = str(diagnosis.get("headline") or "").strip()[:20]
+
     if layer == "doc_gap":
         return {
             "action_type": "DOC_REVISE",
             "proposal": {
                 "block_id": hotspot.block,
+                "display_title": f"[{hotspot.block}] 文件修訂 — {headline or '用法說明缺口'}"[:48],
                 "revised_doc_draft": str(diagnosis.get("doc_revision_draft") or ""),
                 "trace_refs": trace_refs,
             },
@@ -558,6 +577,11 @@ def decide_action(hotspot: Hotspot, diagnosis: dict) -> Optional[dict[str, Any]]
         return {
             "action_type": "PROMOTE",
             "proposal": {
+                # display_title = 掃讀用短標題（UI）；title = 入庫的知識標題
+                # （Java PROMOTE commit 讀它，不可縮短）
+                "display_title": (f"[{hotspot.block}] 蒸餾知識"
+                                  f"（{hotspot.distinct_request_count} requests）"
+                                  f" — {headline or '規劃層原則'}")[:48],
                 "title": str(kd.get("title") or ""),
                 "body": str(kd.get("body") or ""),
                 "memo_class": str(kd.get("memo_class") or ""),
@@ -571,6 +595,7 @@ def decide_action(hotspot: Hotspot, diagnosis: dict) -> Optional[dict[str, Any]]
         return {
             "action_type": "ISSUE",
             "proposal": {
+                "display_title": f"[{hotspot.block}] 疑似誤殺 — {headline or 'verifier/graph 行為'}"[:48],
                 "summary": diag_text,
                 "trace_refs": trace_refs,
                 "suspect": f"block {hotspot.block} 執行端/驗證端行為與文件不符",
@@ -1036,7 +1061,7 @@ async def _deep_dive_pass(http: Any, java_base: str, headers: dict,
         # Activity-id dedupe BEFORE the LLM call: if an open proposal on the
         # same block already cites >= 1 of these traces, the evidence is the
         # same — skip the whole dive (no LLM cost, no duplicate proposal).
-        activity_ids = h.trace_refs
+        activity_ids = h.activity_ids
         dup_id = find_activity_dedupe(h.block, activity_ids, open_proposals)
         if dup_id is not None:
             res.deduped += 1
@@ -1136,6 +1161,8 @@ async def _cfg_pass(http: Any, java_base: str, headers: dict, *,
                         f["model"])
             continue
         narrative = compose_cfg_narrative(f)
+        f = {**f, "display_title": (
+            f"[{f.get('model','?')}] 空回應率異常 — 建議調整 provider")[:48]}
         body = _proposal_body(
             "CFG", f, narrative,
             rationale=narrative["happened"],

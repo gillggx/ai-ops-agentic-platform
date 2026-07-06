@@ -157,7 +157,16 @@ const str = (v: unknown): string | null =>
   typeof v === "string" && v.trim() !== "" ? v : null;
 
 export function proposalTitle(p: Proposal): string {
-  return str(obj(p).title) ?? str(p.rationale) ?? `${p.action_type} #${p.id}`;
+  // display_title = 掃讀用短標題（2026-07-06 UX 回饋：原標題太長抓不到重點）；
+  // 沒有時退回語意 title / rationale。
+  return str(obj(p).display_title) ?? str(obj(p).title) ?? str(p.rationale) ?? `${p.action_type} #${p.id}`;
+}
+
+/** 提案來源：Supervisor 查案（forensics）vs 策展（curation）。 */
+export function metaSource(p: Proposal): "forensics" | "curation" {
+  const m = p.proposer_meta as unknown;
+  const raw = m && typeof m === "object" ? JSON.stringify(m) : String(m ?? "");
+  return raw.includes("forensics") ? "forensics" : "curation";
 }
 
 /** "為什麼" — proposal.why, else rationale unless it was already the title. */
