@@ -291,6 +291,36 @@ class SupervisorCurationServiceTest {
                 null, null, null, null, null)).isInstanceOf(ApiException.class);
     }
 
+    // ── manual-trigger clear-pending ────────────────────────────────────
+
+    @Test
+    void clearPending_bulkRejectsAllProposedWithFixedReason() {
+        SupervisorActionEntity a = action(60L, "PRUNE", "{\"target_ids\":[1]}");
+        SupervisorActionEntity b = action(61L, "CFG", "{\"file\":\"x\"}");
+        when(actions.findByStatus("proposed")).thenReturn(List.of(a, b));
+
+        int cleared = service.clearPending(99L);
+
+        assertThat(cleared).isEqualTo(2);
+        for (SupervisorActionEntity e : List.of(a, b)) {
+            assertThat(e.getStatus()).isEqualTo("rejected");
+            assertThat(e.getReviewedBy()).isEqualTo(99L);
+            assertThat(e.getReviewedAt()).isNotNull();
+            assertThat(e.getRejectReason())
+                    .isEqualTo(SupervisorCurationService.CLEAR_PENDING_REASON);
+        }
+        verify(actions).saveAll(List.of(a, b));
+        verify(knowledge, never()).save(any());   // audit-only, like reject()
+        verify(docMemos, never()).save(any());
+    }
+
+    @Test
+    void clearPending_emptyQueueReturnsZero() {
+        when(actions.findByStatus("proposed")).thenReturn(List.of());
+        assertThat(service.clearPending(99L)).isZero();
+        verify(actions).saveAll(List.of());
+    }
+
     // ── W3: open-proposals queue ────────────────────────────────────────
 
     @Test

@@ -23,7 +23,7 @@ from .background import event_poller, nats_subscriber, embedding_backfill
 from .config import CONFIG
 from .feature_flags import parse_feature_flags_header, set_request_overrides, reset_request_overrides
 from .logging_config import configure_logging, trace_id_ctx
-from .routers import agent, briefing, health, mcp_derivative, pipeline, sandbox
+from .routers import agent, briefing, health, mcp_derivative, pipeline, sandbox, supervisor_runs
 
 configure_logging("python_ai_sidecar")
 log = logging.getLogger("python_ai_sidecar")
@@ -144,3 +144,4 @@ app.include_router(pipeline.router)
 app.include_router(sandbox.router)
 app.include_router(briefing.router)
 app.include_router(mcp_derivative.router)
+app.include_router(supervisor_runs.router)

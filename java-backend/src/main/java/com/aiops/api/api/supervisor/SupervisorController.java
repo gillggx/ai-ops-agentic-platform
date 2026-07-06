@@ -18,6 +18,11 @@ import java.util.Map;
  *
  * <p>W2 (V75): reject accepts an optional {@code {"reason": "..."}} body;
  * /metrics/llm-daily exposes the S3 provider-quality rollup.
+ *
+ * <p>Manual run trigger: /runs + /runs/status forward to the sidecar's
+ * internal supervisor-run endpoints. IT_ADMIN only (method-level
+ * {@code @PreAuthorize} overrides the class-level ADMIN_OR_PE) — a manual
+ * run burns LLM budget and can bulk-reject the whole proposal queue.
  */
 @RestController
 @RequestMapping("/api/v1/supervisor")
@@ -25,10 +30,14 @@ import java.util.Map;
 public class SupervisorController {
 
     private final SupervisorCurationService service;
+    private final SupervisorRunService runs;
     private final LlmUsageService llmUsage;
 
-    public SupervisorController(SupervisorCurationService service, LlmUsageService llmUsage) {
+    public SupervisorController(SupervisorCurationService service,
+                                SupervisorRunService runs,
+                                LlmUsageService llmUsage) {
         this.service = service;
+        this.runs = runs;
         this.llmUsage = llmUsage;
     }
 
@@ -56,6 +65,26 @@ public class SupervisorController {
         String reason = body == null || body.get("reason") == null
                 ? null : String.valueOf(body.get("reason"));
         return ApiResponse.ok(service.reject(id, caller.userId(), reason));
+    }
+
+    /** Manual Supervisor run. Body {@code {kind, days?, max_deep_dives?,
+     *  clear_pending?}}; with clear_pending=true the proposed queue is
+     *  bulk-rejected first. 200 → {@code {"cleared": n, "run_id": "...",
+     *  "started": true}}; run already in flight → HTTP 409
+     *  (code {@code supervisor_run_in_progress}, sidecar body + cleared
+     *  count in error.details). */
+    @PostMapping("/runs")
+    @PreAuthorize(Authorities.ADMIN)
+    public ApiResponse<Map<String, Object>> triggerRun(@RequestBody Map<String, Object> body,
+                                                       @AuthenticationPrincipal AuthPrincipal caller) {
+        return ApiResponse.ok(runs.trigger(body, caller));
+    }
+
+    /** Passthrough of the sidecar's supervisor run status. */
+    @GetMapping("/runs/status")
+    @PreAuthorize(Authorities.ADMIN)
+    public ApiResponse<Map<String, Object>> runStatus(@AuthenticationPrincipal AuthPrincipal caller) {
+        return ApiResponse.ok(runs.status(caller));
     }
 
     /** S3 (V75): LLM provider quality — daily rollup of calls / empty /

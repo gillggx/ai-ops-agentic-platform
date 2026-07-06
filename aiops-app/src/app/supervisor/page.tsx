@@ -23,6 +23,7 @@ import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { TOK, Proposal, api, canSign } from "@/components/supervisor/model";
 import { HealthStrip } from "@/components/supervisor/HealthStrip";
+import { RunTrigger } from "@/components/supervisor/RunTrigger";
 import { ProposalList } from "@/components/supervisor/ProposalList";
 import { ProposalDetail } from "@/components/supervisor/ProposalDetail";
 import { AuditTable } from "@/components/supervisor/AuditTable";
@@ -126,9 +127,13 @@ export default function SupervisorPage() {
     }}>
       <div style={{ maxWidth: 1600, margin: "0 auto" }}>
         {/* page header */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
           <span style={{ fontSize: 16, fontWeight: 700 }}>{t("title")}</span>
           <span style={{ fontSize: 11.5, color: TOK.muted }}>{t("subtitle")}</span>
+          <span style={{ flex: 1 }} />
+          {roles.includes("IT_ADMIN") && (
+            <RunTrigger onFinished={() => { void load(); setHealthTick((n) => n + 1); }} />
+          )}
         </div>
 
         <HealthStrip refreshKey={healthTick} />

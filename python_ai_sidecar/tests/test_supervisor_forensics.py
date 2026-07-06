@@ -33,9 +33,12 @@ from python_ai_sidecar.supervisor_forensics.forensics import (
     compose_forensics_narrative,
     decide_action,
     extract_signals,
+    find_activity_dedupe,
     load_state,
     load_traces,
     mark_cfg_posted,
+    open_proposal_activity_ids,
+    open_proposal_subject,
     resolve_supersede,
     run_forensics,
     validate_diagnosis,
@@ -357,6 +360,57 @@ def test_resolve_supersede_map_and_open_list():
     assert resolve_supersede("DOC_REVISE", "block_x", None, None) is None
 
 
+# ── activity-id dedupe helpers ───────────────────────────────────────────
+
+def test_open_proposal_subject_parsed_defensively():
+    # proposal.block_id (json string)
+    assert open_proposal_subject(
+        {"proposal": json.dumps({"block_id": "block_a"})}) == "block_a"
+    # proposal.model (CFG, dict form)
+    assert open_proposal_subject({"proposal": {"model": "glm-5.2"}}) == "glm-5.2"
+    # narrative.subject.id fallback
+    assert open_proposal_subject(
+        {"proposal": "{broken json",
+         "narrative": json.dumps({"subject": {"id": "block_b"}})}) == "block_b"
+    # proposer_meta.block last resort
+    assert open_proposal_subject(
+        {"proposer_meta": {"block": "block_c"}}) == "block_c"
+    assert open_proposal_subject({}) is None
+
+
+def test_open_proposal_activity_ids_dict_and_string_meta():
+    ids = ["t1.json", "t2.json"]
+    assert open_proposal_activity_ids(
+        {"proposer_meta": {"activity_ids": ids}}) == ids
+    # jsonb column may round-trip as a string
+    assert open_proposal_activity_ids(
+        {"proposer_meta": json.dumps({"activity_ids": ids})}) == ids
+    assert open_proposal_activity_ids({"proposer_meta": "{broken"}) == []
+    assert open_proposal_activity_ids({}) == []
+
+
+def test_find_activity_dedupe_overlap_vs_disjoint():
+    open_props = [
+        {"id": 42, "proposal": json.dumps({"block_id": "block_a"}),
+         "proposer_meta": {"activity_ids": ["t1.json", "t2.json"]}},
+        {"id": 43, "proposal": json.dumps({"block_id": "block_b"}),
+         "proposer_meta": {"activity_ids": ["t9.json"]}},
+        # pre-activity-ids proposal: same subject, no ids → never dedupes
+        {"id": 44, "proposal": json.dumps({"block_id": "block_c"})},
+    ]
+    # >= 1 shared id on the same subject → dedupe hit
+    assert find_activity_dedupe("block_a", ["t2.json", "t3.json"],
+                                open_props) == 42
+    # same subject, disjoint ids → None (supersede path)
+    assert find_activity_dedupe("block_a", ["t7.json"], open_props) is None
+    # overlapping ids but different subject → None
+    assert find_activity_dedupe("block_x", ["t1.json"], open_props) is None
+    # old proposal without recorded ids → None
+    assert find_activity_dedupe("block_c", ["t1.json"], open_props) is None
+    assert find_activity_dedupe("block_a", [], open_props) is None
+    assert find_activity_dedupe("block_a", ["t1.json"], None) is None
+
+
 # ── stage 5: CFG threshold + dedupe ──────────────────────────────────────
 
 def test_cfg_threshold_boundaries():
@@ -644,6 +698,66 @@ def test_run_supersede_from_open_proposals(tmp_path, monkeypatch):
     assert fake.posted[0][1]["supersedes"] == 42
 
 
+def test_run_attaches_activity_ids_to_proposer_meta(tmp_path, monkeypatch):
+    fake = _FakeJava()
+    _patch_httpx(monkeypatch, fake)
+    _seed_hotspot_traces(tmp_path, ["block_a"])
+
+    asyncio.run(run_forensics(
+        "http://java", "tok", trace_dir=tmp_path, now=NOW,
+        state_file=str(tmp_path / "state.json"),
+        force_client=_StubLLM(DOC_GAP_DIAGNOSIS)))
+    body = fake.posted[0][1]
+    # full trace basenames — the build id is the suffix after the last dash
+    assert body["proposer_meta"]["activity_ids"] == ["trace0.json", "trace1.json"]
+    # trace_refs inside the proposal stay untouched
+    prop = json.loads(body["proposal"])
+    assert prop["trace_refs"] == ["trace0.json", "trace1.json"]
+
+
+def test_run_dedupe_skips_on_overlapping_activity_ids(tmp_path, monkeypatch):
+    """Same subject block + >= 1 shared activity id with an open proposal →
+    skip BEFORE the LLM call (no deep-dive burned), counted as deduped."""
+    fake = _FakeJava()
+    fake.get_routes["proposals-open"] = (200, [
+        {"id": 42, "action_type": "DOC_REVISE",
+         "proposal": json.dumps({"block_id": "block_a"}),
+         "proposer_meta": {"activity_ids": ["trace0.json", "zzz.json"]}},
+    ])
+    _patch_httpx(monkeypatch, fake)
+    _seed_hotspot_traces(tmp_path, ["block_a"])
+
+    res = asyncio.run(run_forensics(
+        "http://java", "tok", trace_dir=tmp_path, now=NOW,
+        state_file=str(tmp_path / "state.json"),
+        force_client=_MustNotCallLLM()))       # dedupe must pre-empt the dive
+    assert res.deduped == 1
+    assert res.deep_dives == 0 and res.proposed == 0
+    assert fake.posted == []
+
+
+def test_run_disjoint_activity_ids_supersedes_not_dedupes(tmp_path, monkeypatch):
+    """Same subject but ZERO shared activity ids = NEW evidence → the open
+    proposal is superseded (existing behaviour), not skipped."""
+    fake = _FakeJava()
+    fake.get_routes["proposals-open"] = (200, [
+        {"id": 42, "action_type": "DOC_REVISE",
+         "proposal": json.dumps({"block_id": "block_a"}),
+         "proposer_meta": {"activity_ids": ["ancient-trace.json"]}},
+    ])
+    _patch_httpx(monkeypatch, fake)
+    _seed_hotspot_traces(tmp_path, ["block_a"])
+
+    res = asyncio.run(run_forensics(
+        "http://java", "tok", trace_dir=tmp_path, now=NOW,
+        state_file=str(tmp_path / "state.json"),
+        force_client=_StubLLM(DOC_GAP_DIAGNOSIS)))
+    assert res.proposed == 1 and res.deduped == 0
+    body = fake.posted[0][1]
+    assert body["supersedes"] == 42
+    assert body["proposer_meta"]["activity_ids"] == ["trace0.json", "trace1.json"]
+
+
 def test_run_cfg_pass_posts_and_dedupes(tmp_path, monkeypatch):
     fake = _FakeJava()
     fake.get_routes["llm-usage/daily"] = (200, [
@@ -661,6 +775,8 @@ def test_run_cfg_pass_posts_and_dedupes(tmp_path, monkeypatch):
     assert res1.cfg_proposed == 1 and res1.cfg_deduped == 0
     body = fake.posted[0][1]
     assert body["action_type"] == "CFG"
+    assert body["proposer_meta"]["activity_ids"] == \
+        ["llm-daily:2026-07-06:glm-5.2"]
     prop = json.loads(body["proposal"])
     assert prop == {"model": "glm-5.2", "calls": 200,
                     "empty_calls": 60, "empty_rate": 0.3}

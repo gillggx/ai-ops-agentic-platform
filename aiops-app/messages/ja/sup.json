@@ -54,7 +54,8 @@
     "supersedePre": "この提案は期限切れです — 新しい証拠により自動 supersede され、",
     "supersedePost": "に置き換えられました（同一テーマ・より新しい証拠）。ゾンビ提案は残しません。",
     "supersedeNoRef": "この提案は期限切れです — より新しい提案に置き換えられました（監査用のみ）",
-    "lifecycleNote": "承認後は「人の実行待ち」の中間状態になります。Supervisor が検証結果をこの行に書き戻します"
+    "lifecycleNote": "承認後は「人の実行待ち」の中間状態になります。Supervisor が検証結果をこの行に書き戻します",
+    "activityIds": "ソース記録"
   },
   "life": {
     "propose": "提案",
@@ -122,5 +123,16 @@
     "manualNote": "承認済み — GitHub issue は手動で作成してください（Supervisor は自動で反映しません）。作成後、admin が反映記録を記入します",
     "copyGh": "gh コマンドをコピー",
     "copied": "コピーしました"
+  },
+  "runs": {
+    "trigger": "今すぐ実行",
+    "running": "実行中…",
+    "kindForensics": "フォレンジック（失敗/ループ）",
+    "kindCuration": "ナレッジキュレーション",
+    "clearPending": "未審査項目を先にクリア",
+    "alreadyRunning": "すでに実行中です — 完了をお待ちください",
+    "cleared": "未審査 {n} 件をクリアしました",
+    "done": "実行完了：{summary}",
+    "failed": "実行失敗：{msg}"
   }
 }

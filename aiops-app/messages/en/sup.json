@@ -54,7 +54,8 @@
     "supersedePre": "This proposal is expired — auto-superseded when newer evidence appeared; replaced by",
     "supersedePost": "(same topic, newer evidence). No zombie proposals.",
     "supersedeNoRef": "This proposal is expired — superseded by a newer proposal; audit only",
-    "lifecycleNote": "Approval enters a waiting-for-human state; the Supervisor writes verification results back to this row"
+    "lifecycleNote": "Approval enters a waiting-for-human state; the Supervisor writes verification results back to this row",
+    "activityIds": "Source records"
   },
   "life": {
     "propose": "Propose",
@@ -122,5 +123,16 @@
     "manualNote": "Approved — create the GitHub issue manually (Supervisor never lands changes); admin backfills the landing record afterwards",
     "copyGh": "Copy gh command",
     "copied": "Copied"
+  },
+  "runs": {
+    "trigger": "Run now",
+    "running": "Run in progress…",
+    "kindForensics": "Forensics (failures/loops)",
+    "kindCuration": "Knowledge curation",
+    "clearPending": "Clear pending items first",
+    "alreadyRunning": "A run is already in progress — wait for it",
+    "cleared": "Cleared {n} pending items",
+    "done": "Run finished: {summary}",
+    "failed": "Run failed: {msg}"
   }
 }

@@ -132,6 +132,32 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
       {/* 案情四段 body (narrative) — falls back to 三段式 on old rows */}
       <div style={{ padding: "14px 18px" }}>
         <NarrativeCard p={p} />
+        {/* activity ids（來源 build 紀錄，可調閱；也用於重跑防重複） */}
+        {(() => {
+          const meta = ((): Record<string, unknown> => {
+            const m = p.proposer_meta as unknown;
+            if (m && typeof m === "object") return m as Record<string, unknown>;
+            try { return JSON.parse(String(m ?? "{}")); } catch { return {}; }
+          })();
+          const ids = Array.isArray(meta.activity_ids) ? (meta.activity_ids as unknown[]).map(String) : [];
+          if (ids.length === 0) return null;
+          return (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center", marginTop: 10 }}>
+              <span style={{ fontSize: 10.5, color: TOK.muted }}>{t("detail.activityIds")}</span>
+              {ids.slice(0, 8).map((id) => (
+                <span key={id}
+                  onClick={() => window.open(`/admin/build-traces?trace=${encodeURIComponent(id)}`, "_blank")}
+                  title={id}
+                  style={{ cursor: "pointer", font: `600 10px ${TOK.mono}`, color: "#475569",
+                           border: "1px solid #d7dee7", borderRadius: 4, padding: "1px 6px",
+                           maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  ▣ {id}
+                </span>
+              ))}
+              {ids.length > 8 && <span style={{ fontSize: 10, color: TOK.faint }}>+{ids.length - 8}</span>}
+            </div>
+          );
+        })()}
       </div>
 
       {/* lifecycle strip (提案 → 簽核 → 落地 → 驗證) */}

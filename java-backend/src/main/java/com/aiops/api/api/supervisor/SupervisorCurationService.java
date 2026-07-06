@@ -53,6 +53,8 @@ public class SupervisorCurationService {
     private static final Set<String> PROMOTE_CLASSES = Set.of("domain", "procedure");
     /** W3 forensics: landed proposals unverified for this long enter the queue. */
     private static final int VERIFY_GRACE_DAYS = 7;
+    /** Fixed audit reason stamped by {@link #clearPending} (manual run trigger). */
+    public static final String CLEAR_PENDING_REASON = "手動巡檢前清場（manual trigger）";
 
     private final SupervisorActionRepository actions;
     private final AgentKnowledgeRepository knowledge;
@@ -196,6 +198,25 @@ public class SupervisorCurationService {
         }
         actions.save(a);
         return toDto(a);
+    }
+
+    /** Bulk-reject EVERY status=proposed proposal ahead of a manual
+     *  Supervisor run — a fresh run re-proposes against the current state,
+     *  so a stale queue only confuses the reviewer. Same audit stamping as
+     *  {@link #reject} (status flip + reviewer + fixed reason), atomic:
+     *  either the whole queue clears or none of it does. Returns the count. */
+    @Transactional
+    public int clearPending(Long reviewerId) {
+        List<SupervisorActionEntity> proposed = actions.findByStatus("proposed");
+        OffsetDateTime now = OffsetDateTime.now();
+        for (SupervisorActionEntity a : proposed) {
+            a.setStatus("rejected");
+            a.setReviewedBy(reviewerId);
+            a.setReviewedAt(now);
+            a.setRejectReason(CLEAR_PENDING_REASON);
+        }
+        actions.saveAll(proposed);
+        return proposed.size();
     }
 
     // ── W3 forensics: open proposals + post-landing verification ────────

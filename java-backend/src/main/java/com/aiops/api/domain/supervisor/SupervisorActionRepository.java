@@ -13,6 +13,10 @@ public interface SupervisorActionRepository extends JpaRepository<SupervisorActi
 
     long countByStatus(String status);
 
+    /** Manual-trigger clear-pending: EVERY row in this status, uncapped
+     *  (the Top200 variants are list-page reads, not bulk-op inputs). */
+    List<SupervisorActionEntity> findByStatus(String status);
+
     /** Dedup guard: one live proposal per (type, targets). */
     boolean existsByActionTypeAndTargetIdsAndStatus(String actionType, String targetIds, String status);
 

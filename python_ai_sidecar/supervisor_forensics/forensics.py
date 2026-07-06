@@ -27,6 +27,13 @@ HARD RULES:
 Defensive against not-yet-landed Java W3 endpoints: proposals-open,
 llm-usage/daily, verify-queue and the per-proposal verify POST may all 404 —
 each is skipped gracefully with a log, never an exception.
+
+Activity-id dedupe vs supersede (complementary, both keyed on the subject
+block): every posted proposal carries proposer_meta.activity_ids — the full
+trace basenames backing the hotspot (CFG: "llm-daily:<date>:<model>").
+Same subject + >= 1 overlapping activity id with an open proposal = SAME
+evidence → skip (deduped). Same subject + disjoint ids = NEW evidence →
+supersede the open proposal, as before.
 """
 from __future__ import annotations
 
@@ -881,6 +888,71 @@ def resolve_supersede(action_type: str, subject_id: str,
     return None
 
 
+# ── activity-id dedupe (skip when the OPEN proposal already covers the
+#    exact same evidence; supersede stays for NEW evidence) ────────────────
+
+def _parse_json_field(v: Any) -> Any:
+    """Java rows may carry jsonb columns as dicts or as JSON strings —
+    normalise defensively; unparseable → None (never raises)."""
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError:
+            return None
+    return v
+
+
+def open_proposal_subject(row: dict) -> Optional[str]:
+    """Subject block/model of an open proposal, parsed defensively:
+    proposal.block_id / proposal.model → narrative.subject.id →
+    proposer_meta.block. Returns None when nothing identifiable."""
+    prop = _parse_json_field(row.get("proposal"))
+    if isinstance(prop, dict):
+        subj = prop.get("block_id") or prop.get("model")
+        if subj:
+            return str(subj)
+    nar = _parse_json_field(row.get("narrative"))
+    if isinstance(nar, dict):
+        subj = (nar.get("subject") or {}).get("id")
+        if subj:
+            return str(subj)
+    meta = _parse_json_field(row.get("proposer_meta"))
+    if isinstance(meta, dict) and meta.get("block"):
+        return str(meta["block"])
+    return None
+
+
+def open_proposal_activity_ids(row: dict) -> list[str]:
+    """proposer_meta.activity_ids of an open proposal (empty for proposals
+    posted before activity ids existed — those never dedupe, only supersede)."""
+    meta = _parse_json_field(row.get("proposer_meta"))
+    if isinstance(meta, dict):
+        ids = meta.get("activity_ids")
+        if isinstance(ids, list):
+            return [str(x) for x in ids if str(x or "").strip()]
+    return []
+
+
+def find_activity_dedupe(subject_id: str, activity_ids: list[str],
+                         open_proposals: Optional[list[dict]]) -> Optional[Any]:
+    """Open-proposal id whose subject matches AND whose activity_ids share
+    >= 1 id with the new evidence — i.e. the queue already holds a proposal
+    for the SAME evidence → caller skips posting (deduped). Disjoint ids or
+    no recorded ids → None, and the supersede path handles it (NEW evidence
+    replaces the stale open proposal)."""
+    new_ids = set(activity_ids)
+    if not new_ids:
+        return None
+    for row in open_proposals or []:
+        if not isinstance(row, dict):
+            continue
+        if open_proposal_subject(row) != str(subject_id):
+            continue
+        if new_ids & set(open_proposal_activity_ids(row)):
+            return row.get("id")
+    return None
+
+
 # ═════════════════════════════════════════════════════════════════════════
 # Run orchestration
 # ═════════════════════════════════════════════════════════════════════════
@@ -958,9 +1030,21 @@ async def _deep_dive_pass(http: Any, java_base: str, headers: dict,
     res.llm_model = getattr(client, "model", "") or res.llm_model
     open_proposals = await _fetch_open_proposals(http, java_base, headers)
 
-    for h in hotspots[:cap]:
-        if res.deep_dives >= MAX_DEEP_DIVES:  # constant hard cap, belt+braces
+    for h in hotspots:
+        if res.deep_dives >= cap or res.deep_dives >= MAX_DEEP_DIVES:
             break
+        # Activity-id dedupe BEFORE the LLM call: if an open proposal on the
+        # same block already cites >= 1 of these traces, the evidence is the
+        # same — skip the whole dive (no LLM cost, no duplicate proposal).
+        activity_ids = h.trace_refs
+        dup_id = find_activity_dedupe(h.block, activity_ids, open_proposals)
+        if dup_id is not None:
+            res.deduped += 1
+            logger.info(
+                "forensics: open proposal #%s already covers block=%s with "
+                "overlapping activity ids %s — skip (evidence unchanged)",
+                dup_id, h.block, activity_ids)
+            continue
         block_doc = await _fetch_block_doc(http, java_base, headers, h.block)
         summaries = _load_hotspot_summaries(h)
         try:
@@ -1002,6 +1086,7 @@ async def _deep_dive_pass(http: Any, java_base: str, headers: dict,
             "distinct_requests": h.distinct_request_count,
             "reject_count": h.reject_count,
             "loop_signals": h.loop_signals,
+            "activity_ids": activity_ids,
         }
         supersedes = resolve_supersede(decision["action_type"], h.block,
                                        supersede_map, open_proposals)
@@ -1054,7 +1139,8 @@ async def _cfg_pass(http: Any, java_base: str, headers: dict, *,
         body = _proposal_body(
             "CFG", f, narrative,
             rationale=narrative["happened"],
-            meta={"source": "supervisor_forensics", "kind": "cfg", "day": day},
+            meta={"source": "supervisor_forensics", "kind": "cfg", "day": day,
+                  "activity_ids": [f"llm-daily:{day}:{f['model']}"]},
             supersedes=None,
         )
         if dry_run:

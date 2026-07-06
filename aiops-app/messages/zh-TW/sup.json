@@ -54,7 +54,8 @@
     "supersedePre": "此提案已過期 — 新證據出現時自動 supersede，被",
     "supersedePost": "取代（同主題、證據較新）。不留殭屍提案。",
     "supersedeNoRef": "此提案已過期 — 已被更新的提案取代，僅供追溯",
-    "lifecycleNote": "核准後為「待人執行」中間態；Supervisor 驗證結果回寫此列"
+    "lifecycleNote": "核准後為「待人執行」中間態；Supervisor 驗證結果回寫此列",
+    "activityIds": "來源紀錄"
   },
   "life": {
     "propose": "提案",
@@ -122,5 +123,16 @@
     "manualNote": "已核准 — 請人工建立 GitHub issue（Supervisor 不自動落地），建立後由 admin 回填落地紀錄",
     "copyGh": "複製 gh 指令",
     "copied": "已複製"
+  },
+  "runs": {
+    "trigger": "立即巡檢",
+    "running": "巡檢進行中…",
+    "kindForensics": "查案（失敗案/迴圈）",
+    "kindCuration": "知識策展",
+    "clearPending": "先清除未審核項",
+    "alreadyRunning": "已有巡檢在進行 — 等它完成",
+    "cleared": "已清場 {n} 件未審核",
+    "done": "巡檢完成：{summary}",
+    "failed": "巡檢失敗：{msg}"
   }
 }
