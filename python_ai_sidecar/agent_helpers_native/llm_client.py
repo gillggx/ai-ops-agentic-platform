@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -218,7 +219,9 @@ def _report_llm_exception(model: str) -> None:
     })
 
 
-def _observe_llm_usage(resp: "LLMResponse", model: str = "") -> "LLMResponse":
+def _observe_llm_usage(
+    resp: "LLMResponse", model: str = "", latency_ms: "int | None" = None,
+) -> "LLMResponse":
     """Agent-observability hook (docs/MULTI_AGENT_OBSERVABILITY_SPEC.md §2).
 
     Attributes per-call token usage to the current RoleAgent (planner/builder/
@@ -237,6 +240,7 @@ def _observe_llm_usage(resp: "LLMResponse", model: str = "") -> "LLMResponse":
                 input_tokens=resp.input_tokens,
                 output_tokens=resp.output_tokens,
                 cache_read=resp.cache_read_input_tokens,
+                latency_ms=latency_ms,
             )
     except Exception:  # noqa: BLE001 — observability never breaks the call
         pass
@@ -286,6 +290,7 @@ class AnthropicLLMClient(BaseLLMClient):
         # Anthropic accepts both string and content-block list for `system`.
         # Caller is responsible for placing cache_control breakpoints; we just
         # pass through. Same for `tools[i]["cache_control"]`.
+        _t0 = time.perf_counter()  # wall time incl. any internal retry
         kwargs: Dict[str, Any] = dict(
             model=self._model,
             max_tokens=max_tokens,
@@ -349,7 +354,7 @@ class AnthropicLLMClient(BaseLLMClient):
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
             cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0 if usage else 0,
             cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0 if usage else 0,
-        ), model=self._model)
+        ), model=self._model, latency_ms=int((time.perf_counter() - _t0) * 1000))
 
     async def stream(
         self,
@@ -509,6 +514,7 @@ class OllamaLLMClient(BaseLLMClient):
         # instead of using the function calling API — this instruction fixes it.
         # Flatten cache-block list down to string first; OpenAI-compat APIs
         # only accept a string `system`.
+        _t0 = time.perf_counter()  # wall time incl. any internal retry
         system_str = self._flatten_system(system)
         effective_system = system_str
         if tools:
@@ -698,7 +704,7 @@ class OllamaLLMClient(BaseLLMClient):
             output_tokens=completion_tokens,
             cache_read_input_tokens=cached_tokens,
             reasoning_content=str(_reasoning or "")[:12000],
-        ), model=self._model)
+        ), model=self._model, latency_ms=int((time.perf_counter() - _t0) * 1000))
 
     async def stream(
         self,
