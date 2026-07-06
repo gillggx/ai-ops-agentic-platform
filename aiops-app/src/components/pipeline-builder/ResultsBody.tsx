@@ -19,9 +19,12 @@ type ChartView = "stacked" | "grid" | "tabs";
 interface Props {
   summary: PipelineResultSummary;
   nodeResults: Record<string, NodeResult>;
+  /** When provided, data-view tables get a 下載 CSV button (full data is
+   *  re-fetched server-side; tables only ship ~100 rows). */
+  pipelineJson?: unknown;
 }
 
-export default function ResultsBody({ summary, nodeResults }: Props) {
+export default function ResultsBody({ summary, nodeResults, pipelineJson }: Props) {
   const chartCount = (summary.charts ?? []).length;
   // v30.17j defensive: in chat-mode build (Lite Canvas), summary may
   // arrive from pb_run_done without a charts field — guard all reads.
@@ -43,7 +46,12 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
         <div data-testid="result-evidence-table" style={{ marginTop: 12 }}>
           <div style={sectionHeader}>佐證事件 ({evidenceRows.length} rows)</div>
           <div style={{ height: 280, display: "flex", flexDirection: "column" }}>
-            <DataResultView result={evidenceRows} enableFullscreen={false} />
+            <DataResultView
+              result={evidenceRows}
+              enableFullscreen={false}
+              exportSpec={pipelineJson && summary.evidence_node_id
+                ? { pipelineJson, nodeId: summary.evidence_node_id } : null}
+            />
           </div>
         </div>
       )}
@@ -99,7 +107,13 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
                 </div>
               )}
               <div style={{ height: 300, display: "flex", flexDirection: "column", padding: 10 }}>
-                <DataResultView result={v.rows} enableFullscreen={false} emptyText="無資料" />
+                <DataResultView
+                  result={v.rows}
+                  enableFullscreen={false}
+                  emptyText="無資料"
+                  totalRows={v.total_rows}
+                  exportSpec={pipelineJson ? { pipelineJson, nodeId: v.node_id } : null}
+                />
               </div>
             </div>
           ))}

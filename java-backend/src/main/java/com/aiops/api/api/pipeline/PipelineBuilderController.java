@@ -134,4 +134,31 @@ public class PipelineBuilderController {
 				.bodyToMono(Map.class)
 				.block();
 	}
+
+	/** Full-data CSV export (2026-07-07). UI tables render at most ~100 rows
+	 *  for performance; the complete dataset downloads here. The sidecar
+	 *  re-executes the subgraph and streams text/csv — passed through as a
+	 *  DataBuffer stream (NOT the JSON codec / 16MB in-memory path, so a
+	 *  100MB export never sits in the Java heap). */
+	@PostMapping("/export-csv")
+	public org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
+			exportCsv(@RequestBody Map<String, Object> body) {
+		reactor.core.publisher.Flux<org.springframework.core.io.buffer.DataBuffer> flux = sidecarClient.post()
+				.uri("/internal/pipeline/export-csv")
+				.header("Content-Type", "application/json")
+				.bodyValue(body)
+				.retrieve()
+				.onStatus(s -> s.isError(), resp -> resp.bodyToMono(String.class).map(msg ->
+						ApiException.badRequest("export failed: "
+								+ (msg == null ? "" : msg.substring(0, Math.min(msg.length(), 300))))))
+				.bodyToFlux(org.springframework.core.io.buffer.DataBuffer.class);
+		org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody stream = out ->
+				org.springframework.core.io.buffer.DataBufferUtils.write(flux, out)
+						.map(org.springframework.core.io.buffer.DataBufferUtils::release)
+						.blockLast();
+		return org.springframework.http.ResponseEntity.ok()
+				.header("Content-Type", "text/csv; charset=utf-8")
+				.header("Content-Disposition", "attachment; filename=\"export.csv\"")
+				.body(stream);
+	}
 }

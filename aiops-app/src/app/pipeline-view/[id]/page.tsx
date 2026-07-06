@@ -183,6 +183,7 @@ export default function PipelineViewPage({ params }: { params: Promise<{ id: str
         <ResultsBody
           summary={(summary ?? {}) as unknown as PipelineResultSummary}
           nodeResults={(nodeResults ?? {}) as unknown as Record<string, NodeResult>}
+          pipelineJson={pj ?? undefined}
         />
       </div>
     </div>

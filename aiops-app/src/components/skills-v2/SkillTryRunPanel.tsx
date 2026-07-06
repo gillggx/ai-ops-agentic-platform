@@ -187,6 +187,7 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
         onClose={() => setPanelOpen(false)}
         summary={summary}
         nodeResults={result?.node_results ?? {}}
+        pipelineJson={pj ?? undefined}
       />
     </div>
   );

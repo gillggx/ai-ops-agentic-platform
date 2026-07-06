@@ -326,3 +326,108 @@ async def preview(req: PreviewRequest, caller: CallerContext = ServiceAuth) -> d
         "result_summary": result.get("result_summary"),
         "caller_user_id": caller.user_id,
     }
+
+
+# ── Full-data CSV export (2026-07-07) ─────────────────────────────────────
+# UI tables ship at most ~100 rows for render performance; users who need
+# the complete dataset download it here instead. Re-executes the subgraph
+# on demand (no server-side result persistence — EC2 disk is tight), so the
+# exported rows are as-of download time, not as-of the original run.
+
+_EXPORT_ROWS_CAP = 200_000  # OOM guard for the 8GB box; well past any real use
+
+
+class ExportCsvRequest(BaseModel):
+    pipeline_json: dict
+    node_id: str
+    inputs: dict[str, Any] | None = None
+
+
+@router.post("/export-csv")
+async def export_csv(req: ExportCsvRequest, caller: CallerContext = ServiceAuth):
+    """Run the subgraph up to `node_id` with FULL rows and stream the target
+    node's dataframe output as CSV.
+
+    block_data_view caps its own `rows` by its max_rows param, so exporting
+    a data_view node silently truncates — redirect to its upstream source
+    node (the data the view renders) instead."""
+    import csv as _csv
+    import io as _io
+    from fastapi.responses import StreamingResponse
+
+    pipeline_json = req.pipeline_json or {}
+    nodes = pipeline_json.get("nodes") or []
+    edges = pipeline_json.get("edges") or []
+    target = req.node_id
+
+    node_by_id = {n.get("id"): n for n in nodes if n.get("id")}
+    if target not in node_by_id:
+        raise HTTPException(status_code=404, detail=f"node '{target}' not in pipeline")
+    if (node_by_id[target].get("block_id") or "") == "block_data_view":
+        upstream = [
+            (e.get("from") or {}).get("node")
+            for e in edges
+            if (e.get("to") or {}).get("node") == target
+        ]
+        if upstream and upstream[0] in node_by_id:
+            target = upstream[0]
+
+    result = await preview(
+        PreviewRequest(
+            pipeline_json=pipeline_json,
+            node_id=target,
+            sample_size=_EXPORT_ROWS_CAP,
+            inputs=req.inputs,
+        ),
+        caller,
+    )
+    if result.get("status") not in ("success", "partial"):
+        detail = (
+            result.get("error_message")
+            or "; ".join(e.get("message", "") for e in (result.get("errors") or []))
+            or f"status={result.get('status')}"
+        )
+        raise HTTPException(status_code=422, detail=detail[:400])
+
+    preview_blob = (result.get("node_result") or {}).get("preview") or {}
+    columns: list[str] = []
+    rows: list[dict[str, Any]] = []
+    for _port, blob in preview_blob.items():
+        if isinstance(blob, dict) and blob.get("type") == "dataframe":
+            columns = list(blob.get("columns") or [])
+            rows = list(blob.get("rows") or [])
+            break
+    if not columns:
+        raise HTTPException(
+            status_code=422,
+            detail=f"node '{target}' produced no dataframe output to export",
+        )
+
+    def _cell(v: Any) -> Any:
+        # nested dict/list cells → JSON text so the CSV stays rectangular
+        if isinstance(v, (dict, list)):
+            return json.dumps(v, ensure_ascii=False)
+        return v
+
+    def _iter_csv():
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        buf.write("\ufeff")  # UTF-8 BOM (explicit escape) so Excel opens CJK correctly
+        writer.writerow(columns)
+        yield buf.getvalue()
+        buf.seek(0); buf.truncate(0)
+        for i, r in enumerate(rows):
+            writer.writerow([_cell(r.get(c)) for c in columns])
+            if (i + 1) % 500 == 0:
+                yield buf.getvalue()
+                buf.seek(0); buf.truncate(0)
+        if buf.tell():
+            yield buf.getvalue()
+
+    log.info("export_csv: node=%s rows=%d cols=%d user=%s",
+             target, len(rows), len(columns), caller.user_id)
+    return StreamingResponse(
+        _iter_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{target}.csv"'},
+    )

@@ -23,9 +23,11 @@ interface Props {
   summary: PipelineResultSummary | null;
   /** Full node_results so we can render evidence table for the terminal logic node. */
   nodeResults: Record<string, NodeResult>;
+  /** When provided, data tables get a 下載 CSV button (full data re-fetched server-side). */
+  pipelineJson?: unknown;
 }
 
-export default function PipelineResultsPanel({ open, onClose, summary, nodeResults }: Props) {
+export default function PipelineResultsPanel({ open, onClose, summary, nodeResults, pipelineJson }: Props) {
   const chartCount = summary?.charts.length ?? 0;
   // PR-F: view toggle — user override persists across runs of the panel
   const [userChartView, setUserChartView] = useState<ChartView | null>(null);
@@ -96,7 +98,12 @@ export default function PipelineResultsPanel({ open, onClose, summary, nodeResul
           <div data-testid="result-evidence-table" style={{ marginTop: 12 }}>
             <div style={sectionHeader}>佐證事件 ({evidenceRows.length} rows)</div>
             <div style={{ height: 280, display: "flex", flexDirection: "column" }}>
-              <DataResultView result={evidenceRows} enableFullscreen={false} />
+              <DataResultView
+                result={evidenceRows}
+                enableFullscreen={false}
+                exportSpec={pipelineJson && summary.evidence_node_id
+                  ? { pipelineJson, nodeId: summary.evidence_node_id } : null}
+              />
             </div>
           </div>
         )}
@@ -153,7 +160,13 @@ export default function PipelineResultsPanel({ open, onClose, summary, nodeResul
                   </div>
                 )}
                 <div style={{ height: 300, display: "flex", flexDirection: "column", padding: 10 }}>
-                  <DataResultView result={v.rows} enableFullscreen={false} emptyText="無資料" />
+                  <DataResultView
+                    result={v.rows}
+                    enableFullscreen={false}
+                    emptyText="無資料"
+                    totalRows={v.total_rows}
+                    exportSpec={pipelineJson ? { pipelineJson, nodeId: v.node_id } : null}
+                  />
                 </div>
               </div>
             ))}

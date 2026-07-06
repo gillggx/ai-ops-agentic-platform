@@ -41,12 +41,20 @@ interface Props {
    * the generic component stays free of domain-specific logic.
    */
   rowHighlight?: (row: Record<string, unknown>) => boolean;
+  /** True row count at the source when the shipped rows are already capped
+   *  upstream (e.g. data_view total_rows). Shown as 共 N 筆. */
+  totalRows?: number | null;
+  /** When set, a 下載 CSV button appears — full data is re-fetched server-side
+   *  (tables only ship ~100 rows for render performance). */
+  exportSpec?: { pipelineJson: unknown; nodeId: string } | null;
 }
 
 type View = "structured" | "tree" | "raw";
 
 const ARRAY_KEYS = ["events", "data", "items", "results", "rows", "records", "list"];
-const DEFAULT_MAX_ROWS = 200;
+// 2026-07-07: 200 → 100 — view shows the data's shape; the full dataset is a
+// CSV download away. Large-row DOM tables were the top table-perf complaint.
+const DEFAULT_MAX_ROWS = 100;
 
 /** Find the primary array-of-objects to tabulate. */
 function findTable(result: unknown): { rows: Record<string, unknown>[]; sourceKey: string | null } {
@@ -99,12 +107,47 @@ export default function DataResultView({
   result, loading, error, latencyMs, statusSlot,
   loadingText = "載入中…", emptyText = "尚無資料",
   defaultView = "structured", maxRows = DEFAULT_MAX_ROWS, enableFullscreen = true, rowHighlight,
+  totalRows, exportSpec,
 }: Props) {
   const [view, setView] = useState<View>(defaultView);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [treeOpen, setTreeOpen] = useState<Record<string, boolean>>({});
   const [flash, setFlash] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const downloadCsv = async () => {
+    if (!exportSpec || exporting) return;
+    setExporting(true);
+    try {
+      const res = await fetch("/api/pipeline-builder/export-csv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pipeline_json: exportSpec.pipelineJson,
+          node_id: exportSpec.nodeId,
+        }),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        setFlash(`下載失敗：${t.slice(0, 80)}`);
+        setTimeout(() => setFlash(null), 4000);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${exportSpec.nodeId}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setFlash(`下載失敗：${String(e).slice(0, 80)}`);
+      setTimeout(() => setFlash(null), 4000);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const { rows, sourceKey } = useMemo(() => findTable(result), [result]);
   const columns = useMemo(() => {
@@ -147,7 +190,12 @@ export default function DataResultView({
   const meta = (
     <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", fontFamily: T.mono, fontSize: 12, color: T.muted }}>
       {statusSlot}
-      <span>{countOf(result)} 筆{sourceKey ? ` · ${sourceKey}` : ""}{rows.length > maxRows ? `（顯示前 ${maxRows}）` : ""}</span>
+      <span>
+        {totalRows != null && totalRows > rows.length ? `共 ${totalRows} 筆` : `${countOf(result)} 筆`}
+        {sourceKey ? ` · ${sourceKey}` : ""}
+        {(totalRows != null && totalRows > rows.length) || rows.length > maxRows
+          ? `（顯示前 ${Math.min(rows.length, maxRows)}）` : ""}
+      </span>
       {latencyMs != null && <span style={{ color: T.faint }}>{latencyMs} ms</span>}
       {flash && <b style={{ color: T.accent }}>{flash}</b>}
     </div>
@@ -170,6 +218,11 @@ export default function DataResultView({
           <IconBtn onClick={() => setAllTree(false)}>⊟ 收合</IconBtn>
         </>}
         <IconBtn onClick={copy}>⧉ copy</IconBtn>
+        {exportSpec && (
+          <IconBtn onClick={downloadCsv}>
+            {exporting ? "下載中…" : "↓ 下載 CSV"}
+          </IconBtn>
+        )}
         {enableFullscreen && <IconBtn onClick={() => setFullscreen(f => !f)}>{fullscreen ? "⤡ exit" : "⤢ fullscreen"}</IconBtn>}
       </div>
     </div>

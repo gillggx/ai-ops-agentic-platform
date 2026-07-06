@@ -1264,6 +1264,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
         onClose={() => setResultsPanelOpen(false)}
         summary={runResult?.result_summary ?? null}
         nodeResults={runResult?.node_results ?? {}}
+        pipelineJson={state.pipeline}
       />
 
       {/* Toast */}

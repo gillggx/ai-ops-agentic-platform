@@ -141,7 +141,8 @@ export default function PbPipelineCard({ card, onExpand }: Props) {
       {dataViews.length > 0 && (
         <div style={{ padding: "8px 12px", borderTop: "1px solid #F1F5F9" }}>
           {dataViews.map((dv, i) => (
-            <DataViewTable key={i} dv={dv} />
+            <DataViewTable key={i} dv={dv}
+              pipelineJson={isAdHoc ? card.pipeline_json : null} />
           ))}
         </div>
       )}
@@ -256,14 +257,20 @@ function ChartCell({ chart, height }: { chart: PipelineChartSummary; height: num
   );
 }
 
-function DataViewTable({ dv }: { dv: PipelineDataView }) {
+function DataViewTable({ dv, pipelineJson }: { dv: PipelineDataView; pipelineJson?: unknown }) {
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: "#0F172A", marginBottom: 4 }}>
         {dv.title} <span style={{ color: "#94A3B8", fontWeight: 400 }}>({dv.total_rows} rows)</span>
       </div>
       <div style={{ height: 260, display: "flex", flexDirection: "column" }}>
-        <DataResultView result={dv.rows} enableFullscreen={false} emptyText="無資料" />
+        <DataResultView
+          result={dv.rows}
+          enableFullscreen={false}
+          emptyText="無資料"
+          totalRows={dv.total_rows}
+          exportSpec={pipelineJson ? { pipelineJson, nodeId: dv.node_id } : null}
+        />
       </div>
     </div>
   );

@@ -134,6 +134,37 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
   const [groupHidden, setGroupHidden] = useState<Record<string, boolean>>({});
   const [rowLimit, setRowLimit] = useState<RowLimit>(DEFAULT_ROW_LIMIT);
   const [selectedPort, setSelectedPort] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  // Full-data CSV export — preview ships only 100 rows; this re-runs the
+  // subgraph server-side and streams the complete dataset.
+  const downloadCsv = useCallback(async () => {
+    if (!selectedNode || exporting) return;
+    setExporting(true);
+    try {
+      const res = await fetch("/api/pipeline-builder/export-csv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipeline_json: state.pipeline, node_id: selectedNode.id }),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        setLocal({ kind: "error", message: `CSV 下載失敗：${t.slice(0, 200)}` });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${selectedNode.id}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setLocal({ kind: "error", message: `CSV 下載失敗：${String(e).slice(0, 200)}` });
+    } finally {
+      setExporting(false);
+    }
+  }, [selectedNode, exporting, state.pipeline]);
   // PR-F3: view mode tabs for dataframe preview (Rows / Schema / Stats)
   // 2026-05-13: add `json` tab for object-native data (Gemini dual-view).
   const [viewMode, setViewMode] = useState<"rows" | "schema" | "stats" | "json">("rows");
@@ -186,7 +217,10 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
       const res = await previewNode({
         pipeline_json: state.pipeline,
         node_id: selectedNode.id,
-        sample_size: 1000,  // backend cap; covers "all" for typical previews
+        // 2026-07-07: 1000 → 100. Preview shows the data's shape; shipping
+        // 1000 rows × every ancestor node froze the panel on big/wide data.
+        // Full data is the 下載 CSV button (server-side re-run, streamed).
+        sample_size: 100,
       });
       if (res.status === "validation_error") {
         setLocal({
@@ -388,6 +422,28 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
           >
             {isRendering ? "Running…" : "Run Preview"}
           </button>
+          {render?.kind === "dataframe" && (
+            <button
+              data-testid="preview-export-csv-btn"
+              onClick={downloadCsv}
+              disabled={!selectedNode || exporting}
+              title="重新執行子圖並下載全量資料（畫面僅顯示前 100 筆）"
+              style={{
+                marginLeft: 6,
+                padding: "3px 12px",
+                fontSize: 11,
+                background: "#fff",
+                color: "#4F46E5",
+                border: "1px solid #C7D2FE",
+                borderRadius: 3,
+                cursor: selectedNode && !exporting ? "pointer" : "not-allowed",
+                letterSpacing: "0.02em",
+                fontWeight: 600,
+              }}
+            >
+              {exporting ? "下載中…" : "下載 CSV"}
+            </button>
+          )}
         </span>
       </div>
 

@@ -345,7 +345,7 @@ function Inner({
               />
             ) : summary ? (
               <>
-                <ResultsBody summary={summary} nodeResults={nodeResults} />
+                <ResultsBody summary={summary} nodeResults={nodeResults} pipelineJson={state.pipeline} />
                 <TakeoverFooter onOpenInBuilder={onOpenInBuilder} />
               </>
             ) : (

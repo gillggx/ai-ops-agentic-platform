@@ -43,7 +43,10 @@ class DataViewBlockExecutor(BlockExecutor):
         description: Optional[str] = params.get("description") or None
         max_rows_param = params.get("max_rows")
         try:
-            max_rows = int(max_rows_param) if max_rows_param is not None else 200
+            # 2026-07-07: default 200 → 100 — the view shows the data's shape;
+            # the full dataset ships via the CSV export endpoint instead.
+            # An explicit max_rows param still wins (author intent).
+            max_rows = int(max_rows_param) if max_rows_param is not None else 100
         except (TypeError, ValueError):
             raise BlockExecutionError(
                 code="INVALID_PARAM", message=f"max_rows must be integer, got {max_rows_param!r}"
