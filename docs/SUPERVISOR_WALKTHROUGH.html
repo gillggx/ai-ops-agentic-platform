@@ -1,329 +1,227 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-TW">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Supervisor 運作全紀錄 — 看到什麼、怎麼想、調整什麼</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supervisor 運作說明 — 三個 Agent 的筆記與治理</title>
 <style>
-  :root{
-    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa;
-    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
-    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
-    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
-    --purp:#6d28d9; --purp-bg:#f5f3ff; --purp-bd:#c4b5fd;
-    --teal:#0e7490; --teal-bg:#ecfeff; --teal-bd:#a5f3fc;
-    --red:#b42318; --red-bg:#fef3f2; --red-bd:#fecaca;
-    --ink2:#101828;
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #edeae2; color: #211f1c;
+    font-family: -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+    line-height: 1.75;
   }
-  *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
-       color:var(--ink);background:var(--bg);line-height:1.65;font-size:14.5px;}
-  .wrap{max-width:1120px;margin:0 auto;padding:0 22px 70px;}
-  header.hero{background:linear-gradient(135deg,#2e1065,#6d28d9 55%,#0e7490);color:#fff;
-       margin:0 -22px 26px;padding:34px 30px 28px;}
-  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.85;}
-  header.hero h1{margin:6px 0 6px;font-size:25px;}
-  header.hero .sub{opacity:.92;font-size:13.5px;}
-  h2{font-size:19px;margin:36px 0 8px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
-  h2 .n{display:inline-flex;min-width:27px;height:27px;padding:0 6px;border-radius:7px;background:var(--purp);color:#fff;
-       align-items:center;justify-content:center;font-size:13px;font-weight:700;}
-  h3{font-size:15px;margin:18px 0 6px;color:var(--ink2);}
-  p.desc{color:var(--mut);font-size:13px;margin:0 0 14px;}
-  table{width:100%;border-collapse:collapse;margin:10px 0 6px;font-size:12.7px;background:#fff;
-       border:1px solid var(--line);border-radius:10px;overflow:hidden;}
-  th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
-  thead th{background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut);font-weight:700;}
-  tbody tr:last-child td{border-bottom:none;}
-  td b{color:var(--ink2);}
-  .callout{border-radius:10px;padding:13px 16px;margin:14px 0;font-size:13.4px;}
-  .callout.key{background:var(--teal-bg);border:1px solid var(--teal-bd);}
-  .callout.warn{background:var(--amber-bg);border:1px solid var(--amber-bd);}
-  .callout.hard{background:var(--red-bg);border:1px solid var(--red-bd);}
-  .callout b{color:var(--ink2);}
-  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:11.5px;font-family:ui-monospace,Menlo,monospace;}
-  pre{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:13px 15px;font-size:12px;
-      font-family:ui-monospace,Menlo,monospace;overflow:auto;line-height:1.55;}
-  pre .c{color:#7dd3fc} pre .g{color:#86efac} pre .y{color:#fde68a} pre .m{color:#c4b5fd} pre .r{color:#fca5a5}
-  .diagram{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin:14px 0;
-       box-shadow:0 1px 3px rgba(16,24,40,.06);overflow-x:auto;}
-  .diagram svg{width:100%;min-width:860px;height:auto;display:block;}
-  .verdict-ok{color:var(--green);font-weight:700;}
-  .verdict-miss{color:var(--red);font-weight:700;}
-  footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 96px; }
+  header .eyebrow {
+    font: 600 11px ui-monospace, monospace; letter-spacing: .14em;
+    color: #8a857c; text-transform: uppercase; margin-bottom: 8px;
+  }
+  h1 { margin: 0 0 10px; font-size: 26px; font-weight: 800; letter-spacing: -0.3px; }
+  .lede { color: #6f6a61; font-size: 14.5px; max-width: 720px; margin: 0 0 8px; }
+  .meta { font: 500 11px ui-monospace, monospace; color: #a49e91; }
+
+  .card {
+    background: #fbfbf9; border: 1px solid #dedacf; border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(33,31,28,.06); padding: 22px 26px; margin: 26px 0;
+  }
+  .answer { border-left: 4px solid #211f1c; background: #fff; }
+  .answer .big { font-size: 16px; font-weight: 800; margin: 0 0 6px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 14px 0 4px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #e7e3d9; vertical-align: top; }
+  th { font: 700 11px ui-monospace, monospace; letter-spacing: .06em; color: #a49e91; text-transform: uppercase; }
+  td:first-child { white-space: nowrap; }
+
+  h2 { font-size: 19px; font-weight: 800; margin: 44px 0 4px; display: flex; align-items: center; gap: 10px; }
+  h2 .chap {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 30px; height: 24px; border-radius: 6px; background: #211f1c; color: #fbfbf9;
+    font: 700 12px ui-monospace, monospace; padding: 0 8px;
+  }
+  .chapsub { color: #8a857c; font-size: 13px; margin: 0 0 14px; }
+
+  h3 { font-size: 13px; font-weight: 800; margin: 20px 0 8px; letter-spacing: .04em; color: #54504a; }
+  h3 .tag { font: 700 10.5px ui-monospace, monospace; border-radius: 4px; padding: 1px 7px; margin-right: 6px; }
+  .tag-def  { color: #6d28d9; background: #f3effc; border: 1px solid #ded2f3; }
+  .tag-story{ color: #0e7490; background: #e9f5f8; border: 1px solid #bfe0e9; }
+  .tag-sup  { color: #9a6700; background: #faf3e2; border: 1px solid #ecd9a8; }
+
+  p { margin: 8px 0; font-size: 14px; }
+  .note { font-size: 12.5px; color: #8a857c; }
+
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 12px 0; }
+  .step { display: flex; gap: 12px; }
+  .step .rail { display: flex; flex-direction: column; align-items: center; width: 26px; flex: none; }
+  .step .dot {
+    width: 26px; height: 26px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    font: 700 11px ui-monospace, monospace; background: #fff; border: 1.5px solid #cfc9bb; color: #54504a;
+  }
+  .step .dot.user  { background: #211f1c; color: #fbfbf9; border-color: #211f1c; }
+  .step .dot.mem   { background: #f3effc; color: #6d28d9; border-color: #ded2f3; }
+  .step .dot.sup   { background: #faf3e2; color: #9a6700; border-color: #ecd9a8; }
+  .step .dot.ok    { background: #eaf5ee; color: #1a7f4e; border-color: #bfe0cd; }
+  .step .dot.rej   { background: #fdf0ee; color: #b42318; border-color: #f3c6bf; }
+  .step .dot.rep   { background: #fdf5e7; color: #d97706; border-color: #f0dcb4; }
+  .step .line { width: 1.5px; flex: 1; background: #ddd8cb; min-height: 12px; }
+  .step .body { padding: 2px 0 16px; font-size: 13.5px; }
+  .step .who { font: 700 11px ui-monospace, monospace; color: #8a857c; margin-right: 6px; }
+  .hl { background: #faf3e2; border-radius: 3px; padding: 0 4px; }
+  .purple { color: #6d28d9; font-weight: 600; }
+  .amber { color: #9a6700; font-weight: 600; }
+  .green { color: #1a7f4e; font-weight: 600; }
+  .red { color: #b42318; font-weight: 600; }
+
+  .kv {
+    display: grid; grid-template-columns: 120px 1fr; gap: 6px 14px;
+    font-size: 13px; background: #fff; border: 1px solid #e7e3d9; border-radius: 9px;
+    padding: 12px 16px; margin: 10px 0;
+  }
+  .kv .k { font: 700 10.5px ui-monospace, monospace; color: #8a857c; padding-top: 2px; }
+
+  .evd { display: inline-block; font: 600 11px ui-monospace, monospace; border-radius: 4px; padding: 2px 8px; margin: 2px 4px 2px 0; }
+  .evd.sys  { color: #475569; border: 1px solid #d7dee7; background: #fff; }
+  .evd.self { color: #9a6700; border: 1px dashed #ecd9a8; background: #fffdf6; }
+  .evd.mem  { color: #6d28d9; border: 1px solid #ded2f3; background: #faf8ff; }
+
+  .divider { border: none; border-top: 1px dashed #d5cfc0; margin: 40px 0; }
+  footer { margin-top: 40px; font-size: 12px; color: #a49e91; line-height: 1.8; }
+  a { color: #1d4ed8; }
+  @media (max-width: 640px) { .kv { grid-template-columns: 1fr; } .wrap { padding: 32px 16px 72px; } }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-<header class="hero">
-  <div class="kic">Supervisor Deep-Dive · Live Run Record · 2026-07-04</div>
-  <h1>Supervisor 運作全紀錄</h1>
-  <div class="sub">以 2026-07-04 的真實觸發為底：它看到什麼（36 筆修正草稿 + 43 筆文件備忘）、怎麼想（5 筆新提案的推理）、人核准了什麼、DB 實際長出什麼（第一筆 procedure 記憶 id 83）、漏斗如何閉環（monitor 的 DOC_GAP 換血）。所有數字皆為實測，非示意。</div>
+<header>
+  <div class="eyebrow">AIOps Platform · Supervisor 運作說明 · 2026-07-06</div>
+  <h1>三個 Agent 的筆記，與 Supervisor 的治理</h1>
+  <p class="lede">寫給 product owner 的版本：用一個 request 的生命週期，說明 Planner / Builder / Repair 各自留下什麼筆記（W1 / W2 / W3）、什麼時候生效、Supervisor 在哪一刻介入 — 以及它永遠不做什麼。</p>
+  <p class="meta">對應介面：/supervisor 簽核工作台 · /agent-knowledge 知識工房 · /me 我的偏好</p>
 </header>
 
-<!-- 0 big picture -->
-<h2><span class="n">0</span>全景：一次 curation 的完整生命週期</h2>
-<div class="diagram">
-<svg viewBox="0 0 980 560" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Noto Sans TC',sans-serif">
-  <defs>
-    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
-    </marker>
-  </defs>
-
-  <!-- Stage 1: raw material -->
-  <rect x="15" y="20" width="290" height="150" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
-  <text x="30" y="44" font-size="13" font-weight="700" fill="#1d4ed8">1. 原料累積（build 過程自動產生）</text>
-  <text x="30" y="68" font-size="11.5" fill="#334155">W1 Planner：user 改 plan → preference/presentation</text>
-  <text x="30" y="88" font-size="11.5" fill="#334155">W3 Repair：自我修復成功 → correction 草稿(inactive)</text>
-  <text x="30" y="108" font-size="11.5" fill="#334155">W2 Builder：verifier 拒後過 → doc 便利貼(pending)</text>
-  <text x="30" y="128" font-size="11.5" fill="#334155">Episodes：每 build 的事件流（divergence/handover）</text>
-  <text x="30" y="152" font-size="11" fill="#1d4ed8" font-weight="700">本次實況：36 筆草稿 + 43 筆便利貼 + 3 筆 W1</text>
-
-  <!-- Stage 2: input assembly -->
-  <rect x="350" y="20" width="280" height="150" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
-  <text x="365" y="44" font-size="13" font-weight="700" fill="#0e7490">2. 輸入組裝（deterministic，Java）</text>
-  <text x="365" y="68" font-size="11.5" fill="#334155">GET /internal/supervisor/curation-input</text>
-  <text x="365" y="88" font-size="11.5" fill="#334155">draft corrections（active=false，各 100 筆上限）</text>
-  <text x="365" y="108" font-size="11.5" fill="#334155">live preferences / presentations（重複候選）</text>
-  <text x="365" y="128" font-size="11.5" fill="#334155">pending doc memos（審核佇列）</text>
-  <text x="365" y="152" font-size="11" fill="#0e7490" font-weight="700">截斷：每列 body 400 字、每區 30 列（控 token）</text>
-
-  <!-- Stage 3: LLM propose -->
-  <rect x="675" y="20" width="290" height="150" rx="10" fill="#f5f3ff" stroke="#c4b5fd"/>
-  <text x="690" y="44" font-size="13" font-weight="700" fill="#6d28d9">3. LLM 提案（1 次呼叫，Haiku/部署模型）</text>
-  <text x="690" y="68" font-size="11.5" fill="#334155">原則式 prompt：寧缺勿濫、id 不可捏造、</text>
-  <text x="690" y="86" font-size="11.5" fill="#334155">per-type 精確 JSON schema</text>
-  <text x="690" y="108" font-size="11.5" fill="#334155">跨列歸納：同 pattern 的草稿+便利貼交叉引用</text>
-  <text x="690" y="130" font-size="11.5" fill="#334155">產出 MERGE/CORRECT/PRUNE/PROMOTE/DOC_REVISE</text>
-  <text x="690" y="152" font-size="11" fill="#6d28d9" font-weight="700">本次實況：10 筆輸出（上限 12/run）</text>
-
-  <!-- Stage 4: gate -->
-  <rect x="675" y="205" width="290" height="105" rx="10" fill="#fef3f2" stroke="#fecaca"/>
-  <text x="690" y="229" font-size="13" font-weight="700" fill="#b42318">4. 確定性驗證閘（pure function）</text>
-  <text x="690" y="252" font-size="11.5" fill="#334155">型別/必填欄檢查 · 每個 id 必須存在於輸入</text>
-  <text x="690" y="272" font-size="11.5" fill="#334155">PROMOTE 只准 domain/procedure · 去重</text>
-  <text x="690" y="296" font-size="11" fill="#b42318" font-weight="700">本次實況：擋掉 5 筆（首航曾 11/11 全擋自創格式）</text>
-
-  <!-- Stage 5: queue + human -->
-  <rect x="350" y="205" width="280" height="105" rx="10" fill="#fffaeb" stroke="#fde68a"/>
-  <text x="365" y="229" font-size="13" font-weight="700" fill="#b54708">5. 提案佇列 + 人工審核（/supervisor）</text>
-  <text x="365" y="252" font-size="11.5" fill="#334155">status=proposed；逐筆看 rationale + 完整 JSON</text>
-  <text x="365" y="272" font-size="11.5" fill="#334155">approve → 同交易 commit；reject → DB 零變動</text>
-  <text x="365" y="296" font-size="11" fill="#b54708" font-weight="700">本次實況：核准 4、駁回 1（被新輪取代的舊提案）</text>
-
-  <!-- Stage 6: commit effects -->
-  <rect x="15" y="205" width="290" height="105" rx="10" fill="#ecfdf3" stroke="#a6f4c5"/>
-  <text x="30" y="229" font-size="13" font-weight="700" fill="#067647">6. 生效（per-type commit，Java 交易）</text>
-  <text x="30" y="252" font-size="11.5" fill="#334155">PROMOTE→新 domain/procedure 列（active）</text>
-  <text x="30" y="272" font-size="11.5" fill="#334155">CORRECT→改寫+轉正 · DOC_REVISE→memo 結案</text>
-  <text x="30" y="296" font-size="11" fill="#067647" font-weight="700">本次實況：id 82(domain) + id 83(procedure) 誕生</text>
-
-  <!-- Stage 7: downstream -->
-  <rect x="15" y="345" width="450" height="120" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
-  <text x="30" y="369" font-size="13" font-weight="700" fill="#1d4ed8">7. 回到 build 迴路（30 秒內）</text>
-  <text x="30" y="392" font-size="11.5" fill="#334155">embedding backfill（30s job）→ 新列進 RAG 池</text>
-  <text x="30" y="412" font-size="11.5" fill="#334155">下一次 build 的知識注入依「相關性」競爭 top-K</text>
-  <text x="30" y="432" font-size="11.5" fill="#334155">召回全程可觀測：memory_recall 事件 → /agent-activity</text>
-  <text x="30" y="456" font-size="11" fill="#1d4ed8" font-weight="700">實測：id 82/83 30 秒內 embedded=true</text>
-
-  <!-- Stage 8: monitor funnel -->
-  <rect x="510" y="345" width="455" height="120" rx="10" fill="#ecfeff" stroke="#a5f3fc"/>
-  <text x="525" y="369" font-size="13" font-weight="700" fill="#0e7490">8. 漏斗閉環（Monitor 佐證）</text>
-  <text x="525" y="392" font-size="11.5" fill="#334155">DOC_REVISE 核准 → 該 block 的 pending memo 歸零</text>
-  <text x="525" y="412" font-size="11.5" fill="#334155">→ Monitor 下次掃描 DOC_GAP 自動除名</text>
-  <text x="525" y="436" font-size="11" fill="#0e7490" font-weight="700">實測：process_history(12 筆) 核准後從 DOC_GAP 消失，</text>
-  <text x="525" y="454" font-size="11" fill="#0e7490" font-weight="700">換 block_filter(9)/weco_rules(7) 補位</text>
-
-  <!-- arrows -->
-  <line x1="305" y1="95" x2="350" y2="95" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
-  <line x1="630" y1="95" x2="675" y2="95" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
-  <line x1="820" y1="170" x2="820" y2="205" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
-  <line x1="675" y1="257" x2="630" y2="257" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
-  <line x1="350" y1="257" x2="305" y2="257" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
-  <line x1="160" y1="310" x2="160" y2="345" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
-  <line x1="465" y1="405" x2="510" y2="405" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
-  <!-- loop back -->
-  <path d="M 240 465 C 240 520, 60 520, 60 170" fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#ar)"/>
-  <text x="105" y="512" font-size="11" fill="#64748b">下一輪 build 再產生新原料（持續學習迴圈）</text>
-</svg>
+<div class="card answer">
+  <p class="big">先回答最常見的誤解：Planner 記下你的修正後，要等 Supervisor 審核嗎？— 不用。</p>
+  <p>Supervisor <b>不是流程中的守門員</b>，它是<b>事後的策展人</b>。三種筆記的治理等級由「訊號可信度」決定：</p>
+  <table>
+    <tr><th>筆記</th><th>誰寫的</th><th>訊號來源</th><th>生效方式</th><th>Supervisor 的角色</th></tr>
+    <tr><td><b>W1 偏好</b></td><td>Planner</td><td>user <b>親手</b>修改 plan</td><td class="green">立即生效</td><td>事後整理：去重、清理、抓矛盾</td></tr>
+    <tr><td><b>W2 便利貼</b></td><td>Builder</td><td>agent 踩坑的<b>自述</b></td><td class="amber">進待審佇列，人審才生效</td><td>彙整成提案、起草修訂稿</td></tr>
+    <tr><td><b>W3 修正</b></td><td>Repair</td><td>agent 修復後的<b>推論</b></td><td class="red">draft，不參與檢索</td><td>主動提案轉正，人簽核</td></tr>
+  </table>
+  <p class="note">可信度遞減（親手 &gt; 自述 &gt; 推論），生效門檻就遞增（即時 &gt; PE 審 &gt; 提案＋簽核）。</p>
 </div>
-<div class="callout hard"><b>Hard rule 貫穿全程：propose-only。</b>Supervisor 沒有任何直接寫記憶的路徑 — 3/4/5 三關（LLM 自律 → 確定性閘 → 人工核准）全過才 commit。這是 2026-07-03 污染事件（自動寫入讓同類 build 3/3 → 0/3）換來的架構決定。</div>
 
-<!-- 1 what it sees -->
-<h2><span class="n">1</span>它「看到什麼」— 輸入的真實樣貌</h2>
-<p class="desc">2026-07-04 觸發當下，curation-input 端點回傳的內容（每列含 id / title / body / memo_class / written_by / uses）：</p>
-<table>
-  <thead><tr><th>區塊</th><th>量</th><th>實例（當天真實資料）</th></tr></thead>
-  <tbody>
-    <tr><td><b>draft corrections</b><br>（W3，active=false）</td><td>36 筆</td><td>
-      id 76「[repair·retry] p3: 按日分組聚合成每日均值」（EQP-03 案的修復教訓）·
-      id 73「篩選出 OOC 事件並依機台分組計數」·
-      id 51–62 一批「MCP fetch failed」（昨天 mongod 事故的殘留）</td></tr>
-    <tr><td><b>live preferences</b></td><td>2 筆</td><td>id 41「預設時間窗 12h」· <b>id 68「取得 EQP-01 過去 7 天的歷史資料（v31編輯驗收28156）」← 我們故意埋的測試誘餌</b></td></tr>
-    <tr><td><b>live presentations</b></td><td>1 筆</td><td>id 42「line chart 改 bar chart」</td></tr>
-    <tr><td><b>pending doc memos</b><br>（W2）</td><td>43 筆</td><td>block_process_history ×13（缺參 + orphan 兩類）· block_filter ×9 · block_weco_rules ×7 · block_spc_panel ×6 …</td></tr>
-  </tbody>
-</table>
-<pre><span class="c"># 它拿到的每列長這樣（截斷至 400 字控 token）：</span>
-{"id": 72, "title": "[repair·retry] p1: 取得 EQP-01、EQP-02、EQP-03 過去 7 天的歷史資料",
- "body": "phase p1 round 用盡進入 repair，結果=retry。最後 verifier 拒因:
-          {'reason': '請至少提供 tool_id / lot_id / step 其中一個（三擇一）'}...",
- "memo_class": "correction", "written_by": "repair", "uses": 3}</pre>
-<div class="callout key"><b>它看不到什麼（刻意）</b>：block 原始碼、完整 trace、執行中的 build。它只吃「已沉澱的失敗筆記與便利貼」— 這讓它的判斷永遠基於可追溯的證據列，每筆提案都能列出 target id。</div>
+<h2><span class="chap">一</span>Planner 與 W1 — 偏好（preference）</h2>
+<p class="chapsub">「這個 user 喜歡怎樣」。個人 scope — 只影響你自己的 build，存在你名下，/me 可自助管理。</p>
 
-<!-- 2 how it thinks -->
-<h2><span class="n">2</span>它「怎麼想」— 從 79 筆原料到 10 筆提案</h2>
-<p class="desc">單次 LLM 呼叫（本次 11,353 in / 7,389 out tokens）。核心思維模式是<b>跨列歸納</b>，以下是本次真實產出的推理鏈：</p>
-<table>
-  <thead><tr><th>提案</th><th>它的推理（rationale 原文節錄）</th><th>證據跨度</th></tr></thead>
-  <tbody>
-    <tr><td><b>#15 PROMOTE domain</b><br>「三擇一必填」</td><td>「3 條 draft correction（72, 65, 51）與 4 條 doc memo（26, 21, 20, 22）均記錄同一參數缺失錯誤，跨多個 episode 反覆出現，屬穩定 domain fact」</td><td>7 列 × 2 種來源</td></tr>
-    <tr><td><b>#14 PROMOTE procedure</b><br>「避免 orphan leaf」</td><td>「同一失敗模式橫跨 12 條以上 draft correction 及 20 條以上 doc memo，涵蓋 5 個 block、4 個 phase，屬於從大量證據歸納出的穩定 pattern」</td><td>30+ 列 × 5 blocks</td></tr>
-    <tr><td><b>#17 DOC_REVISE</b><br>process_history</td><td>「累積 12 條 doc memo，涵蓋兩種反覆出現的問題（參數缺失與 orphan），文件顯然未充分說明」→ 草案分「缺漏 1 / 缺漏 2」兩節撰寫</td><td>12 memos → 分 2 類</td></tr>
-    <tr><td><b>#16 CORRECT id 55</b></td><td>「id 55 與 60 記錄同一型別錯誤（limit expected integer got str），教訓明確、可操作且無誤導風險，適合 promote」</td><td>2 列互證</td></tr>
-    <tr><td><b>PRUNE（前輪）</b></td><td>「MCP fetch failed 等基礎設施錯誤屬一次性狀況，非可重用教訓」— 正確識別 mongod 事故殘留為雜訊</td><td>5 列同源</td></tr>
-  </tbody>
-</table>
-<pre><span class="c"># 它輸出的提案格式（PROMOTE 實例，schema 由 prompt 硬性規定）：</span>
-{"action_type": "PROMOTE",
- "target_ids": [72, 65, 51, 26, 21, 20, 22],
- "proposal": {
-   "memo_class": "domain",
-   "title": "block_process_history 必須提供 tool_id / lot_id / step 至少一項",
-   "body": "**Why:** ... 此問題在多個 episode 中反覆出現 ...
-            **How to apply:** 在 plan/execute 階段確保至少一項來源條件 ...",
-   "applies_to": "both"},
- "rationale": "3 條 draft correction 與 4 條 doc memo 均記錄同一參數缺失錯誤..."}</pre>
+<div class="card">
+  <h3><span class="tag tag-def">類別定義</span>W1 是什麼</h3>
+  <p>Planner 在 plan 確認關卡觀察你的編輯行為。你改了它提的 plan，就代表它對你的理解有落差 — 這是全系統<b>可信度最高的訊號</b>：不是 agent 猜的，是你親手改的。所以 W1 寫入即 active，不設審核。</p>
 
-<!-- 3 gate -->
-<h2><span class="n">3</span>確定性驗證閘 — 不信任 LLM 的那一層</h2>
-<pre>
-每筆提案過四關（pure function，單元測試覆蓋）：
- 1. action_type ∈ {MERGE, CORRECT, PRUNE, PROMOTE, DOC_REVISE}
- 2. per-type 必填欄齊全（MERGE 要 keep_id+remove_ids；DOC_REVISE 要 revised_doc_draft…）
- 3. <span class="y">每個 id 必須存在於這次輸入</span> — 幻覺 id 一票否決
- 4. PROMOTE 只准 domain / procedure（fast-path 類不走此路）
+  <h3><span class="tag tag-story">情境</span>「SPC 圖要附 UCL/LCL」</h3>
+  <div class="flow">
+    <div class="step"><div class="rail"><div class="dot user">你</div><div class="line"></div></div>
+      <div class="body">說「幫我看 EQP-01 的 SPC 趨勢」。</div></div>
+    <div class="step"><div class="rail"><div class="dot">P</div><div class="line"></div></div>
+      <div class="body"><span class="who">PLANNER</span>提出 plan：p1 撈資料 → p2 聚焦 xbar → p3 畫趨勢圖。暫停等你確認。</div></div>
+    <div class="step"><div class="rail"><div class="dot user">你</div><div class="line"></div></div>
+      <div class="body">在確認卡上把 p3 改成「趨勢圖，<span class="hl">要附 UCL/LCL 管制線</span>」，按確認。</div></div>
+    <div class="step"><div class="rail"><div class="dot ok">✓</div><div class="line"></div></div>
+      <div class="body"><b>兩件事同時發生、互不等待：</b>(a) build 照你改過的 plan 繼續跑；(b) Planner 寫下 W1。</div></div>
+    <div class="step"><div class="rail"><div class="dot mem">◆</div><div class="line"></div></div>
+      <div class="body"><span class="who">W1 寫入</span><span class="purple">「這個 user 的 SPC 圖要帶 UCL/LCL」</span> — <b>寫完即生效</b>，Console 活動流可看到這筆 memory_write。</div></div>
+    <div class="step"><div class="rail"><div class="dot ok">✓</div></div>
+      <div class="body">下次你再要 SPC 圖：Planner 召回這筆 W1，<b>第一次提的 plan 就自帶管制線</b>。全程沒有任何人審核過這筆記憶。</div></div>
+  </div>
 
-戰績：
- <span class="r">首航（07-04 清晨）：LLM 自創 JSON 形狀 → 11/11 全擋</span> → prompt 補精確 schema 後恢復
- <span class="g">本次：10 筆輸出 → 5 筆過閘、5 筆被擋</span>（run 上限 12 筆，防灌爆人工佇列）
-</pre>
-
-<!-- 4 human review -->
-<h2><span class="n">4</span>人工審核 — 你在 /supervisor 看到與做的</h2>
-<p class="desc">每筆卡片顯示：操作類型（色條）+ rationale 一句話 + 型別化摘要 + 完整 JSON 展開。本次的審核決策與理由：</p>
-<table>
-  <thead><tr><th>決策</th><th>對象</th><th>理由</th></tr></thead>
-  <tbody>
-    <tr><td><b style="color:var(--green)">核准</b></td><td>#15 PROMOTE domain（三擇一）</td><td>證據充分（7 列）、內容與 block 實際契約一致</td></tr>
-    <tr><td><b style="color:var(--green)">核准</b></td><td>#14 PROMOTE procedure（orphan 配方）</td><td>30+ 列證據、今天最大系統性 pattern</td></tr>
-    <tr><td><b style="color:var(--red)">駁回</b></td><td>#9 PROMOTE（前輪的 orphan 提案）</td><td><b>佇列級判斷</b>：與 #14 同主題但證據較舊較少 — 核准會生出兩筆近重複 procedure。駁回 = DB 零變動</td></tr>
-    <tr><td><b style="color:var(--green)">核准</b></td><td>#17 DOC_REVISE process_history</td><td>12 筆 memo 聚合、草案分類清楚</td></tr>
-    <tr><td><b style="color:var(--green)">核准</b></td><td>#16 CORRECT id 55（limit 型別）</td><td>教訓乾淨、promote 合理</td></tr>
-  </tbody>
-</table>
-
-<!-- 5 what it adjusts -->
-<h2><span class="n">5</span>它「調整什麼」— commit 的 DB 實際效果</h2>
-<div class="diagram">
-<svg viewBox="0 0 980 330" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Noto Sans TC',sans-serif">
-  <defs>
-    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
-    </marker>
-  </defs>
-  <rect x="15" y="15" width="220" height="300" rx="10" fill="#fffaeb" stroke="#fde68a"/>
-  <text x="30" y="40" font-size="13" font-weight="700" fill="#b54708">核准的提案</text>
-  <text x="30" y="66" font-size="11.5" fill="#334155">#15 PROMOTE domain</text>
-  <text x="30" y="106" font-size="11.5" fill="#334155">#14 PROMOTE procedure</text>
-  <text x="30" y="146" font-size="11.5" fill="#334155">#17 DOC_REVISE ×12 memos</text>
-  <text x="30" y="186" font-size="11.5" fill="#334155">#16 CORRECT id 55</text>
-  <text x="30" y="226" font-size="11.5" fill="#334155">#9 REJECT（重複）</text>
-
-  <rect x="330" y="15" width="300" height="300" rx="10" fill="#ecfdf3" stroke="#a6f4c5"/>
-  <text x="345" y="40" font-size="13" font-weight="700" fill="#067647">agent_knowledge / block_doc_memos</text>
-  <text x="345" y="66" font-size="11.5" fill="#334155">+ id 82 domain「三擇一必填」active</text>
-  <text x="345" y="84" font-size="10.5" fill="#64748b">   written_by=supervisor, source=supervisor</text>
-  <text x="345" y="106" font-size="11.5" fill="#334155">+ id 83 procedure「避免 orphan leaf」active</text>
-  <text x="345" y="124" font-size="10.5" fill="#64748b">   系統第一筆 procedure 記憶</text>
-  <text x="345" y="146" font-size="11.5" fill="#334155">12 筆 memo：pending → promoted</text>
-  <text x="345" y="164" font-size="10.5" fill="#64748b">   文件草案留在 action row（block_docs 本體不動）</text>
-  <text x="345" y="186" font-size="11.5" fill="#334155">id 55：body 改寫 + active=true（draft 轉正）</text>
-  <text x="345" y="226" font-size="11.5" fill="#334155">駁回 → 零變動（只蓋審核章）</text>
-  <text x="345" y="266" font-size="11" fill="#067647" font-weight="700">全部同交易 commit — 失敗即整筆回滾</text>
-
-  <rect x="725" y="15" width="240" height="300" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
-  <text x="740" y="40" font-size="13" font-weight="700" fill="#1d4ed8">30 秒後的世界</text>
-  <text x="740" y="66" font-size="11.5" fill="#334155">embedding backfill：</text>
-  <text x="740" y="84" font-size="11.5" fill="#334155">id 82/83 embedded=true（實測）</text>
-  <text x="740" y="112" font-size="11.5" fill="#334155">→ 進 RAG 池，與既有知識</text>
-  <text x="740" y="130" font-size="11.5" fill="#334155">   依相關性競爭 top-K</text>
-  <text x="740" y="158" font-size="11.5" fill="#334155">→ 未來 build 召回時，</text>
-  <text x="740" y="176" font-size="11.5" fill="#334155">   /agent-activity 逐輪可見</text>
-  <text x="740" y="212" font-size="11.5" fill="#334155">Monitor 下輪掃描：</text>
-  <text x="740" y="230" font-size="11.5" fill="#334155">process_history 從 DOC_GAP</text>
-  <text x="740" y="248" font-size="11.5" fill="#334155">除名（12 memo 已結案）</text>
-
-  <line x1="235" y1="62" x2="330" y2="62" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar2)"/>
-  <line x1="235" y1="102" x2="330" y2="102" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar2)"/>
-  <line x1="235" y1="142" x2="330" y2="142" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar2)"/>
-  <line x1="235" y1="182" x2="330" y2="182" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar2)"/>
-  <line x1="235" y1="222" x2="330" y2="222" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#ar2)"/>
-  <line x1="630" y1="165" x2="725" y2="165" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar2)"/>
-</svg>
+  <h3><span class="tag tag-sup">Supervisor 介入</span>不在當下，在每週體檢</h3>
+  <p>Supervisor 定期巡視所有 W1，只做三種<b>提案</b>（送進工作台，人簽核才落地）：</p>
+  <div class="kv">
+    <div class="k">PRUNE</div><div>這筆偏好 90 天沒被召回 → 提案清掉（軟刪 30 天可復原）</div>
+    <div class="k">MERGE</div><div>你前後留了兩筆講同一件事的偏好 → 提案合併、保留較完整的那筆</div>
+    <div class="k">矛盾偵測</div><div>你的偏好與新知識條目衝突（同時召回會互打）→ 提案讓人裁決留哪個</div>
+  </div>
+  <p class="note">你自己隨時可以在 <b>/me 我的偏好</b> 停用或刪除 — 不必經過任何人。</p>
 </div>
-<pre><span class="c"># DB 驗證（核准後即查）：</span>
-83 | procedure | supervisor | active | 避免 orphan leaf：每個產生資料的節點必須連接至下游消費者
-82 | domain    | supervisor | active | block_process_history 必須提供 tool_id / lot_id / step 至少一項
-55 | correction| repair     | <span class="g">active</span> | （由 draft 改寫轉正）
-<span class="c"># 至此 6/6 記憶類（domain/preference/presentation/correction/episodic/procedure）全部有真實資料</span></pre>
 
-<!-- 6 funnel -->
-<h2><span class="n">6</span>漏斗閉環 — Monitor 的前後對照</h2>
-<pre>
-DOC_GAP 清單（≥3 筆 pending memo 的 block）：
+<h2><span class="chap">二</span>Builder 與 W2 — 文件便利貼（doc memo）</h2>
+<p class="chapsub">「block 文件沒講清楚的坑」。不是知識條目，是貼在某個 block 文件上的便利貼 — 因為 block docs 是 LLM 的唯一文件來源，agent 不准直接改它。</p>
 
-  <span class="y">核准 #17 前</span>                          <span class="g">核准 #17 後（下一輪掃描）</span>
-  block_process_history  13  ◀── 榜首      block_filter           9  ◀── 補位
-  block_filter            9               block_weco_rules       7
-  block_weco_rules        7               block_spc_panel        6
-  block_spc_panel         6               block_unnest           3
-                                          <span class="g">process_history 除名（12 memo 已結案）</span>
+<div class="card">
+  <h3><span class="tag tag-def">類別定義</span>W2 是什麼</h3>
+  <p>Builder 在建構中踩了坑又爬出來（被 Verifier 拒絕 → 修正 → 通過），這段「拒→修→過」的經驗如果源頭是<b>文件缺陷</b>，Builder 就寫張便利貼。它是 agent 對自己失敗的自述（△ 虛線級訊號），而且對象是<b>全域共用</b>的文件 — 錯了會污染所有人，所以必須人審。</p>
 
-  REPAIR_HANDOVER：14 次/7天 → 28 次/7天（今天 ~100 個測試 build 灌的，指標如實反映）
-</pre>
-<div class="callout key"><b>這就是「漏斗」的意義</b>：Builder 踩坑 → 便利貼累積 → Monitor 量化揭示 → Supervisor 聚合成文件草案 → 人核准 → 便利貼結案 → Monitor 榜單自動換血。每一步都可觀測、可追溯。</div>
+  <h3><span class="tag tag-story">情境</span>「limit 到底是字串還是數字」</h3>
+  <div class="flow">
+    <div class="step"><div class="rail"><div class="dot">B</div><div class="line"></div></div>
+      <div class="body"><span class="who">BUILDER</span>對 block_unnest 設 <span class="mono">limit="25"</span>（字串）。</div></div>
+    <div class="step"><div class="rail"><div class="dot rej">V</div><div class="line"></div></div>
+      <div class="body"><span class="who">VERIFIER</span>結構檢查（零 LLM）拒絕：<span class="mono red">PARAM_TYPE_WRONG — limit 應為 integer</span>。</div></div>
+    <div class="step"><div class="rail"><div class="dot ok">✓</div><div class="line"></div></div>
+      <div class="body"><span class="who">BUILDER</span>下一輪改成 <span class="mono">limit=25</span>，通過。</div></div>
+    <div class="step"><div class="rail"><div class="dot mem">◆</div></div>
+      <div class="body"><span class="who">W2 寫入</span><span class="purple">「block_unnest 的 limit 型別易誤，文件應標明 integer」</span> — 進 <span class="amber">review queue</span>。<b>不生效、不改文件</b>，只是躺在佇列裡。</div></div>
+  </div>
 
-<!-- 7 honest -->
-<h2><span class="n">7</span>誠實清單 — 這次評估抓到的不符合預期</h2>
-<table>
-  <thead><tr><th>#</th><th>發現</th><th>判定</th><th>改進方向</th></tr></thead>
-  <tbody>
-    <tr><td>1</td><td>我們故意埋的測試誘餌 <b>id 68</b>（title 含「v31編輯驗收28156」流水號）未被 PRUNE — 15 筆提案零觸及</td><td class="verdict-miss">MISS</td><td>curation input 補 created_at/uses；prompt 加「帶測試/流水號標記且 uses 低者可 PRUNE」原則</td></tr>
-    <tr><td>2</td><td>CLI 執行的 curation，skip 原因沒進 journald（只有 service 行程會）</td><td class="verdict-miss">工程債</td><td>runner 加 file logging</td></tr>
-    <tr><td>3</td><td>/supervisor 卡片的 target_ids 顯示為空（parseListOfObjects 吃掉純數字陣列）</td><td class="verdict-miss">顯示 bug</td><td>toDto 改用通用 list parse</td></tr>
-    <tr><td>4</td><td>舊輪提案滯留佇列，與新輪近重複（#9 vs #14）— 這次靠人工判斷駁回</td><td class="verdict-miss">流程債</td><td>proposer 對同主題舊提案自動標 superseded</td></tr>
-    <tr><td>5</td><td>新蒸餾記憶在低相關 build（spc-trend）未進召回 top-K</td><td class="verdict-ok">BY DESIGN</td><td>RAG 相關性競爭本該如此；相關查詢時自然浮出，/agent-activity 可持續觀測</td></tr>
-  </tbody>
-</table>
+  <h3><span class="tag tag-sup">Supervisor 介入</span>彙整 + 起草，送 PE 簽核</h3>
+  <div class="flow">
+    <div class="step"><div class="rail"><div class="dot sup">S</div><div class="line"></div></div>
+      <div class="body"><span class="who">SUPERVISOR</span>發現同一個 block 累積了 <b>4 張同主題便利貼</b> — 不是偶發，是文件真的有缺口。彙整成一個 <b>DOC_REVISE 提案</b>，並把修訂後的文件段落<b>草稿起好</b>，附證據鏈：<span class="evd sys">▣ episodes ×4</span><span class="evd sys">▣ 拒→過 diff</span></div></div>
+    <div class="step"><div class="rail"><div class="dot user">PE</div><div class="line"></div></div>
+      <div class="body">在<b>知識工房收件匣</b>看到這張卡（三段式：提案／為什麼／依據），核准（可先改寫草稿）或駁回。</div></div>
+    <div class="step"><div class="rail"><div class="dot ok">✓</div></div>
+      <div class="body">核准 → block docs 更新。之後<b>所有 user</b> 的 build 讀到修訂後的文件，這個坑不會再有人踩。</div></div>
+  </div>
+</div>
 
-<!-- 8 numbers -->
-<h2><span class="n">8</span>本次觸發的完整數字</h2>
-<table>
-  <tbody>
-    <tr><td>輸入</td><td>36 draft corrections + 2 preferences + 1 presentation + 43 pending doc memos（≈ 今天 ~100 個 build 的沉澱）</td></tr>
-    <tr><td>LLM</td><td>1 次呼叫 · 11,353 in / 7,389 out tokens · Haiku 4.5</td></tr>
-    <tr><td>提案</td><td>10 筆輸出 → 5 過閘（PROMOTE×2 / CORRECT×2 / DOC_REVISE×2 混舊輪）→ 佇列 15 筆</td></tr>
-    <tr><td>審核</td><td>核准 4 / 駁回 1（人工，/supervisor）</td></tr>
-    <tr><td>生效</td><td>domain id 82 + procedure id 83（皆 30 秒內 embedded）· 12 memos promoted · correction 55 轉正</td></tr>
-    <tr><td>閉環佐證</td><td>monitor DOC_GAP 榜單換血 · spc-trend 回歸 build OK（4 nodes, 55.7s）且召回管線正常（planner 12 筆）</td></tr>
-  </tbody>
-</table>
+<h2><span class="chap">三</span>Repair 與 W3 — 修正（correction）</h2>
+<p class="chapsub">「這樣修才對」的推論。比 W2 更危險 — 是 agent 從一次修復推廣出來的通則，可能只是巧合，所以門檻最高。</p>
+
+<div class="card">
+  <h3><span class="tag tag-def">類別定義</span>W3 是什麼</h3>
+  <p>Builder 連續卡關時 Repair 介入診斷、修復。Repair 把修復心得寫成 W3 — 但它存成 <b>draft</b>：<b>檢索完全撈不到它</b>，等於這筆知識還不存在。原因：單一案例的修復推論，未經其他證據支持前不能污染知識庫。</p>
+
+  <h3><span class="tag tag-story">情境</span>「spec_limits 要用巢狀物件」</h3>
+  <div class="flow">
+    <div class="step"><div class="rail"><div class="dot rej">V</div><div class="line"></div></div>
+      <div class="body"><span class="who">VERIFIER</span>對 p3 的 block_spc_panel <b>連拒兩次</b>（缺 spec_limits）。Builder 卡住，升級 Repair。</div></div>
+    <div class="step"><div class="rail"><div class="dot rep">R</div><div class="line"></div></div>
+      <div class="body"><span class="who">REPAIR</span>三路對齊診斷（原始需求 × canvas × 拒因），重建節點、把 spec_limits 改成<span class="hl">巢狀物件</span>，通過。</div></div>
+    <div class="step"><div class="rail"><div class="dot mem">◆</div></div>
+      <div class="body"><span class="who">W3 寫入</span><span class="purple">「spc_panel 的 spec_limits 需要巢狀物件格式」</span> — <span class="red">draft</span>，不參與任何檢索。</div></div>
+  </div>
+
+  <h3><span class="tag tag-sup">Supervisor 介入</span>找旁證，提 PROMOTE，人簽核</h3>
+  <div class="flow">
+    <div class="step"><div class="rail"><div class="dot sup">S</div><div class="line"></div></div>
+      <div class="body"><span class="who">SUPERVISOR</span>不會放著 draft 爛掉。它比對其他訊號：本週 3 件「agent 自評 PASS 但 user 打不準確」全落在同一情境，且該步驟<b>知識召回 0 筆</b>（知識缺口實錘）。於是提 <b>PROMOTE 提案</b>：「把這筆 draft 轉正為 domain 知識」，附證據鏈：<span class="evd sys">▣ 召回 0 筆 ×3</span><span class="evd self">△ user 評「不準確」×3</span><span class="evd mem">◆ 對應 W3 draft</span></div></div>
+    <div class="step"><div class="rail"><div class="dot user">PE</div><div class="line"></div></div>
+      <div class="body">在收件匣核准（How-to-apply 草稿可先改寫）。</div></div>
+    <div class="step"><div class="rail"><div class="dot ok">✓</div></div>
+      <div class="body">30 秒 embed 完成 → 下次 build 開始被召回。從「一次修復的推論」變成「全域生效的知識」，中間隔著 Supervisor 的旁證 + 人的簽核。</div></div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<h2><span class="chap">總</span>所以 Supervisor 到底是什麼</h2>
+<div class="card">
+  <p>把三章疊起來看：<b>agents 在戰場上留下三種筆記，可信度遞減、生效門檻遞增。Supervisor 是定期巡視筆記堆的策展人 — 把散落的訊號彙整成「有證據的提案」，但落地的手永遠是人的。</b></p>
+  <p>2026-07 起它的職掌從知識面擴到執行面（監督三面）：</p>
+  <table>
+    <tr><th>監督面</th><th>看什麼</th><th>產出</th><th>簽核者</th></tr>
+    <tr><td class="mono">S1 執行健康</td><td>build 成功率、rounds、拒因分布、退步偵測</td><td>診斷 + 調參提案 / issue 型提案</td><td>IT_ADMIN / 開發者</td></tr>
+    <tr><td class="mono">S2 知識品質</td><td>召回命中、W1–W3 佇列、零召回事件</td><td>PRUNE / PROMOTE / MERGE / DOC_REVISE</td><td>PE</td></tr>
+    <tr><td class="mono">S3 成本資源</td><td>花費、cache、provider 品質（如空回應率）</td><td>異常警報 + 設定調整提案</td><td>IT_ADMIN</td></tr>
+  </table>
+  <p>四條硬規則：<b>無落地權</b>（一切經人簽核，危險動作僅限 authed UI）、<b>提案必附證據鏈</b>（▣ 系統事實 / △ 自述 / ◆ 記憶，可點回 trace）、<b>code 不在職掌</b>（只指出、不修）、<b>提案會過期</b>（新證據出現自動 supersede）。</p>
+</div>
 
 <footer>
-  來源：2026-07-04 實際觸發紀錄（supervisor_actions #9–#18 · agent_knowledge id 82/83 · monitor scan 前後對照）。
-  相關文件：<code>AGENT_OPERATIONS_FLOW.html</code>（各 agent 流程）· <code>MULTI_AGENT_PROGRESS.html</code>（進度總表）。
+  介面對照：提案簽核在 <span class="mono">/supervisor</span>（IT_ADMIN）；W2/W3/教它草稿的審核在 <span class="mono">/agent-knowledge</span> 知識工房收件匣（PE）；個人 W1 在 <span class="mono">/me 我的偏好</span>；每次 build 用了哪些記憶，看 Agent Console 的「記憶效應」區。<br>
+  相關文件：<a href="https://github.com/gillggx/ai-ops-agentic-platform/blob/main/docs/SUPERVISOR_CHARTER_AND_DESIGN_BRIEF.md">Supervisor 定位總綱＋設計 brief</a>（給開發者/設計師的規格版）。本頁為 product-owner 敘事版，2026-07-06 取代舊 walkthrough。
 </footer>
 
 </div>
