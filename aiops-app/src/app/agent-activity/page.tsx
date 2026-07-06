@@ -172,15 +172,19 @@ export default function AgentActivityPage() {
             )
           )}
         </div>
-        {selected && <MetaBar key={selected} episodeKey={selected} />}
+        {/* key 必須加前綴：MetaBar 與 Tab 是同層 siblings，先前兩者都用裸
+            `selected` 當 key —— sibling 重複 key 讓 React reconciler 在切換
+            episode 時不拆舊 MetaBar，meta 列一條條累積（bug 修 3 次的根因，
+            prod 無警告靜默壞）。 */}
+        {selected && <MetaBar key={`meta-${selected}`} episodeKey={selected} />}
         {!selected ? (
           <div style={{ padding: 40, color: "#9ca3af" }}>左側選一個 build。</div>
         ) : tab === "trace" ? (
-          <TraceTab key={selected} episodeKey={selected} />
+          <TraceTab key={`tab-${selected}`} episodeKey={selected} />
         ) : tab === "timeline" ? (
-          <TimelineTab key={selected} episodeKey={selected} />
+          <TimelineTab key={`tab-${selected}`} episodeKey={selected} />
         ) : (
-          <ScorecardTab key={selected} episodeKey={selected} />
+          <ScorecardTab key={`tab-${selected}`} episodeKey={selected} />
         )}
       </main>
     </div>
