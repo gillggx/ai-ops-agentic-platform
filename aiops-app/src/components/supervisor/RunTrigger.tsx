@@ -7,63 +7,17 @@
  *  onFinished 讓頁面 reload 提案。單飛由後端保證（409 → 顯示進行中）。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { TOK } from "./model";
 
-interface RunStatus {
-  running: boolean;
-  kind?: string;
-  started_at?: string;
-  last?: { run_id?: string; kind?: string; finished_at?: string; ok?: boolean; summary?: string };
-}
-
-export function RunTrigger({ onFinished }: { onFinished: () => void }) {
+export function RunTrigger({ onStarted }: { onStarted: () => void }) {
   const t = useTranslations("sup");
   const [kind, setKind] = useState<"forensics" | "curation">("forensics");
   const [clearPending, setClearPending] = useState(false);
   const [days, setDays] = useState(7);
   const [running, setRunning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopPoll = useCallback(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-  }, []);
-
-  const poll = useCallback(() => {
-    stopPoll();
-    pollRef.current = setInterval(async () => {
-      try {
-        const r = await fetch("/api/supervisor/runs/status", { cache: "no-store" });
-        const j = await r.json();
-        const st: RunStatus = j.data ?? j;
-        if (!st.running) {
-          stopPoll();
-          setRunning(false);
-          const last = st.last;
-          setNote(last?.ok === false
-            ? t("runs.failed", { msg: String(last?.summary ?? "").slice(0, 120) })
-            : t("runs.done", { summary: String(last?.summary ?? "").slice(0, 160) }));
-          onFinished();
-        }
-      } catch { /* poll 失敗下一輪再試 */ }
-    }, 5000);
-  }, [onFinished, stopPoll, t]);
-
-  // 掛載時同步一次（可能有別人觸發的 run 在跑）
-  useEffect(() => {
-    void (async () => {
-      try {
-        const r = await fetch("/api/supervisor/runs/status", { cache: "no-store" });
-        const j = await r.json();
-        const st: RunStatus = j.data ?? j;
-        if (st.running) { setRunning(true); poll(); }
-      } catch { /* fail-open */ }
-    })();
-    return stopPoll;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const trigger = async () => {
     setNote(null);
@@ -77,7 +31,8 @@ export function RunTrigger({ onFinished }: { onFinished: () => void }) {
       const j = await r.json().catch(() => ({}));
       if (r.status === 409 || j?.data?.running === true) {
         setNote(t("runs.alreadyRunning"));
-        poll();
+        onStarted();   // overlay 會顯示現有 run
+        setRunning(false);
         return;
       }
       if (!r.ok) {
@@ -87,7 +42,8 @@ export function RunTrigger({ onFinished }: { onFinished: () => void }) {
       }
       const cleared = Number(j?.data?.cleared ?? 0);
       if (cleared > 0) setNote(t("runs.cleared", { n: cleared }));
-      poll();
+      setRunning(false);
+      onStarted();   // 交棒給阻擋式進度罩
     } catch (e) {
       setRunning(false);
       setNote(t("runs.failed", { msg: String((e as Error).message || e) }));

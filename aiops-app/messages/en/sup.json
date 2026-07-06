@@ -142,5 +142,21 @@
     "curation": "curation",
     "forensicsTip": "Produced by Supervisor trace forensics (failures/loops)",
     "curationTip": "Produced by Supervisor knowledge curation"
+  },
+  "progress": {
+    "titleForensics": "Forensics run in progress",
+    "titleCuration": "Curation run in progress",
+    "ofTotal": "/ {total} total",
+    "preparing": "Preparing…",
+    "proposed": "{n} proposed",
+    "blockingNote": "A run is in progress — signing and re-triggering are paused until it finishes",
+    "stage": {
+      "starting": "Starting",
+      "scanning": "Scanning cases",
+      "aggregating": "Aggregating hotspots",
+      "checking": "Investigating",
+      "finalizing": "Finalizing (cost/verify)",
+      "done": "Done"
+    }
   }
 }

@@ -68,6 +68,7 @@ _run_state: dict[str, Any] = {
     "run_id": None,
     "kind": None,
     "started_at": None,
+    "progress": None,   # live {stage, scanned, checked, ...} — mutated by the run
     "last": None,
 }
 #: Strong reference to the detached task — asyncio only keeps weak refs, so
@@ -79,7 +80,7 @@ def _reset_state_for_tests() -> None:
     """Test hook — restore pristine module state between test cases."""
     global _current_task
     _run_state.update(running=False, run_id=None, kind=None,
-                      started_at=None, last=None)
+                      started_at=None, progress=None, last=None)
     _current_task = None
 
 
@@ -118,6 +119,10 @@ async def _execute_run(run_id: str, kind: str, days: int,
     ok = False
     summary = ""
     try:
+        def _on_progress(p: dict) -> None:
+            # Detached-task callback runs on the same loop as status reads —
+            # a plain dict swap is atomic enough for telemetry.
+            _run_state["progress"] = p
         if kind == "forensics":
             res = await run_forensics(
                 CONFIG.java_api_url,
@@ -125,6 +130,7 @@ async def _execute_run(run_id: str, kind: str, days: int,
                 trace_dir=os.environ.get("BUILDER_TRACE_DIR", DEFAULT_TRACE_DIR),
                 days=days,
                 max_deep_dives=max_deep_dives,
+                progress=_on_progress,
             )
             summary = _format_forensics_summary(res)
         else:
@@ -150,7 +156,7 @@ async def _execute_run(run_id: str, kind: str, days: int,
             "summary": summary,
         }
         _run_state.update(running=False, run_id=None, kind=None,
-                          started_at=None)
+                          started_at=None, progress=None)
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────
@@ -174,7 +180,7 @@ async def start_supervisor_run(
         )
     run_id = str(uuid.uuid4())
     _run_state.update(running=True, run_id=run_id, kind=req.kind,
-                      started_at=_utcnow_iso())
+                      started_at=_utcnow_iso(), progress=None)
     capped_dives = min(req.max_deep_dives, REQUEST_MAX_DEEP_DIVES)
     _current_task = asyncio.ensure_future(
         _execute_run(run_id, req.kind, req.days, capped_dives))
@@ -191,5 +197,6 @@ async def supervisor_run_status(
         "running": _run_state["running"],
         "kind": _run_state["kind"],
         "started_at": _run_state["started_at"],
+        "progress": _run_state["progress"],
         "last": _run_state["last"],
     }

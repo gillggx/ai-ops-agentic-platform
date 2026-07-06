@@ -142,5 +142,21 @@
     "curation": "策展",
     "forensicsTip": "Supervisor 从失败案/循环 trace 取证产出",
     "curationTip": "Supervisor 知识库体检产出"
+  },
+  "progress": {
+    "titleForensics": "查案巡检进行中",
+    "titleCuration": "知识策展进行中",
+    "ofTotal": "／ 共 {total} 笔",
+    "preparing": "准备中…",
+    "proposed": "已提 {n} 件",
+    "blockingNote": "巡检进行中，暂时无法签核或再次触发 — 完成后自动解除",
+    "stage": {
+      "starting": "启动中",
+      "scanning": "扫描案例",
+      "aggregating": "汇整热点",
+      "checking": "逐案取证",
+      "finalizing": "收尾（成本/成效检查）",
+      "done": "完成"
+    }
   }
 }

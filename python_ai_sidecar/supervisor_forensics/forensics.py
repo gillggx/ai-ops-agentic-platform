@@ -44,7 +44,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 # Reuse the curation pass's LLM client selection + tolerant JSON parsing —
 # same cost posture (Haiku pin with deployment-client fallback).
@@ -243,8 +243,19 @@ def extract_signals(trace: dict, path: str, mtime: float = 0.0) -> TraceSignals:
     )
 
 
+def _emit(progress: Optional[Callable[[dict], None]], **fields: Any) -> None:
+    """Fire a progress update; never let a bad callback break the run."""
+    if progress is None:
+        return
+    try:
+        progress(fields)
+    except Exception:  # noqa: BLE001 — progress is best-effort telemetry
+        pass
+
+
 def load_traces(trace_dir: Path | str, *, days: Optional[int] = DEFAULT_DAYS,
-                now: Optional[datetime] = None) -> list[TraceSignals]:
+                now: Optional[datetime] = None,
+                progress: Optional[Callable[[dict], None]] = None) -> list[TraceSignals]:
     """Read *.json traces under trace_dir with mtime within the last `days`.
 
     days=None disables the mtime filter (used by the verify pass which
@@ -257,7 +268,8 @@ def load_traces(trace_dir: Path | str, *, days: Optional[int] = DEFAULT_DAYS,
         return []
     now = now or datetime.now(tz=timezone.utc)
     cutoff = now.timestamp() - days * 86400 if days is not None else None
-    out: list[TraceSignals] = []
+    # Pre-filter by mtime so the scan total is known up-front（給進度用「共 N 筆」）
+    in_window: list[tuple[Path, float]] = []
     for p in sorted(d.glob("*.json")):
         try:
             mtime = p.stat().st_mtime
@@ -266,6 +278,11 @@ def load_traces(trace_dir: Path | str, *, days: Optional[int] = DEFAULT_DAYS,
             continue
         if cutoff is not None and mtime < cutoff:
             continue
+        in_window.append((p, mtime))
+    scan_total = len(in_window)
+    out: list[TraceSignals] = []
+    for _i, (p, mtime) in enumerate(in_window, start=1):
+        _emit(progress, stage="scanning", scanned=_i, scan_total=scan_total)
         try:
             trace = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as ex:
@@ -1048,9 +1065,11 @@ async def _deep_dive_pass(http: Any, java_base: str, headers: dict,
                           hotspots: list[Hotspot], *, cap: int,
                           dry_run: bool, supersede_map: Optional[dict],
                           force_client: Any,
-                          res: ForensicsRunResult) -> None:
+                          res: ForensicsRunResult,
+                          progress: Optional[Callable[[dict], None]] = None) -> None:
     if not hotspots or cap <= 0:
         return
+    dive_total = min(len(hotspots), cap, MAX_DEEP_DIVES)
     client = force_client or _haiku_client()
     res.llm_model = getattr(client, "model", "") or res.llm_model
     open_proposals = await _fetch_open_proposals(http, java_base, headers)
@@ -1058,6 +1077,8 @@ async def _deep_dive_pass(http: Any, java_base: str, headers: dict,
     for h in hotspots:
         if res.deep_dives >= cap or res.deep_dives >= MAX_DEEP_DIVES:
             break
+        _emit(progress, stage="checking", checked=res.deep_dives + 1,
+              check_total=dive_total, block=h.block, proposed=res.proposed)
         # Activity-id dedupe BEFORE the LLM call: if an open proposal on the
         # same block already cites >= 1 of these traces, the evidence is the
         # same — skip the whole dive (no LLM cost, no duplicate proposal).
@@ -1281,8 +1302,13 @@ async def run_forensics(
     supersede_map: Optional[dict] = None,
     force_client: Any = None,
     now: Optional[datetime] = None,
+    progress: Optional[Callable[[dict], None]] = None,
 ) -> ForensicsRunResult:
-    """One offline forensics pass. See module docstring for the pipeline."""
+    """One offline forensics pass. See module docstring for the pipeline.
+
+    `progress` (optional) receives dicts as stages advance — the runs router
+    threads it into the live run state so admins see 「共 N 筆、檢查到第 X 筆」.
+    """
     import httpx
 
     now = now or datetime.now(tz=timezone.utc)
@@ -1291,9 +1317,11 @@ async def run_forensics(
     java_base = java_base.rstrip("/")
     trace_dir = Path(trace_dir)
 
-    signals = load_traces(trace_dir, days=days, now=now)
+    signals = load_traces(trace_dir, days=days, now=now, progress=progress)
     res.traces_scanned = len(signals)
     res.failed_traces = sum(1 for s in signals if s.failed_ish)
+    _emit(progress, stage="aggregating", scanned=len(signals),
+          scan_total=len(signals))
     hotspots, dropped = aggregate_hotspots(signals)
     res.hotspots = len(hotspots)
     res.dropped_single_case = len(dropped)
@@ -1304,8 +1332,9 @@ async def run_forensics(
         await _deep_dive_pass(
             http, java_base, headers, hotspots,
             cap=cap, dry_run=dry_run, supersede_map=supersede_map,
-            force_client=force_client, res=res,
+            force_client=force_client, res=res, progress=progress,
         )
+        _emit(progress, stage="finalizing", proposed=res.proposed)
         await _cfg_pass(
             http, java_base, headers,
             state_file=state_file, dry_run=dry_run, now=now, res=res,
@@ -1314,4 +1343,5 @@ async def run_forensics(
             http, java_base, headers,
             trace_dir=trace_dir, dry_run=dry_run, now=now, res=res,
         )
+    _emit(progress, stage="done", proposed=res.proposed)
     return res

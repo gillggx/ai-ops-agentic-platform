@@ -24,6 +24,7 @@ import { useTranslations } from "next-intl";
 import { TOK, Proposal, api, canSign } from "@/components/supervisor/model";
 import { HealthStrip } from "@/components/supervisor/HealthStrip";
 import { RunTrigger } from "@/components/supervisor/RunTrigger";
+import { RunProgressOverlay } from "@/components/supervisor/RunProgressOverlay";
 import { ProposalList } from "@/components/supervisor/ProposalList";
 import { ProposalDetail } from "@/components/supervisor/ProposalDetail";
 import { AuditTable } from "@/components/supervisor/AuditTable";
@@ -46,6 +47,7 @@ export default function SupervisorPage() {
   const [selId, setSelId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [healthTick, setHealthTick] = useState(0);
+  const [startSignal, setStartSignal] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,11 +134,15 @@ export default function SupervisorPage() {
           <span style={{ fontSize: 11.5, color: TOK.muted }}>{t("subtitle")}</span>
           <span style={{ flex: 1 }} />
           {roles.includes("IT_ADMIN") && (
-            <RunTrigger onFinished={() => { void load(); setHealthTick((n) => n + 1); }} />
+            <RunTrigger onStarted={() => setStartSignal((n) => n + 1)} />
           )}
         </div>
 
         <HealthStrip refreshKey={healthTick} />
+        {roles.includes("IT_ADMIN") && (
+          <RunProgressOverlay startSignal={startSignal}
+            onDone={() => { void load(); setHealthTick((n) => n + 1); }} />
+        )}
 
         {/* tabs */}
         <div style={{

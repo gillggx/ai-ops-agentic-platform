@@ -142,5 +142,21 @@
     "curation": "整理",
     "forensicsTip": "Supervisor のトレース調査（失敗/ループ）による提案",
     "curationTip": "Supervisor のナレッジ整理による提案"
+  },
+  "progress": {
+    "titleForensics": "調査実行中",
+    "titleCuration": "整理実行中",
+    "ofTotal": "／ 全 {total} 件",
+    "preparing": "準備中…",
+    "proposed": "{n} 件提出",
+    "blockingNote": "実行中のため、承認と再実行は一時停止しています — 完了後に自動解除されます",
+    "stage": {
+      "starting": "開始中",
+      "scanning": "ケースをスキャン",
+      "aggregating": "ホットスポット集約",
+      "checking": "調査中",
+      "finalizing": "仕上げ（コスト/検証）",
+      "done": "完了"
+    }
   }
 }

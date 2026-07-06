@@ -75,7 +75,7 @@ def test_unknown_kind_rejected(client):
 def test_status_initial_shape(client):
     body = client.get(STATUS_URL, headers=HEADERS).json()
     assert body == {"running": False, "kind": None,
-                    "started_at": None, "last": None}
+                    "started_at": None, "progress": None, "last": None}
 
 
 # ── start + single-flight + during/after status ──────────────────────────

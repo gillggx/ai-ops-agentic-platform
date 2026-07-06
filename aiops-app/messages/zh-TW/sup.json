@@ -142,5 +142,21 @@
     "curation": "策展",
     "forensicsTip": "Supervisor 從失敗案/迴圈 trace 取證產出",
     "curationTip": "Supervisor 知識庫體檢產出"
+  },
+  "progress": {
+    "titleForensics": "查案巡檢進行中",
+    "titleCuration": "知識策展進行中",
+    "ofTotal": "／ 共 {total} 筆",
+    "preparing": "準備中…",
+    "proposed": "已提 {n} 件",
+    "blockingNote": "巡檢進行中，暫時無法簽核或再次觸發 — 完成後自動解除",
+    "stage": {
+      "starting": "啟動中",
+      "scanning": "掃描案例",
+      "aggregating": "彙整熱點",
+      "checking": "逐案取證",
+      "finalizing": "收尾（成本/成效檢查）",
+      "done": "完成"
+    }
   }
 }
