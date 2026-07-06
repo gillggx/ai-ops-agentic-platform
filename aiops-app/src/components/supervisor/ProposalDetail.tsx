@@ -57,6 +57,7 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
 }) {
   const t = useTranslations("sup");
   const [reason, setReason] = useState("");
+  const [ghCopied, setGhCopied] = useState(false);
   const [reasonErr, setReasonErr] = useState(false);
 
   const tc = typeChip(p.action_type);
@@ -186,6 +187,41 @@ function DetailInner({ p, roles, busy, onApprove, onReject, onShelve, onGoto }: 
           ) : (
             <span>{t("detail.supersedeNoRef")}</span>
           )}
+        </div>
+      )}
+
+      {/* W3 — ISSUE 型核准後：人建 issue，給 gh 指令複製鈕（不自動建，
+          遵守「Supervisor 不落地」；landed 由人回填） */}
+      {p.action_type === "ISSUE" && p.status === "approved" && !p.landed_at && (
+        <div style={{
+          margin: "0 18px 14px", background: "#f1f5f9", border: "1px solid #d7dee7",
+          borderRadius: 8, padding: "10px 14px", display: "flex", gap: 10,
+          alignItems: "center", flexWrap: "wrap",
+        }}>
+          <span style={{ fontSize: 12, color: TOK.muted, flex: 1, minWidth: 200 }}>
+            {t("issue.manualNote")}
+          </span>
+          <button
+            onClick={() => {
+              const raw = ((): Record<string, unknown> => {
+                const pr = p.proposal as unknown;
+                if (pr && typeof pr === "object") return pr as Record<string, unknown>;
+                try { return JSON.parse(String(pr ?? "{}")); } catch { return {}; }
+              })();
+              const title = String(raw.summary ?? p.rationale ?? `supervisor issue #${p.id}`).slice(0, 120);
+              const refs = Array.isArray(raw.trace_refs) ? (raw.trace_refs as unknown[]).join("\n") : "";
+              const cmd = `gh issue create --title ${JSON.stringify(title)} --body ${JSON.stringify(
+                `${String(raw.suspect ?? p.rationale ?? "")}\n\ntraces:\n${refs}\n\nsupervisor proposal #${p.id}`)}`;
+              void navigator.clipboard?.writeText(cmd).catch(() => {});
+              setGhCopied(true);
+            }}
+            style={{
+              border: `1px solid ${TOK.btnBorder}`, background: ghCopied ? "#eaf5ee" : "#fff",
+              color: ghCopied ? "#1a7f4e" : TOK.muted, borderRadius: 6,
+              fontSize: 11.5, fontWeight: 600, padding: "5px 12px", cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >{ghCopied ? t("issue.copied") : t("issue.copyGh")}</button>
         </div>
       )}
 

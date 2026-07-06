@@ -5,12 +5,17 @@ import com.aiops.api.common.ApiResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * Internal LLM usage rollup write endpoint (S3, V75). The sidecar's
+ * Internal LLM usage rollup endpoints (S3, V75). The sidecar's
  * llm_client fires one increment per completed LLM call; the row is
  * upserted atomically (see {@code LlmProviderDailyRepository}).
+ *
+ * <p>W3: GET /daily mirrors the public {@code /supervisor/metrics/llm-daily}
+ * read (same {@code LlmUsageService.daily} rows) but under internal-token
+ * auth so the forensics CLI doesn't need a user JWT.
  */
 @RestController
 @RequestMapping("/internal/llm-usage")
@@ -32,6 +37,13 @@ public class InternalLlmUsageController {
                 asLong(body.get("input_tokens")),
                 asLong(body.get("output_tokens")),
                 asLong(body.get("cache_read"))));
+    }
+
+    /** Same rows as the public /supervisor/metrics/llm-daily endpoint. */
+    @GetMapping("/daily")
+    public ApiResponse<List<Map<String, Object>>> daily(
+            @RequestParam(name = "days", defaultValue = "7") int days) {
+        return ApiResponse.ok(service.daily(days));
     }
 
     private static boolean asBool(Object o) {

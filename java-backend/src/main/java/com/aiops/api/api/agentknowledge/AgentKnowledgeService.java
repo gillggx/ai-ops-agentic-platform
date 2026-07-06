@@ -1,5 +1,6 @@
 package com.aiops.api.api.agentknowledge;
 
+import com.aiops.api.api.memory.MemoryGovernancePolicy;
 import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.auth.Role;
 import com.aiops.api.common.ApiException;
@@ -183,6 +184,7 @@ public class AgentKnowledgeService {
 			e.setStatus("draft");
 			e.setActive(false);
 		}
+		backfillReviewAt(e);   // W3: domain|procedure rows carry an annual review date
 		// embedding will be filled in by sidecar's _backfill_embeddings (async)
 		return Dtos.KnowledgeDto.of(knowledgeRepo.save(e));
 	}
@@ -212,6 +214,7 @@ public class AgentKnowledgeService {
 		}
 		e.setStatus("active");
 		e.setActive(true);
+		backfillReviewAt(e);   // W3: agent-written domain|procedure drafts get a review date on approval
 		e.setUpdatedAt(OffsetDateTime.now());
 		return Dtos.KnowledgeDto.of(e);
 	}
@@ -318,6 +321,17 @@ public class AgentKnowledgeService {
 	private static void requireReviewerRole(AuthPrincipal caller) {
 		if (!canPublishKnowledge(caller)) {
 			throw ApiException.forbidden("PE or IT_ADMIN role required to review knowledge drafts");
+		}
+	}
+
+	/** W3 governance: durable classes (domain | procedure) carry an annual
+	 *  review date. Backfilled on create AND on draft approval, only when the
+	 *  caller didn't already set one — never overwrites an explicit review_at.
+	 *  Window lives in {@link MemoryGovernancePolicy#REVIEW_PERIOD_DAYS}
+	 *  (sidecar mirrors the constant — see that class's sync-duty note). */
+	private static void backfillReviewAt(AgentKnowledgeEntity e) {
+		if (e.getReviewAt() == null && MemoryGovernancePolicy.requiresReview(e.getMemoClass())) {
+			e.setReviewAt(MemoryGovernancePolicy.nextReviewAt(OffsetDateTime.now()));
 		}
 	}
 

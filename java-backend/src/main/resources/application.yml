@@ -78,6 +78,11 @@ aiops:
   audit:
     retention-days: 90
     async-queue-size: 1000
+  knowledge:
+    # W3 feature flag (default OFF): weighted RAG re-ranking
+    # (cosine x priority x freshness + per-class quota) in
+    # InternalAgentKnowledgeService. OFF = legacy pure-cosine top-K.
+    weighted-ranking: ${KNOWLEDGE_WEIGHTED_RANKING:false}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8000}
 

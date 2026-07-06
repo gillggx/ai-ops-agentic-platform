@@ -117,5 +117,10 @@
     "lifecycle": "一行一案 · 提案 → 签核 → 落地 → 验证 四段生命周期",
     "empty": "尚无签核记录",
     "rejectReason": "驳回理由：{reason}"
+  },
+  "issue": {
+    "manualNote": "已批准 — 请人工创建 GitHub issue（Supervisor 不自动落地），创建后由 admin 回填落地记录",
+    "copyGh": "复制 gh 命令",
+    "copied": "已复制"
   }
 }

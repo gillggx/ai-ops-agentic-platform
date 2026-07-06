@@ -117,5 +117,10 @@
     "lifecycle": "1 行 1 案件 · 提案 → 承認 → 反映 → 検証 の 4 段ライフサイクル",
     "empty": "承認履歴はまだありません",
     "rejectReason": "却下理由：{reason}"
+  },
+  "issue": {
+    "manualNote": "承認済み — GitHub issue は手動で作成してください（Supervisor は自動で反映しません）。作成後、admin が反映記録を記入します",
+    "copyGh": "gh コマンドをコピー",
+    "copied": "コピーしました"
   }
 }

@@ -11,10 +11,13 @@ import com.aiops.api.domain.agentknowledge.AgentKnowledgeRepository;
 import com.aiops.api.domain.agentknowledge.AgentLexiconEntity;
 import com.aiops.api.domain.agentknowledge.AgentLexiconRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,11 +40,28 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class InternalAgentKnowledgeService {
 
+	/** W3: candidate pool width when weighted re-ranking is ON — wide enough
+	 *  for the re-ranker to reshuffle, small enough to stay cheap. */
+	private static final int WEIGHTED_CANDIDATE_POOL = 30;
+	private static final int DEFAULT_KNOWLEDGE_LIMIT = 3;
+
 	private final AgentDirectiveRepository directiveRepo;
 	private final AgentDirectiveFireRepository fireRepo;
 	private final AgentLexiconRepository lexiconRepo;
 	private final AgentKnowledgeRepository knowledgeRepo;
 	private final AgentExampleRepository exampleRepo;
+
+	/** W3 feature flag (default OFF): weighted RAG re-ranking. Bound from
+	 *  {@code aiops.knowledge.weighted-ranking} in application.yml, which maps
+	 *  the {@code KNOWLEDGE_WEIGHTED_RANKING} env var. Field (not constructor)
+	 *  injection on purpose — the class uses Lombok @RequiredArgsConstructor
+	 *  for the final repos; tests set it via the package-private setter. */
+	@Value("${aiops.knowledge.weighted-ranking:false}")
+	private boolean weightedRankingEnabled;
+
+	void setWeightedRankingEnabled(boolean enabled) {
+		this.weightedRankingEnabled = enabled;
+	}
 
 	// ══════════════════════════════════════════════════════════════════════
 	// Directives
@@ -89,7 +109,12 @@ public class InternalAgentKnowledgeService {
 
 	/** Sidecar passes a vector literal "[v1,v2,...]" computed from query.
 	 *  V58: {@code layer} ('plan'|'execute'|null) filters by applies_to so the
-	 *  plan and execute agent layers retrieve different slices. */
+	 *  plan and execute agent layers retrieve different slices.
+	 *
+	 *  <p>W3: when {@code aiops.knowledge.weighted-ranking} is ON, a widened
+	 *  candidate pool is re-ranked by cosine × priority × freshness with a
+	 *  per-class quota ({@link KnowledgeReRanker}). Flag OFF (default) takes
+	 *  the untouched legacy pure-cosine path. */
 	public List<AgentKnowledgeEntity> searchKnowledge(Long userId, String queryVec,
 	                                                   String skillSlug, String toolId, String recipeId,
 	                                                   String layer, Integer limit) {
@@ -97,9 +122,42 @@ public class InternalAgentKnowledgeService {
 			return List.of();
 		}
 		String layerFilter = (layer == null || layer.isBlank()) ? null : layer;
-		return knowledgeRepo.searchByEmbedding(
-				userId, queryVec, skillSlug, toolId, recipeId,
-				layerFilter, limit != null ? limit : 3);
+		int topK = limit != null ? limit : DEFAULT_KNOWLEDGE_LIMIT;
+		if (!weightedRankingEnabled) {
+			return knowledgeRepo.searchByEmbedding(
+					userId, queryVec, skillSlug, toolId, recipeId, layerFilter, topK);
+		}
+		return searchKnowledgeWeighted(userId, queryVec, skillSlug, toolId, recipeId,
+				layerFilter, topK);
+	}
+
+	/** W3 weighted path: fetch top-{@value #WEIGHTED_CANDIDATE_POOL} ids with
+	 *  their cosine distance (projection query — the entity query can't return
+	 *  the computed column), hydrate the entities, and let the pure re-ranker
+	 *  pick the final top-K. */
+	private List<AgentKnowledgeEntity> searchKnowledgeWeighted(Long userId, String queryVec,
+	                                                            String skillSlug, String toolId,
+	                                                            String recipeId, String layerFilter,
+	                                                            int topK) {
+		List<AgentKnowledgeRepository.KnowledgeDistanceRow> rows =
+				knowledgeRepo.searchByEmbeddingWithDistance(
+						userId, queryVec, skillSlug, toolId, recipeId,
+						layerFilter, WEIGHTED_CANDIDATE_POOL);
+		if (rows.isEmpty()) {
+			return List.of();
+		}
+		Map<Long, AgentKnowledgeEntity> byId = new HashMap<>();
+		for (AgentKnowledgeEntity e : knowledgeRepo.findAllById(
+				rows.stream().map(AgentKnowledgeRepository.KnowledgeDistanceRow::getId).toList())) {
+			byId.put(e.getId(), e);
+		}
+		List<KnowledgeReRanker.Candidate> candidates = new ArrayList<>(rows.size());
+		for (AgentKnowledgeRepository.KnowledgeDistanceRow row : rows) {
+			AgentKnowledgeEntity e = byId.get(row.getId());
+			if (e == null || row.getDist() == null) continue;   // raced delete / null-safe
+			candidates.add(new KnowledgeReRanker.Candidate(e, 1.0 - row.getDist()));
+		}
+		return KnowledgeReRanker.rerank(candidates, topK, OffsetDateTime.now());
 	}
 
 	/** PUT embedding for a knowledge row (called by sidecar after async embed).

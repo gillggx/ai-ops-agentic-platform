@@ -37,14 +37,22 @@ import java.util.*;
  *   <li>DOC_REVISE — {block_id, memo_ids[], revised_doc_draft} : marks the
  *       doc memos promoted and keeps the draft on the action row —
  *       block_docs itself is NOT touched (single source of truth).</li>
+ *   <li>CFG / ISSUE (W3) — free-form proposal JSON, stored as-is with no
+ *       target validation: config-change and issue-tracker suggestions that
+ *       a human lands OUTSIDE this system. Approving one commits nothing —
+ *       landed_at stays NULL until the manual landing is recorded.</li>
  * </ul>
  */
 @Service
 public class SupervisorCurationService {
 
     private static final Set<String> TYPES =
-            Set.of("MERGE", "CORRECT", "PRUNE", "PROMOTE", "DOC_REVISE");
+            Set.of("MERGE", "CORRECT", "PRUNE", "PROMOTE", "DOC_REVISE", "CFG", "ISSUE");
+    /** W3: approve() flips status only — the change lands manually, later. */
+    private static final Set<String> MANUAL_LANDING_TYPES = Set.of("CFG", "ISSUE");
     private static final Set<String> PROMOTE_CLASSES = Set.of("domain", "procedure");
+    /** W3 forensics: landed proposals unverified for this long enter the queue. */
+    private static final int VERIFY_GRACE_DAYS = 7;
 
     private final SupervisorActionRepository actions;
     private final AgentKnowledgeRepository knowledge;
@@ -63,17 +71,25 @@ public class SupervisorCurationService {
 
     // ── propose (sidecar) ───────────────────────────────────────────────
 
+    /** {@code proposal} / {@code narrative} accept a Map OR a JSON string —
+     *  the sidecar proposer sends {@code json.dumps} strings (W2 regression:
+     *  instanceof-Map coercion silently nulled them → badRequest). Strings
+     *  are validated as JSON objects and stored as-is; Maps are serialized. */
     @Transactional
     public Map<String, Object> propose(String actionType, List<?> targetIds,
-                                       Map<String, Object> proposal, String rationale,
+                                       Object proposal, String rationale,
                                        Map<String, Object> proposerMeta,
-                                       Map<String, Object> narrative) {
+                                       Object narrative,
+                                       Long supersedes) {
         if (actionType == null || !TYPES.contains(actionType)) {
             throw ApiException.badRequest("action_type must be one of " + TYPES);
         }
-        if (proposal == null || proposal.isEmpty()) {
+        String proposalJson = normalizeJsonObject("proposal", proposal);
+        if (proposalJson == null) {
             throw ApiException.badRequest("proposal required");
         }
+        // CFG / ISSUE (W3): proposal JSON stored as-is, no target validation —
+        // targets live outside this system (config files, issue tracker).
         String targets = JsonUtils.safeWrite(mapper, targetIds == null ? List.of() : targetIds);
         if (actions.existsByActionTypeAndTargetIdsAndStatus(actionType, targets, "proposed")) {
             return Map.of("deduped", true);
@@ -81,14 +97,26 @@ public class SupervisorCurationService {
         SupervisorActionEntity a = new SupervisorActionEntity();
         a.setActionType(actionType);
         a.setTargetIds(targets);
-        a.setProposal(JsonUtils.safeWrite(mapper, proposal));
+        a.setProposal(proposalJson);
         a.setRationale(rationale);
         a.setProposerMeta(JsonUtils.safeWrite(mapper, proposerMeta));
         // V75 案情敘事 — optional; NULL keeps the old 3-part frontend rendering
-        if (narrative != null && !narrative.isEmpty()) {
-            a.setNarrative(JsonUtils.safeWrite(mapper, narrative));
+        String narrativeJson = normalizeJsonObject("narrative", narrative);
+        if (narrativeJson != null) {
+            a.setNarrative(narrativeJson);
         }
         a = actions.save(a);
+        // W3 forensics: the new proposal replaces a still-open one. Only a
+        // 'proposed' row can be superseded — reviewed rows keep their history.
+        if (supersedes != null) {
+            final Long newId = a.getId();
+            actions.findById(supersedes)
+                    .filter(old -> "proposed".equals(old.getStatus()))
+                    .ifPresent(old -> {
+                        old.setSupersededBy(newId);
+                        actions.save(old);
+                    });
+        }
         return Map.of("id", a.getId(), "deduped", false);
     }
 
@@ -121,24 +149,33 @@ public class SupervisorCurationService {
         if (!"proposed".equals(a.getStatus())) {
             throw ApiException.badRequest("proposal " + id + " already " + a.getStatus());
         }
-        Map<String, Object> p = JsonUtils.parseObject(mapper, a.getProposal());
-        Map<String, Object> result = switch (a.getActionType()) {
-            case "MERGE" -> commitMerge(p);
-            case "CORRECT" -> commitCorrect(p);
-            case "PRUNE" -> commitPrune(p);
-            case "PROMOTE" -> commitPromote(p);
-            case "DOC_REVISE" -> commitDocRevise(p, reviewerId);
-            default -> throw ApiException.badRequest("unknown action_type " + a.getActionType());
-        };
         OffsetDateTime now = OffsetDateTime.now();
         a.setStatus("approved");
         a.setReviewedBy(reviewerId);
         a.setReviewedAt(now);
-        // V75 landing lifecycle: the per-type commit above succeeded (it
-        // throws otherwise), so the change has landed — stamp when/who.
-        a.setLandedAt(now);
-        a.setLandedBy(String.valueOf(reviewerId));
-        a.setCommitResult(JsonUtils.safeWrite(mapper, result));
+        if (MANUAL_LANDING_TYPES.contains(a.getActionType())) {
+            // W3 CFG / ISSUE: approval commits NOTHING here — a human lands
+            // the change outside this system (config edit / issue tracker),
+            // so landed_at/by stay NULL until that landing is recorded.
+            a.setCommitResult(JsonUtils.safeWrite(mapper,
+                    Map.of("note", "awaiting manual landing")));
+        } else {
+            Map<String, Object> p = JsonUtils.parseObject(mapper, a.getProposal());
+            Map<String, Object> result = switch (a.getActionType()) {
+                case "MERGE" -> commitMerge(p);
+                case "CORRECT" -> commitCorrect(p);
+                case "PRUNE" -> commitPrune(p);
+                case "PROMOTE" -> commitPromote(p);
+                case "DOC_REVISE" -> commitDocRevise(p, reviewerId);
+                default -> throw ApiException.badRequest("unknown action_type " + a.getActionType());
+            };
+            // V75 landing lifecycle: the per-type commit above succeeded (it
+            // throws otherwise, rolling back the status flip with it) — stamp
+            // when/who landed.
+            a.setLandedAt(now);
+            a.setLandedBy(String.valueOf(reviewerId));
+            a.setCommitResult(JsonUtils.safeWrite(mapper, result));
+        }
         actions.save(a);
         return toDto(a);
     }
@@ -157,6 +194,73 @@ public class SupervisorCurationService {
         if (reason != null && !reason.isBlank()) {
             a.setRejectReason(reason);
         }
+        actions.save(a);
+        return toDto(a);
+    }
+
+    // ── W3 forensics: open proposals + post-landing verification ────────
+
+    /** Still-open proposals (status=proposed, not superseded) — the
+     *  forensics CLI reads this to decide whether a new finding supersedes
+     *  an existing queue entry. Slim rows, same spirit as verifyQueue. */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> openProposals() {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (SupervisorActionEntity a
+                : actions.findByStatusAndSupersededByIsNullOrderByIdDesc("proposed")) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", a.getId());
+            m.put("action_type", a.getActionType());
+            m.put("narrative", a.getNarrative() == null ? null
+                    : JsonUtils.parseObject(mapper, a.getNarrative()));
+            m.put("proposal", JsonUtils.parseObject(mapper, a.getProposal()));
+            m.put("created_at", a.getCreatedAt() == null ? null : a.getCreatedAt().toString());
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** Landed proposals with no verification after the grace period —
+     *  the forensics CLI works this queue. Slim rows on purpose (the CLI
+     *  只需要判斷 landing 是否奏效, 不需要完整 review payload). */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> verifyQueue() {
+        OffsetDateTime cutoff = OffsetDateTime.now().minusDays(VERIFY_GRACE_DAYS);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (SupervisorActionEntity a
+                : actions.findByVerifyAtIsNullAndLandedAtBeforeOrderByLandedAtAsc(cutoff)) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", a.getId());
+            m.put("action_type", a.getActionType());
+            // NOT JsonUtils.parseListOfObjects — target_ids is a JSON array of
+            // ids (numbers), and that helper binds List<Map> (→ [] fallback).
+            m.put("target_ids", parseIdList(a.getTargetIds()));
+            m.put("proposal", JsonUtils.parseObject(mapper, a.getProposal()));
+            m.put("narrative", a.getNarrative() == null ? null
+                    : JsonUtils.parseObject(mapper, a.getNarrative()));
+            m.put("landed_at", a.getLandedAt() == null ? null : a.getLandedAt().toString());
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** Record the post-landing verification outcome. Write-once: a second
+     *  verify is rejected so the audit trail can't be rewritten. */
+    @Transactional
+    public Map<String, Object> verify(Long id, String verifyResult) {
+        if (verifyResult == null || verifyResult.isBlank()) {
+            throw ApiException.badRequest("verify_result required");
+        }
+        SupervisorActionEntity a = actions.findById(id)
+                .orElseThrow(() -> ApiException.notFound("proposal " + id));
+        if (a.getLandedAt() == null) {
+            throw ApiException.badRequest("proposal " + id + " has not landed — nothing to verify");
+        }
+        if (a.getVerifyAt() != null) {
+            throw ApiException.badRequest("proposal " + id + " already verified at " + a.getVerifyAt());
+        }
+        a.setVerifyResult(verifyResult);
+        a.setVerifyAt(OffsetDateTime.now());
         actions.save(a);
         return toDto(a);
     }
@@ -298,6 +402,46 @@ public class SupervisorCurationService {
         m.put("verify_at", a.getVerifyAt() == null ? null : a.getVerifyAt().toString());
         m.put("superseded_by", a.getSupersededBy());
         return m;
+    }
+
+    /** Normalize a Map-or-JSON-string field to its JSON text form.
+     *  <ul>
+     *    <li>null / blank string / empty map → {@code null} (caller decides
+     *        whether the field is required);</li>
+     *    <li>Map → serialized via {@link JsonUtils#safeWrite};</li>
+     *    <li>String → MUST parse as a JSON object (validated here so a bad
+     *        payload fails loudly at the API instead of as a cryptic jsonb
+     *        insert error), then stored as-is;</li>
+     *    <li>anything else → badRequest.</li>
+     *  </ul> */
+    private String normalizeJsonObject(String field, Object value) {
+        if (value == null) return null;
+        if (value instanceof Map<?, ?> m) {
+            return m.isEmpty() ? null : JsonUtils.safeWrite(mapper, m);
+        }
+        if (value instanceof String s) {
+            if (s.isBlank()) return null;
+            try {
+                Map<?, ?> parsed = mapper.readValue(s, Map.class);
+                return parsed.isEmpty() ? null : s;   // store the exact string
+            } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                throw ApiException.badRequest(
+                        field + " must be a JSON object (got unparseable string): " + e.getOriginalMessage());
+            }
+        }
+        throw ApiException.badRequest(field + " must be a JSON object or object-typed map");
+    }
+
+    /** Parse a JSON array of scalar ids ("[1,2]") — empty list on null /
+     *  blank / parse failure (same fallback contract as JsonUtils). */
+    private List<Object> parseIdList(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return mapper.readValue(json,
+                    new com.fasterxml.jackson.core.type.TypeReference<List<Object>>() {});
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return List.of();
+        }
     }
 
     private static Long asLong(Object o) {

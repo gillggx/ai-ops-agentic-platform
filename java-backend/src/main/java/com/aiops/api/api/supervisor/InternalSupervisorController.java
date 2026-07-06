@@ -18,6 +18,13 @@ import java.util.*;
  * draft corrections, live preference/presentation rows (dup candidates),
  * pending doc memos. POST /proposals — queue a proposal (propose-only; a
  * human approves in /supervisor before anything commits).
+ *
+ * <p>W3 forensics-CLI additions: POST /proposals accepts optional
+ * {@code supersedes} and takes proposal/narrative as JSON string OR object;
+ * GET /proposals-open lists the open (proposed, not superseded) queue;
+ * GET /verify-queue lists landed-but-unverified proposals past the grace
+ * period; POST /proposals/{id}/verify records the write-once verification
+ * outcome.
  */
 @RestController
 @RequestMapping("/internal/supervisor")
@@ -63,21 +70,49 @@ public class InternalSupervisorController {
     public ApiResponse<Map<String, Object>> propose(@RequestBody Map<String, Object> body) {
         Object targets = body.get("target_ids");
         @SuppressWarnings("unchecked")
-        Map<String, Object> proposal = body.get("proposal") instanceof Map<?, ?> m
-                ? (Map<String, Object>) m : null;
-        @SuppressWarnings("unchecked")
         Map<String, Object> meta = body.get("proposer_meta") instanceof Map<?, ?> m2
                 ? (Map<String, Object>) m2 : null;
-        @SuppressWarnings("unchecked")
-        Map<String, Object> narrative = body.get("narrative") instanceof Map<?, ?> m3
-                ? (Map<String, Object>) m3 : null;
+        // proposal / narrative pass through RAW — the sidecar proposer sends
+        // json.dumps STRINGS, the frontend sends objects; the service accepts
+        // both (W2 regression: instanceof-Map here silently nulled strings).
         return ApiResponse.ok(service.propose(
                 body.get("action_type") == null ? null : String.valueOf(body.get("action_type")),
                 targets instanceof List<?> l ? l : List.of(),
-                proposal,
+                body.get("proposal"),
                 body.get("rationale") == null ? null : String.valueOf(body.get("rationale")),
                 meta,
-                narrative));
+                body.get("narrative"),
+                asLong(body.get("supersedes"))));
+    }
+
+    /** W3: open queue (proposed, not superseded) — CLI supersede detection. */
+    @GetMapping("/proposals-open")
+    public ApiResponse<List<Map<String, Object>>> proposalsOpen() {
+        return ApiResponse.ok(service.openProposals());
+    }
+
+    /** W3: landed > 7d ago, never verified — the forensics CLI's worklist. */
+    @GetMapping("/verify-queue")
+    public ApiResponse<List<Map<String, Object>>> verifyQueue() {
+        return ApiResponse.ok(service.verifyQueue());
+    }
+
+    /** W3: record the post-landing verification outcome (write-once). */
+    @PostMapping("/proposals/{id}/verify")
+    public ApiResponse<Map<String, Object>> verify(@PathVariable Long id,
+                                                   @RequestBody Map<String, Object> body) {
+        Object result = body == null ? null : body.get("verify_result");
+        return ApiResponse.ok(service.verify(id, result == null ? null : String.valueOf(result)));
+    }
+
+    private static Long asLong(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number n) return n.longValue();
+        try {
+            return Long.parseLong(String.valueOf(o));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private static List<Map<String, Object>> krows(List<AgentKnowledgeEntity> rows) {

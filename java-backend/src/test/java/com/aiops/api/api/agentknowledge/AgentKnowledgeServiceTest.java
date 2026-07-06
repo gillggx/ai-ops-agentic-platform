@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.Set;
 
@@ -102,6 +103,59 @@ class AgentKnowledgeServiceTest {
         Dtos.KnowledgeDto dto = service.approveKnowledge(10L, PE);
         assertThat(dto.status()).isEqualTo("active");
         assertThat(dto.active()).isTrue();
+    }
+
+    // ── W3: review_at backfill (domain | procedure only) ────────────────
+
+    @Test
+    void approve_domainDraft_backfillsReviewAt365d() {
+        AgentKnowledgeEntity draft = row(20, 1L, "draft", false);
+        draft.setMemoClass("domain");
+        when(knowledge.findById(20L)).thenReturn(Optional.of(draft));
+
+        Dtos.KnowledgeDto dto = service.approveKnowledge(20L, PE);
+
+        assertThat(dto.reviewAt()).isNotNull();
+        assertThat(dto.reviewAt()).isBetween(
+                OffsetDateTime.now().plusDays(365).minusMinutes(1),
+                OffsetDateTime.now().plusDays(365).plusMinutes(1));
+    }
+
+    @Test
+    void approve_procedureDraft_backfillsReviewAt() {
+        AgentKnowledgeEntity draft = row(21, 1L, "draft", false);
+        draft.setMemoClass("procedure");
+        when(knowledge.findById(21L)).thenReturn(Optional.of(draft));
+        assertThat(service.approveKnowledge(21L, PE).reviewAt()).isNotNull();
+    }
+
+    @Test
+    void approve_nonDurableOrUnclassifiedDraft_noReviewAt() {
+        AgentKnowledgeEntity episodic = row(22, 1L, "draft", false);
+        episodic.setMemoClass("episodic");
+        when(knowledge.findById(22L)).thenReturn(Optional.of(episodic));
+        AgentKnowledgeEntity legacy = row(23, 1L, "draft", false);   // memo_class NULL
+        when(knowledge.findById(23L)).thenReturn(Optional.of(legacy));
+
+        assertThat(service.approveKnowledge(22L, PE).reviewAt()).isNull();
+        assertThat(service.approveKnowledge(23L, PE).reviewAt()).isNull();
+    }
+
+    @Test
+    void approve_existingReviewAt_notOverwritten() {
+        AgentKnowledgeEntity draft = row(24, 1L, "draft", false);
+        draft.setMemoClass("domain");
+        OffsetDateTime preset = OffsetDateTime.now().plusDays(30);
+        draft.setReviewAt(preset);
+        when(knowledge.findById(24L)).thenReturn(Optional.of(draft));
+
+        assertThat(service.approveKnowledge(24L, PE).reviewAt()).isEqualTo(preset);
+    }
+
+    @Test
+    void create_uiPath_hasNoMemoClass_soNoReviewAt() {
+        // UI create requests carry no memo_class → the backfill guard must not fire
+        assertThat(service.createKnowledge(createReq(), PE).reviewAt()).isNull();
     }
 
     @Test

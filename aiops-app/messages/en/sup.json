@@ -117,5 +117,10 @@
     "lifecycle": "One row per case · propose → sign-off → land → verify lifecycle",
     "empty": "No sign-off records yet",
     "rejectReason": "Reject reason: {reason}"
+  },
+  "issue": {
+    "manualNote": "Approved — create the GitHub issue manually (Supervisor never lands changes); admin backfills the landing record afterwards",
+    "copyGh": "Copy gh command",
+    "copied": "Copied"
   }
 }
