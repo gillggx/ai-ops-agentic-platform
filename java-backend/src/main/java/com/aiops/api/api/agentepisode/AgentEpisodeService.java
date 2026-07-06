@@ -72,7 +72,7 @@ public class AgentEpisodeService {
     public int appendSteps(String episodeKey, List<Map<String, Object>> batch) {
         if (batch == null || batch.isEmpty()) return 0;
         AgentEpisodeEntity ep = episodes.findByEpisodeKey(episodeKey)
-                .orElseGet(() -> upsert(episodeKey, null, "", null));
+                .orElseGet(() -> upsert(episodeKey, null, "", null, null));
         List<AgentStepEntity> rows = new ArrayList<>(batch.size());
         for (Map<String, Object> s : batch) {
             String agent = str(s.get("agent"));
