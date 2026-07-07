@@ -143,9 +143,10 @@ public class SkillV2Service {
 		SkillV2Entity row = loadBySlug(slug);
 		Object pjObj = body.get("pipeline_json");
 		if (pjObj != null) {
-			if (row.getPipelineId() == null) throw ApiException.badRequest("skill has no bound pipeline");
-			PipelineEntity pipeline = pipelineRepo.findById(row.getPipelineId())
-					.orElseThrow(() -> ApiException.notFound("pipeline " + row.getPipelineId()));
+			final Long pid = row.getPipelineId();  // row 之後 reassign — lambda 用 final 快照
+			if (pid == null) throw ApiException.badRequest("skill has no bound pipeline");
+			PipelineEntity pipeline = pipelineRepo.findById(pid)
+					.orElseThrow(() -> ApiException.notFound("pipeline " + pid));
 			String pipelineJson = (pjObj instanceof String s) ? s : JsonUtils.safeWrite(mapper, pjObj);
 			if (pipelineJson == null || pipelineJson.isBlank()) {
 				throw ApiException.badRequest("pipeline_json could not be serialized");
