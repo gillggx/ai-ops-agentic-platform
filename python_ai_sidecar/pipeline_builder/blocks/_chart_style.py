@@ -32,6 +32,7 @@ import pandas as pd
 from python_ai_sidecar.pipeline_builder.blocks.base import BlockExecutionError
 
 TOOLTIP_FIELDS_MAX = 5
+_MISSING = object()
 
 _STYLE_KEYS = {
     "spc_zones": bool,
@@ -47,15 +48,21 @@ _STYLE_KEYS = {
 
 def parse_style(params: dict[str, Any]) -> dict[str, Any]:
     """Sanitise the `style` param. Unknown keys / wrong-typed values are
-    DROPPED (fail-soft) — a style mistake must never kill the chart."""
+    DROPPED (fail-soft) — a style mistake must never kill the chart.
+
+    Alias tolerance (2026-07-07, STYLE suite round 1): LLMs routinely flatten
+    nested params — the agent wrote `y_label` at top level instead of
+    `style.y_label`. Accept every style key at BOTH levels; the nested
+    `style` object wins on conflict. Same precedent as line_chart accepting
+    highlight_column/highlight_field."""
     raw = params.get("style")
-    if not isinstance(raw, dict):
-        return {}
+    nested = raw if isinstance(raw, dict) else {}
     out: dict[str, Any] = {}
     for key, rule in _STYLE_KEYS.items():
-        if key not in raw:
+        # top-level alias first, nested style overrides
+        v = nested[key] if key in nested else params.get(key, _MISSING)
+        if v is _MISSING:
             continue
-        v = raw[key]
         if rule is bool:
             if isinstance(v, bool):
                 out[key] = v
@@ -66,6 +73,7 @@ def parse_style(params: dict[str, Any]) -> dict[str, Any]:
             if isinstance(v, str) and v in rule:
                 out[key] = v
     return out
+
 
 
 def parse_tooltip_fields(
