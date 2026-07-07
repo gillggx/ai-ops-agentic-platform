@@ -32,6 +32,9 @@ export interface DualPanelOpts {
   formatX?: (idx: number) => string;
   /** Title rendered top-left. */
   title?: string;
+  /** chart-style wave 1: σ Zone A/B/C bands on the TOP panel (needs
+   *  panel.sigma). Agent-set via spec.style.spc_zones. */
+  spcZones?: boolean;
 }
 
 const M = { t: 22, r: 56, b: 32, l: 60 };
@@ -69,6 +72,7 @@ function drawPanel(
   innerLeft: number,
   innerRight: number,
   xs: (i: number) => number,
+  spcZones = false,
 ) {
   const { values, CL, UCL, LCL, violations } = panel;
   if (values.length === 0) return;
@@ -79,6 +83,27 @@ function drawPanel(
   const vMax = Math.max(...allV);
   const pad = (vMax - vMin) * 0.08 || 0.5;
   const y = scale(vMin - pad, vMax + pad, yTop + panelH, yTop);
+
+  // chart-style wave 1: σ Zone A/B/C bands (Shewhart convention), clipped to
+  // the panel. Drawn first so grid/lines/points sit on top.
+  if (spcZones && panel.sigma && Number.isFinite(panel.sigma) && panel.sigma > 0) {
+    const bands: Array<[number, number, string]> = [
+      [2, 3, '#f4dedb'], [1, 2, '#efe9df'], [0, 1, '#e9efe6'],
+    ];
+    const clampY = (v: number) => Math.min(yTop + panelH, Math.max(yTop, y(v)));
+    for (const [s0, s1, fill] of bands) {
+      for (const sign of [1, -1]) {
+        const a = clampY(CL + sign * s1 * panel.sigma);
+        const b = clampY(CL + sign * s0 * panel.sigma);
+        const hh = Math.abs(b - a);
+        if (hh <= 0) continue;
+        el('rect', {
+          x: innerLeft, y: Math.min(a, b), width: innerRight - innerLeft,
+          height: hh, fill, opacity: 0.7,
+        }, svg);
+      }
+    }
+  }
 
   // Out-of-spec band (faint alert tint between LCL and UCL is the "good" zone;
   // we tint OUTSIDE the limits to draw the eye to violations.)
@@ -177,7 +202,7 @@ function drawPanel(
       const me = e as MouseEvent;
       tt.show(
         `<b>Subgroup ${i + 1}</b><br/>${label}: ${v.toFixed(3)}` +
-        (viol ? `<br/><span style="color:${T.alert}">⚠ ${viol}</span>` : ''),
+        (viol ? `<br/><span style="color:${T.alert}">[違規] ${viol}</span>` : ''),
         me.clientX,
         me.clientY,
       );
@@ -226,7 +251,9 @@ export function renderDualPanel(
     el('text', { x: innerLeft, y: 14, 'text-anchor': 'start', class: 'axis-title', text: opts.title }, svg);
   }
 
-  drawPanel(svg, T, top, opts.topLabel ?? 'X̄', y1Top, h1, innerLeft, innerRight, xs);
+  // Zones on the top (X̄ / I) panel only — the R/MR panel's zones are not a
+  // standard convention.
+  drawPanel(svg, T, top, opts.topLabel ?? 'X̄', y1Top, h1, innerLeft, innerRight, xs, opts.spcZones === true);
   drawPanel(svg, T, bot, opts.botLabel ?? 'R', y2Top, h2, innerLeft, innerRight, xs);
 
   // Shared X axis (bottom of bottom panel)

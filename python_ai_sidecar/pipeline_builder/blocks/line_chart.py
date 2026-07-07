@@ -195,4 +195,21 @@ class LineChartBlockExecutor(BlockExecutor):
             spec["highlight"] = highlight
         if series_field:
             spec["series_field"] = series_field
+
+        # 2026-07-07 chart-style wave 1: agent-adjustable style + tooltip.
+        # Convention default: when control limits are present this IS an SPC
+        # chart — zones on unless the agent says otherwise (style.spc_zones
+        # false wins; see _chart_style.apply_chart_style).
+        from python_ai_sidecar.pipeline_builder.blocks._chart_style import (
+            apply_chart_style,
+        )
+        has_limits = ucl is not None and lcl is not None
+        apply_chart_style(
+            spec, params, df,
+            default_style={"spc_zones": True} if has_limits else None,
+        )
+        # weco_annotate: hover on a limit-breaching point explains the rule
+        # ("R1: 單點超出 3σ"). Rendering is frontend; we just pass the intent.
+        if params.get("weco_annotate") is True and has_limits:
+            spec["weco_annotate"] = True
         return {"chart_spec": spec}

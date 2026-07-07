@@ -90,6 +90,8 @@ export default function IMR({ spec, height }: Props) {
       topLabel: 'I (individual)',
       botLabel: 'MR (moving range)',
       title: spec.title,
+      // chart-style wave 1: agent-set σ zones (block defaults this to true)
+      spcZones: (spec as { style?: { spc_zones?: boolean } }).style?.spc_zones === true,
     });
   }, [spec]);
   return (

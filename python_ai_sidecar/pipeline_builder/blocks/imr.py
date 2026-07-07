@@ -62,4 +62,12 @@ class IMRBlockExecutor(BlockExecutor):
             spec["value_column"] = value_col
         if isinstance(params.get("weco_rules"), list):
             spec["weco_rules"] = [str(r) for r in params["weco_rules"]]
+
+        # 2026-07-07 chart-style wave 1 (same convention as block_xbar_r).
+        from python_ai_sidecar.pipeline_builder.blocks._chart_style import (
+            apply_chart_style,
+        )
+        apply_chart_style(spec, params, df, default_style={"spc_zones": True})
+        if params.get("weco_annotate") is True:
+            spec["weco_annotate"] = True
         return {"chart_spec": spec}

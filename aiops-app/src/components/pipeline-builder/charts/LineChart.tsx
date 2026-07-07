@@ -22,6 +22,10 @@ import type { ChartTheme } from './lib';
 import { buildAxis, projectX, type Axis } from './lib/axis';
 import { scale, ticks } from './lib/primitives';
 import {
+  drawAxisLabels, drawSpcZones, markerRadius, specStyle,
+  tooltipFieldLines, tooltipFields, wecoBreachText,
+} from './lib/specStyle';
+import {
   RULE_COLOR,
   SERIES_COLORS,
   type ChartSpec,
@@ -198,8 +202,29 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
     y2Ticks = ticks(y2Min - y2Pad, y2Max + y2Pad, 6);
   }
 
+  // Agent-adjustable style (chart-style wave 1)
+  const style = specStyle(spec);
+  const ttFields = tooltipFields(spec);
+  const ruleByLabel = (label: string) =>
+    (spec.rules ?? []).find((r) => String(r.label ?? '').toUpperCase() === label);
+  const uclRule = ruleByLabel('UCL');
+  const lclRule = ruleByLabel('LCL');
+  const centerRule = ruleByLabel('CENTER');
+
+  // σ Zone A/B/C bands — under everything else, so draw before grid/axes.
+  if (style.spc_zones && uclRule && lclRule
+      && Number.isFinite(uclRule.value) && Number.isFinite(lclRule.value)) {
+    drawSpcZones(svg, { x0: innerLeft, x1: innerRight }, y, {
+      ucl: uclRule.value, lcl: lclRule.value,
+      center: centerRule && Number.isFinite(centerRule.value) ? centerRule.value : null,
+    });
+  }
+
   // Background grid + axes
   drawAxes(svg, T, x, y, yTicks, yFmt, {
+    x0: innerLeft, y0: innerTop, x1: innerRight, y1: innerBottom,
+  });
+  drawAxisLabels(svg, style, {
     x0: innerLeft, y0: innerTop, x1: innerRight, y1: innerBottom,
   });
 
@@ -248,10 +273,25 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
 
   // Series traces
   // Project secondary using y2
+  const primaryDash = style.line_style === 'dash' ? '6 4' : '';
+  const stepMode = style.line_style === 'step';
+  const dotR = markerRadius(style, T.pointR);
   for (const tr of traces) {
     const yProj = tr.axis === 'secondary' && y2 ? y2 : y;
     const projectedPts = tr.points.map(([px, py, row]) => [px, Number.isFinite(py) ? yProj(py) : NaN, row] as [number, number, Record<string, unknown>]);
-    const path = buildPath(projectedPts.map(([px, py]) => [px, py]));
+    // step: insert an intermediate (x2, y1) knee between consecutive points
+    let pathPts = projectedPts.map(([px, py]) => [px, py] as [number, number]);
+    if (stepMode) {
+      const stepped: Array<[number, number]> = [];
+      for (let i = 0; i < pathPts.length; i++) {
+        if (i > 0 && Number.isFinite(pathPts[i][0]) && Number.isFinite(pathPts[i - 1][1])) {
+          stepped.push([pathPts[i][0], pathPts[i - 1][1]]);
+        }
+        stepped.push(pathPts[i]);
+      }
+      pathPts = stepped;
+    }
+    const path = buildPath(pathPts);
     el('path', {
       d: path,
       fill: 'none',
@@ -259,17 +299,17 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
       'stroke-width': T.stroke,
       'stroke-linecap': 'round',
       'stroke-linejoin': 'round',
-      'stroke-dasharray': tr.axis === 'secondary' ? '4 3' : '',
+      'stroke-dasharray': tr.axis === 'secondary' ? '4 3' : primaryDash,
     }, svg);
-    // Points
+    // Points (dotR 0 = markers off; hover targets stay via invisible dots)
     for (const [px, py, row] of projectedPts) {
       if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
       const dot = el('circle', {
         cx: px,
         cy: py,
-        r: T.pointR,
-        fill: tr.color,
-        stroke: T.bg,
+        r: dotR > 0 ? dotR : 4,
+        fill: dotR > 0 ? tr.color : 'transparent',
+        stroke: dotR > 0 ? T.bg : 'none',
         'stroke-width': 0.5,
       }, svg);
       (dot as SVGElement).style.cursor = 'pointer';
@@ -277,8 +317,17 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
       const tt = tooltip();
       dot.addEventListener('mouseenter', (e) => {
         const me = e as MouseEvent;
+        const rawV = Number(row[tr.name]);
+        // weco_annotate: explain a limit breach right in the tooltip
+        let head = '';
+        if (spec.weco_annotate && uclRule && lclRule && Number.isFinite(rawV)) {
+          const breach = wecoBreachText(rawV, uclRule.value, lclRule.value);
+          if (breach) head = `<div style="color:#ff9d8a;font-weight:700">${breach}</div>`;
+        }
         tt.show(
-          `<div><b>${tr.name}</b></div><div style="color:#75736d">${spec.x}: ${xLabel}</div><div>value: ${(row[tr.name] ?? py).toString()}</div>`,
+          head
+          + `<div><b>${tr.name}</b></div><div style="color:#75736d">${spec.x}: ${xLabel}</div><div>value: ${(row[tr.name] ?? py).toString()}</div>`
+          + tooltipFieldLines(row, ttFields),
           me.clientX,
           me.clientY,
         );

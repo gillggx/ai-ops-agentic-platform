@@ -2594,6 +2594,19 @@ def _blocks() -> list[dict[str, Any]]:
                 "                  （e.g. SPC long-form 用 facet='chart_name' 一次出 X̄/R/S/P/C 5 張）\n"
                 "title:             string, opt\n"
                 "\n"
+                "== Style（外觀由參數控制） ==\n"
+                "style:             object, opt — 圖表外觀：\n"
+                "  spc_zones:      bool — σ 區帶 Zone A/B/C 上色。有管制線時預設 true\n"
+                "                  （標準 SPC 管制圖慣例）；使用者要「簡潔/不要區帶」→ 設 false\n"
+                "  line_style:     'solid'|'dash'|'step' — 主線線型\n"
+                "  show_markers:   bool；marker_size: 'small'|'medium'|'large'\n"
+                "  x_label / y_label: string — 軸標題（含單位，e.g. 'xbar (nm)'）\n"
+                "tooltip_fields:    string[], opt, max 5 — 滑鼠提示額外顯示的欄位\n"
+                "                  （e.g. ['lotID','recipe']）。必須是資料真實欄位名，\n"
+                "                  錯欄位會回報可用欄位清單\n"
+                "weco_annotate:     bool, opt — 違規點的提示顯示違規說明\n"
+                "                  （「違反 R1：單點超出 UCL」）\n"
+                "\n"
                 "== Output ==\n"
                 "chart_spec (dict | dict[]): type='line', data, x, y, …\n"
                 "  facet 啟用時 chart_spec 是 list；frontend 攤平成多張 panel\n"
@@ -2620,6 +2633,20 @@ def _blocks() -> list[dict[str, Any]]:
                     "highlight_column": {"type": "string", "x-column-source": "input.data"},
                     "facet": {"type": "string", "title": "facet — split into N panels by column"},
                     "title": {"type": "string"},
+                    "style": {
+                        "type": "object",
+                        "properties": {
+                            "spc_zones": {"type": "boolean"},
+                            "line_style": {"type": "string", "enum": ["solid", "dash", "step"]},
+                            "show_markers": {"type": "boolean"},
+                            "marker_size": {"type": "string", "enum": ["small", "medium", "large"]},
+                            "show_values": {"type": "boolean"},
+                            "x_label": {"type": "string"},
+                            "y_label": {"type": "string"},
+                        },
+                    },
+                    "tooltip_fields": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                    "weco_annotate": {"type": "boolean"},
                 },
             },
             "produces": {"covers": ["chart"], "outcome_extractors": []},
@@ -2873,6 +2900,12 @@ def _blocks() -> list[dict[str, Any]]:
                 "subgroup_size:    int, opt — 估 σ 用的 n（預設取出現最多的 group size）\n"
                 "weco_rules:       string[], opt — 例 ['R1','R2','R5']，預設 R1-R8 全開\n"
                 "title:            string, opt\n"
+                "\n"
+                "== Style（外觀由參數控制） ==\n"
+                "style.spc_zones:   bool — σ 區帶 Zone A/B/C 上色，預設 true（標準管制圖慣例）；\n"
+                "                  使用者要「簡潔/不要區帶」→ 設 false\n"
+                "weco_annotate:     bool — 違規點滑鼠提示顯示違反的 WECO 規則說明\n"
+                "tooltip_fields:    string[], max 5 — 提示額外顯示的資料欄位\n"
                 "\n== Keywords ==\n"
                 "SPC 统计制程管制 統計製程管制, control chart 管制图 管制圖, "
                 "X-bar R X̄/R, WECO, OOC out of control, "
@@ -2890,6 +2923,16 @@ def _blocks() -> list[dict[str, Any]]:
                     "subgroup_size": {"type": "integer", "minimum": 2, "maximum": 10},
                     "weco_rules": {"type": "array", "items": {"type": "string"}},
                     "title": {"type": "string"},
+                    "style": {
+                        "type": "object",
+                        "properties": {
+                            "spc_zones": {"type": "boolean"},
+                            "x_label": {"type": "string"},
+                            "y_label": {"type": "string"},
+                        },
+                    },
+                    "tooltip_fields": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                    "weco_annotate": {"type": "boolean"},
                 },
             },
             "produces": {"covers": ["chart"], "outcome_extractors": []},
@@ -2910,6 +2953,12 @@ def _blocks() -> list[dict[str, Any]]:
                 "value_column:  string — 與 values 二擇一\n"
                 "weco_rules:    string[], opt\n"
                 "title:         string, opt\n"
+                "\n"
+                "== Style（外觀由參數控制） ==\n"
+                "style.spc_zones:   bool — σ 區帶 Zone A/B/C 上色，預設 true（標準管制圖慣例）；\n"
+                "                  使用者要「簡潔/不要區帶」→ 設 false\n"
+                "weco_annotate:     bool — 違規點滑鼠提示顯示違反的 WECO 規則說明\n"
+                "tooltip_fields:    string[], max 5 — 提示額外顯示的資料欄位\n"
                 "\n== Keywords ==\n"
                 "SPC, control chart 管制图 管制圖, IMR individual moving range, "
                 "OOC, outlier 异常点 異常點, anomaly 异常 異常, "
@@ -2924,6 +2973,16 @@ def _blocks() -> list[dict[str, Any]]:
                     "value_column": {"type": "string"},
                     "weco_rules": {"type": "array", "items": {"type": "string"}},
                     "title": {"type": "string"},
+                    "style": {
+                        "type": "object",
+                        "properties": {
+                            "spc_zones": {"type": "boolean"},
+                            "x_label": {"type": "string"},
+                            "y_label": {"type": "string"},
+                        },
+                    },
+                    "tooltip_fields": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                    "weco_annotate": {"type": "boolean"},
                 },
             },
             "produces": {"covers": ["chart"], "outcome_extractors": []},
@@ -3802,6 +3861,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "⚠ event_filter=custom_time 但忘了給 event_time → 退回 all 模式 + 警告 note\n"
                 "⚠ 上游沒 spc_charts 欄又沒 SPC 長表 → empty chart + message\n"
                 "\n"
+                "== Style（外觀由參數控制） ==\n"
+                "style.spc_zones / tooltip_fields / weco_annotate 與 block_line_chart 同義，\n"
+                "由 panel 透傳到每一格子圖（有管制線時 spc_zones 預設 true；\n"
+                "使用者要簡潔版 → style.spc_zones=false）\n"
+                "\n"
                 "== Errors ==\n"
                 "- INVALID_INPUT: data 不是 DataFrame\n"
             ),
@@ -3838,6 +3902,17 @@ def _blocks() -> list[dict[str, Any]]:
                     "value_color": {"type": "string", "default": "#16a34a", "title": "Value 線顏色"},
                     "bound_color": {"type": "string", "default": "#f59e0b", "title": "UCL/LCL 線顏色"},
                     "title": {"type": "string", "default": "SPC Charts", "title": "圖表標題"},
+                    "style": {
+                        "type": "object", "title": "圖表外觀 — σ 區帶/軸標籤（透傳到每格子圖）",
+                        "properties": {
+                            "spc_zones": {"type": "boolean"},
+                            "x_label": {"type": "string"},
+                            "y_label": {"type": "string"},
+                        },
+                    },
+                    "tooltip_fields": {"type": "array", "items": {"type": "string"}, "maxItems": 5,
+                                       "title": "滑鼠提示額外欄位 (e.g. ['lotID'])，透傳到每格"},
+                    "weco_annotate": {"type": "boolean", "title": "違規點提示顯示違規說明"},
                 },
             },
             "examples": [

@@ -150,6 +150,8 @@ export default function XbarR({ spec, height }: Props) {
       topLabel: 'X̄ (subgroup mean)',
       botLabel: 'R (range)',
       title: spec.title,
+      // chart-style wave 1: agent-set σ zones (block defaults this to true)
+      spcZones: (spec as { style?: { spc_zones?: boolean } }).style?.spc_zones === true,
     });
   }, [spec]);
   return (

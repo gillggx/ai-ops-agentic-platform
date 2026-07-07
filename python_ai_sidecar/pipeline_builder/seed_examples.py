@@ -458,6 +458,23 @@ def examples_by_name() -> dict[str, list[dict[str, Any]]]:
         # ── PR-G — 6 chart blocks (Stage 2 part 1/3) ─────────────────
         "block_line_chart": [
             {
+                "name": "標準 SPC 管制圖（σ 區帶 + 違規提示 + 指定欄位 tooltip）",
+                "summary": "「畫標準 SPC 管制圖，提示顯示 lotID」→ 區帶/違規說明/軸標籤全套",
+                "params": {
+                    "x": "eventTime",
+                    "y": "spc_xbar_chart_value",
+                    "ucl_column": "spc_xbar_chart_ucl",
+                    "lcl_column": "spc_xbar_chart_lcl",
+                    "center_column": "spc_xbar_chart_center",
+                    "highlight_field": "spc_xbar_chart_is_ooc",
+                    "style": {"spc_zones": True, "y_label": "xbar"},
+                    "tooltip_fields": ["lotID"],
+                    "weco_annotate": True,
+                    "title": "EQP-01 STEP_001 X̄ 管制圖",
+                },
+                "upstream_hint": "block_process_history(nested=false) → 此處；「簡潔版/不要區帶」→ style.spc_zones=False",
+            },
+            {
                 "name": "SPC X̄ trend with UCL/LCL",
                 "summary": "Time-series xbar chart with control limits + OOC red ring overlay",
                 "params": {

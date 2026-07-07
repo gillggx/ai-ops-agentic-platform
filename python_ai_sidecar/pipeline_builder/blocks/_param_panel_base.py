@@ -388,6 +388,19 @@ class _ParamPanelBase(BlockExecutor):
             "n_series": int(out[series_field].nunique()) if series_field and series_field in out.columns else 1,
             "color_by": color_by or None,
         }
+
+        # 2026-07-07 chart-style wave 1: panel passes style / tooltip_fields
+        # through to its rendered chart (the spec IS the sub-chart here) —
+        # SPC panels with bound rules default to zones on, same as line_chart.
+        from python_ai_sidecar.pipeline_builder.blocks._chart_style import (
+            apply_chart_style,
+        )
+        apply_chart_style(
+            spec, params, out,
+            default_style={"spc_zones": True} if rules else None,
+        )
+        if params.get("weco_annotate") is True and rules:
+            spec["weco_annotate"] = True
         return spec
 
     def _empty_chart(self, title: str, message: str) -> dict[str, Any]:
