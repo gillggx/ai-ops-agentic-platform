@@ -1,0 +1,143 @@
+<title>Anthropic 模型通路與設定指南 — 直連 / OpenRouter / Bedrock</title>
+<style>
+  :root{
+    --ink:#1a1d26; --muted:#5b6270; --faint:#959ca8;
+    --bg:#f7f7f9; --card:#ffffff; --bd:#e4e6ea;
+    --accent:#31459c; --accent-soft:#eceff9;
+    --warn:#9a5b00; --warn-soft:#fdf3e3;
+    --bad:#a03123; --bad-soft:#fbeeec;
+    --ok:#0f6b4f; --ok-soft:#e7f2ed;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Noto Sans TC","PingFang TC",system-ui,sans-serif;
+    line-height:1.65;margin:0;padding:0 20px 80px}
+  main{max-width:1060px;margin:0 auto}
+  header{padding:44px 0 12px;border-bottom:2px solid var(--ink);margin-bottom:8px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  h1{font-size:29px;line-height:1.25;margin:8px 0 6px;text-wrap:balance}
+  .sub{color:var(--muted);font-size:14px;max-width:66ch}
+  h2{font-size:19px;margin:44px 0 4px;padding-top:20px;border-top:1px solid var(--bd)}
+  h2 .no{font-family:var(--mono);color:var(--accent);font-size:14px;margin-right:8px}
+  h3{font-size:15px;margin:22px 0 6px}
+  .lede{color:var(--muted);font-size:13.5px;margin:0 0 14px;max-width:72ch}
+  table{border-collapse:collapse;width:100%;font-size:13px;background:var(--card);
+    border:1px solid var(--bd);border-radius:10px;overflow:hidden}
+  .tblwrap{overflow-x:auto;border-radius:10px;margin:10px 0}
+  th{background:#edeef2;text-align:left;padding:8px 12px;font-size:12px;color:var(--muted);
+    font-weight:700;white-space:nowrap}
+  td{padding:8px 12px;border-top:1px solid var(--bd);vertical-align:top;font-variant-numeric:tabular-nums}
+  td.c{font-family:var(--mono);font-size:12px;white-space:nowrap}
+  .pill{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:700;white-space:nowrap}
+  .g{background:var(--ok-soft);color:var(--ok)} .y{background:var(--warn-soft);color:var(--warn)}
+  .r{background:var(--bad-soft);color:var(--bad)}
+  code{font-family:var(--mono);font-size:12px;background:#eef0f4;border-radius:4px;padding:1px 6px}
+  pre{background:#141824;color:#dde3ee;border-radius:10px;padding:14px 16px;font-family:var(--mono);
+    font-size:12px;line-height:1.6;overflow-x:auto}
+  pre .cm{color:#7d8799}
+  .note{background:var(--warn-soft);border:1px solid #efd9b0;border-radius:10px;padding:12px 16px;font-size:13px;margin:14px 0}
+  .good{background:var(--ok-soft);border:1px solid #c4dfd3;border-radius:10px;padding:12px 16px;font-size:13px;margin:14px 0}
+  .bad{background:var(--bad-soft);border:1px solid #ecc9c3;border-radius:10px;padding:12px 16px;font-size:13px;margin:14px 0}
+  b.hl{color:var(--accent)}
+  .foot{margin-top:56px;padding-top:14px;border-top:1px solid var(--bd);color:var(--faint);font-size:12px}
+  .foot a{color:var(--accent)}
+</style>
+<main>
+<header>
+  <div class="eyebrow">AIOps Platform · LLM Channel &amp; Config Guide</div>
+  <h1>打 Anthropic 模型：直連 vs OpenRouter vs AWS Bedrock</h1>
+  <div class="sub">回答三個問題：通路之間差在哪、thinking 與 prompt cache 各通路怎麼開、
+  以及在我們平台上有哪些現成開關與地雷。含本平台 7 月實測數據佐證。</div>
+</header>
+
+<h2><span class="no">01</span>三條通路一頁對比</h2>
+<div class="tblwrap"><table>
+<tr><th></th><th>Anthropic 直連（現況）</th><th>OpenRouter</th><th>AWS Bedrock</th></tr>
+<tr><td><b>本質</b></td><td>官方 API（native messages wire）</td><td>聚合路由，多走 OpenAI 相容 wire</td><td>AWS 託管的 Anthropic 模型（Converse / native API）</td></tr>
+<tr><td><b>Prompt cache</b></td><td><span class="pill g">完整支援</span><br>我們實測 98–99.7% 命中</td>
+  <td><span class="pill r">高風險</span><br>官方文件說支援，但 <b>OpenAI-wire 路徑會靜默失效</b>（system 進 messages 陣列，Anthropic 只認 native wire 的 cache_control）— 我們 7/1 實測 cache 0%，社群多起相同 issue（VSCode/Zed/hermes）</td>
+  <td><span class="pill g">支援</span><br>cachePoint 機制（Converse API），逐區域/模型確認</td></tr>
+<tr><td><b>Thinking 控制</b></td><td><span class="pill g">第一手</span><br>Claude 5：adaptive+effort；Claude 4：budget</td>
+  <td><span class="pill y">間接</span><br>用 OR 統一的 reasoning 參數轉譯，新機制上線有時差</td>
+  <td><span class="pill g">支援</span><br>與官方同步（adaptive thinking 文件已上線）</td></tr>
+<tr><td><b>延遲</b></td><td>最低（一跳）</td><td>+1 跳路由</td><td>看區域（東京/首爾區域近；美東遠）</td></tr>
+<tr><td><b>新模型上架</b></td><td>Day 0</td><td>快（通常 day 0-1）</td><td>快（Sonnet 5 已上，day 0 blog）</td></tr>
+<tr><td><b>計費/認證</b></td><td>Anthropic key，模型牌價</td><td>一把 key 打多模型，~5% 加成</td><td>AWS 帳單、IAM 認證、可企業採購/承諾用量</td></tr>
+<tr><td><b>合規/私網</b></td><td>公網 API</td><td>公網 + 第三方經手</td><td><b>VPC/PrivateLink、資料留在 AWS</b> — 半導體廠務環境的關鍵優勢</td></tr>
+<tr><td><b>適用時機</b></td><td>現在（開發/驗證期最優）</td><td>打非 Anthropic 模型（GLM 等）才用</td><td>正式進廠、要走企業合規/私網時</td></tr>
+</table></div>
+<div class="bad"><b>直接回答「OR 打 Anthropic 跟 AWS 有差嗎」：有，而且大。</b>
+OR 的 OpenAI 相容路徑會讓 Anthropic 的 prompt cache 靜默失效 — 帳面看起來能跑，成本卻是 5 倍
+（我們 7/1 bake-off 就是這樣把 Sonnet 誤判成「太貴」）。Bedrock 是官方託管，cache 與 thinking 跟直連同源，
+差別主要在認證計費（AWS/IAM）、區域延遲與合規能力，不在功能閹割。</div>
+
+<h2><span class="no">02</span>Thinking 怎麼開 — 兩代 API 不一樣</h2>
+<p class="lede">這是本週實驗踩過的雷：Claude 5 家族與 Claude 4 家族的 thinking API 完全不同，用錯直接 400。</p>
+<div class="tblwrap"><table>
+<tr><th></th><th>Claude 5 家族（sonnet-5 / fable-5）</th><th>Claude 4 家族（haiku-4.5 / opus-4.8）</th></tr>
+<tr><td><b>機制</b></td><td>adaptive thinking，<b>常開、關不掉</b>；用 effort 控深度</td><td>extended thinking，預設關；用 token 預算開</td></tr>
+<tr><td><b>參數</b></td><td class="c">thinking:{type:"adaptive"}<br>output_config:{effort:"low|medium|high|xhigh"}</td>
+  <td class="c">thinking:{type:"enabled",budget_tokens:N}</td></tr>
+<tr><td><b>限制</b></td><td>不支援 temperature / top_p / 固定 budget / assistant prefill</td><td>開 thinking 時 temperature 必須 1；max_tokens 必須 &gt; budget</td></tr>
+<tr><td><b>tool-use 迴圈</b></td><td colspan="2">回放 assistant 內容時 thinking block 必須<b>原封含 signature</b> 傳回，否則 400（我們的 client 已處理）</td></tr>
+</table></div>
+<div class="note"><b>修正一個先前的說法：</b>Sonnet 5 的 thinking 其實常開 — 7/6「快答版」跑的是<b>預設 effort 檔</b>，
+7/7 顯式設 <code>effort=high</code> 才拿到 17/17。所以正確結論是「<b>effort 檔位決定成敗</b>」而非「開/關 thinking」。
+另外還有 <code>xhigh</code> 檔沒測過，是後續可做的實驗。</div>
+
+<h2><span class="no">03</span>Prompt cache 怎麼開 — 要點與地雷</h2>
+<div class="tblwrap"><table>
+<tr><th>要點</th><th>內容</th></tr>
+<tr><td>斷點機制</td><td>在 system / tools / messages 的 content block 加 <code>cache_control:{type:"ephemeral"}</code>，最多 4 個顯式斷點</td></tr>
+<tr><td>最小可快取前綴</td><td>約 1024–4096 tokens（依模型）— 太短的 prompt 不會進 cache</td></tr>
+<tr><td>TTL 與價格</td><td>5 分鐘（寫 1.25×、讀 0.1×）或 1 小時（寫 2×）— <b>agent 迴圈這種連續呼叫是 cache 的最佳場景</b></td></tr>
+<tr><td>驗證方式</td><td>看回應 usage 的 <code>cache_read_input_tokens</code> 是否 &gt; 0，<b>不要假設有開就有效</b>（OR 的教訓）</td></tr>
+<tr><td>OpenRouter 特有</td><td>官方建議 top-level cache_control 自動模式；但 OpenAI-wire 相容層是已知雷區，用前先量測</td></tr>
+<tr><td>Bedrock 特有</td><td>Converse API 用 cachePoint block；逐 region × model 查支援矩陣</td></tr>
+</table></div>
+<div class="good"><b>我們的實測基準：</b>直連 + agent 迴圈場景，Haiku 快答 cache 99.7%（fresh input 只 14.6k tokens、cache read 5.24M），
+17 案全量 $1.02。同場景走 OR 時 cache 0%，Sonnet 成本假性膨脹 ~5 倍。</div>
+
+<h2><span class="no">04</span>本平台現成開關（.env，已上線）</h2>
+<pre><span class="cm"># python_ai_sidecar/.env — 單一切換點</span>
+LLM_PROVIDER=anthropic            <span class="cm"># anthropic 直連 | ollama(=OpenAI相容, 打 OR/GLM)</span>
+LLM_MODEL=claude-haiku-4-5-20251001
+
+<span class="cm"># Claude 5 家族用（sonnet-5）：adaptive + effort</span>
+ANTHROPIC_THINKING_EFFORT=high    <span class="cm"># low|medium|high（xhigh 未接，可加）；空 = 模型預設檔</span>
+
+<span class="cm"># Claude 4 家族用（haiku-4.5 / opus-4.8）：budget 式</span>
+ANTHROPIC_THINKING_BUDGET=6000    <span class="cm"># 0 = 關；&gt;0 自動把 max_tokens 抬過 budget</span>
+
+<span class="cm"># 只在完全沒開 thinking 時生效（API 規定）</span>
+ANTHROPIC_TEMPERATURE=            <span class="cm"># 注意：sonnet-5 完全不支援 temperature，留空</span></pre>
+<div class="tblwrap"><table>
+<tr><th>提醒</th><th>說明</th></tr>
+<tr><td>兩個 thinking 開關別同時設</td><td>EFFORT 優先；模型家族用錯參數會 400（錯誤訊息會告訴你該用哪個）</td></tr>
+<tr><td>sonnet-5 + TEMPERATURE</td><td>會 400 — 該模型不收 temperature，保持留空</td></tr>
+<tr><td>cache 驗證習慣</td><td>換通路/模型後第一件事：跑一案、查 episode cost_json 的 cache_read 是否 &gt; 0</td></tr>
+<tr><td>成本歸因</td><td>thinking tokens 計入 output — Agent Activity 的 LLM 呼叫數/耗時已可觀測，比對 effort 檔位成本用它</td></tr>
+<tr><td>若要接 Bedrock</td><td>SDK 有 <code>AnthropicBedrock</code> client，llm_client 加一個 provider 分支 + IAM 認證即可，工作量約半天；建議等「進廠/合規」需求明確再做</td></tr>
+</table></div>
+
+<h2><span class="no">05</span>建議</h2>
+<div class="tblwrap"><table>
+<tr><th>情境</th><th>建議通路</th><th>理由</th></tr>
+<tr><td>現在（開發/驗證）</td><td><b>Anthropic 直連</b></td><td>cache 實測最好、thinking 第一手、Day 0 新模型；已驗證 $1–2.3/全量 17 案</td></tr>
+<tr><td>打非 Anthropic 模型（GLM 備援）</td><td>OpenRouter</td><td>它的價值在聚合多模型，不在打 Anthropic</td></tr>
+<tr><td>進廠 / 合規 / 私網</td><td>AWS Bedrock</td><td>VPC/PrivateLink + AWS 帳務整合；功能與官方同步，遷移成本低（半天接一個 provider 分支）</td></tr>
+<tr><td>永遠別做</td><td>OR 打 Anthropic 模型當 default</td><td>cache 靜默失效 = 成本 5 倍，且不易察覺（HTTP 全 200）</td></tr>
+</table></div>
+
+<div class="foot">Sources：
+<a href="https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html">AWS Bedrock — Adaptive thinking</a> ·
+<a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html">AWS Bedrock — Claude Sonnet 5 model card</a> ·
+<a href="https://aws.amazon.com/blogs/machine-learning/introducing-claude-sonnet-5-on-aws-anthropics-most-capable-sonnet-model/">Introducing Claude Sonnet 5 on AWS</a> ·
+<a href="https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5">Claude Docs — What's new in Sonnet 5</a> ·
+<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Claude Docs — Prompt caching</a> ·
+<a href="https://openrouter.ai/docs/guides/best-practices/prompt-caching">OpenRouter — Prompt caching</a> ·
+<a href="https://github.com/microsoft/vscode/issues/312939">VSCode issue #312939（OR+Claude cache 失效）</a> ·
+<a href="https://github.com/zed-industries/zed/issues/52576">Zed issue #52576</a>
+<br>內部佐證：SLASH-17 實測（07-01 OR cache 0% / 07-06~07 直連 98–99.7%）· 2026-07-07</div>
+</main>
