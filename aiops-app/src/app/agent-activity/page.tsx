@@ -517,6 +517,12 @@ function describeStep(s: StepRow): [string, string] {
     case "plan_confirmed": return ["計畫已確認", ""];
     case "plan_user_edited": return ["使用者修改了計畫", ""];
     case "replan": return ["重新規劃", ""];
+    case "plan_patch": {
+      const ops = Array.isArray(p["ops"]) ? (p["ops"] as Array<Record<string, unknown>>) : [];
+      const kept = Array.isArray(p["preserved"]) ? (p["preserved"] as unknown[]).join(",") : "";
+      const opsTxt = ops.map((o) => `${o["op"] === "remove_phase" ? "移除" : "改寫"} ${o["id"]}`).join("、");
+      return ["計畫修訂", `${opsTxt}${kept ? `（保留 ${kept}）` : ""}`];
+    }
     case "source_cache_stats": {
       const h = Number(p["hits"] ?? 0), f = Number(p["fetches"] ?? 0);
       return ["資料重用統計", `實際取資料 ${f} 次、重用 ${h} 次`];

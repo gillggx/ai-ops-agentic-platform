@@ -76,6 +76,9 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
 from python_ai_sidecar.agent_builder.graph_build.nodes.phase_revise import (
     phase_revise_node,
 )
+from python_ai_sidecar.agent_builder.graph_build.nodes.plan_patch import (
+    plan_patch_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.halt_handover import (
     halt_handover_node,
 )
@@ -415,10 +418,28 @@ def _route_after_step_pause(state: BuildGraphState) -> str:
 
 def _route_after_phase_revise(state: BuildGraphState) -> str:
     """After phase_revise_node:
+      - status=plan_patch_pending -> plan_patch (波2 M2 — Planner 計畫修訂)
       - status=handover_pending -> halt_handover
       - status=phase_in_progress -> back to agentic_phase_loop
     """
     status = state.get("status")
+    if status == "plan_patch_pending":
+        return "plan_patch"
+    if status == "handover_pending":
+        return "halt_handover"
+    return "agentic_phase_loop"
+
+
+def _route_after_plan_patch(state: BuildGraphState) -> str:
+    """After plan_patch_node:
+      - patch applied (phase_in_progress) -> agentic_phase_loop from the
+        patched phase; completed prefix untouched, source cache keys intact
+      - patch rejected with budget left (plan_patch_pending) -> one more try
+      - budget spent / unfixable -> halt_handover (pre-M2 behavior)
+    """
+    status = state.get("status")
+    if status == "plan_patch_pending":
+        return "plan_patch"
     if status == "handover_pending":
         return "halt_handover"
     return "agentic_phase_loop"
@@ -739,6 +760,15 @@ def build_graph():
     g.add_node("phase_verifier", _verifier_observed)
     g.add_node("step_pause_gate", step_pause_gate_node)
     g.add_node("phase_revise", _repair_delegate)
+    # 波2 M2: Planner-attributed plan patch (計畫修訂) — escalation target of
+    # a revise-exhausted phase; falls back to halt_handover.
+    async def _plan_patch_delegate(state: BuildGraphState) -> dict[str, Any]:
+        tok = set_current_agent("planner")
+        try:
+            return _drain_console(await plan_patch_node(state))
+        finally:
+            reset_current_agent(tok)
+    g.add_node("plan_patch", _plan_patch_delegate)
     g.add_node("halt_handover", halt_handover_node)
     # v30.17j: deficit pause node — interrupt() + wait for user action
     from python_ai_sidecar.agent_builder.graph_build.nodes.judge_clarify_pause import (
@@ -837,7 +867,15 @@ def build_graph():
     g.add_conditional_edges(
         "phase_revise",
         _route_after_phase_revise,
-        {"agentic_phase_loop": "agentic_phase_loop", "halt_handover": "halt_handover"},
+        {"agentic_phase_loop": "agentic_phase_loop", "halt_handover": "halt_handover",
+         "plan_patch": "plan_patch"},
+    )
+    # 波2 M2: plan_patch -> loop (applied) / self-retry (rejected) / handover
+    g.add_conditional_edges(
+        "plan_patch",
+        _route_after_plan_patch,
+        {"agentic_phase_loop": "agentic_phase_loop", "plan_patch": "plan_patch",
+         "halt_handover": "halt_handover"},
     )
     # v30: handover -> finalize (build_partial / failed / take_over) or
     # back to ReAct loop (edit_goal chosen + new goal supplied)

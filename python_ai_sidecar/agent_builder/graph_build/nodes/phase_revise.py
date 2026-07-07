@@ -94,21 +94,23 @@ async def phase_revise_node(state: BuildGraphState) -> dict[str, Any]:
             "status": "failed",
             "fail_reason": "revise_budget_exhausted",
         }
+        # 波2 M2 (2026-07-07): revise exhausted no longer jumps straight to
+        # handover — first give the Planner ONE structured shot at a plan
+        # patch (計畫修訂). The diagnosis envelope carries why/tried so the
+        # Planner never re-diagnoses; plan_patch_node falls back to this
+        # exact handover shape when the patch budget is spent or rejected.
         return {
             "v30_phase_outcomes": outcomes,
-            "status": "handover_pending",
-            "v30_handover": {
+            "status": "plan_patch_pending",
+            "v30_patch_diagnosis": {
                 "failed_phase_id": pid,
                 "reason": prev_outcome.get("fail_reason") or "revise budget exhausted",
                 "tried_summary": _summarize_actions(state, pid),
                 "missing_capabilities": prev_outcome.get("missing_capabilities") or [],
-                "options_offered": ["edit_goal", "take_over", "backlog", "abort"],
-                "user_choice": None,
             },
-            "sse_events": [_event("handover_pending", {
+            "sse_events": [_event("plan_patch_started", {
                 "failed_phase_id": pid,
                 "reason": prev_outcome.get("fail_reason") or "revise budget exhausted",
-                "options": ["edit_goal", "take_over", "backlog", "abort"],
             })],
         }
 

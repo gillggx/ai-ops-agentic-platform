@@ -304,6 +304,11 @@ class BuildGraphState(TypedDict, total=False):
     # 2026-06-23: consecutive non-output-leaf rejections by phase_verifier.
     # Past LEAF_PRUNE_AFTER the verifier prunes the dead leaf instead of looping.
     v30_leaf_reject_count: int
+    # 波2 M2 (2026-07-07) — Planner plan-patch escalation. phase_revise budget
+    # exhaustion routes to plan_patch_node (計畫修訂) before handover; the
+    # diagnosis envelope carries why/tried so Planner never re-diagnoses.
+    v30_plan_patch_count: int
+    v30_patch_diagnosis: Optional[dict]
     # v30.22 (2026-05-19) — agent-driven verify trigger. When the loop
     # round emits run_verifier (or phase_complete legacy, or hits round
     # budget), this is set True and router sends graph to phase_verifier.
