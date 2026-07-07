@@ -1,5 +1,6 @@
 package com.aiops.api.api.pipeline;
 
+import com.aiops.api.common.JsonUtils;
 import com.aiops.api.domain.pipeline.BlockEntity;
 import com.aiops.api.domain.pipeline.BlockRepository;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
@@ -248,4 +249,3 @@ public class PipelineBuilderService {
 		}).toList();
 	}
 }
-import com.aiops.api.common.JsonUtils;
