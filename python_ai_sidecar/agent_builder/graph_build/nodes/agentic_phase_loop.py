@@ -786,9 +786,9 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             _tp: dict[str, Any] = {"tool": tool_name}
             _ta = tool_args or {}
             if tool_name == "inspect_block_doc":
-                _tp["block"] = str(_ta.get("block_name") or _ta.get("block") or "")
+                _tp["block"] = str(_ta.get("block_id") or _ta.get("block_name") or _ta.get("block") or "")
             elif tool_name in ("add_node", "commit_pick"):
-                _tp["block"] = str(_ta.get("block_name") or _ta.get("block") or "")
+                _tp["block"] = str(_ta.get("block_id") or _ta.get("block_name") or _ta.get("block") or "")
                 _nid = (action_result or {}).get("node_id")
                 if _nid:
                     _tp["node"] = str(_nid)
