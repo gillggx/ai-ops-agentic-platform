@@ -286,12 +286,29 @@ function MetaBar({ episodeKey }: { episodeKey: string }) {
   const phases = d.phase_count != null ? String(d.phase_count) : "—";
   const trigger = deriveTrigger(d);
   const { calls, avgMs } = llmStats(d.cost);
+  // Topic = the user's original prompt. Resume rounds carry a technical
+  // "[resume:…]" instruction — strip it so the topic reads like what the
+  // user actually typed (the original instruction is first-write-wins on
+  // the episode, so this is mostly a legacy-row safety net).
+  const rawTopic = (d.instruction ?? "").trim();
+  const topic = rawTopic.replace(/^\[resume:[^\]]*\]\s*/, "").trim();
 
   return (
-    <div style={{
-      display: "flex", flexWrap: "wrap", gap: 8, padding: "12px 20px",
-      borderBottom: "1px solid #e5e7eb", background: "#fafafa",
-    }}>
+    <div style={{ borderBottom: "1px solid #e5e7eb", background: "#fafafa" }}>
+      <div style={{ padding: "14px 20px 0" }}>
+        <div style={{ fontSize: 10.5, color: "#9ca3af", marginBottom: 3 }}>
+          使用者的原始指令
+        </div>
+        <div style={{
+          fontSize: 15, fontWeight: 700, color: "#111827", lineHeight: 1.5,
+          whiteSpace: "pre-wrap", wordBreak: "break-word",
+        }}>
+          {topic || "（無指令內容 — 例如由排程觸發）"}
+        </div>
+      </div>
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 8, padding: "10px 20px 12px",
+      }}>
       <MetaCell label="誰觸發" value={who} />
       <MetaCell label="何時" value={when} />
       <MetaCell label="花費多久" value={duration} />
@@ -306,6 +323,7 @@ function MetaBar({ episodeKey }: { episodeKey: string }) {
       <MetaCell label="LLM 呼叫" value={calls > 0 ? `${calls} 次` : "—"} />
       <MetaCell label="平均每次耗時"
         value={avgMs != null ? `${(avgMs / 1000).toFixed(1)}s` : "—"} />
+      </div>
     </div>
   );
 }
