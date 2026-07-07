@@ -154,7 +154,10 @@ async def adapt_events(
                                 "iteration": output.get("current_iteration", 0),
                             }
 
-            elif ev_name == "tool_execute":
+            elif ev_name in ("tool_execute", "coordinator_triage"):
+                # coordinator_triage (G1 快速路, 2026-07-07) emits its updated
+                # pb_pipeline card through the same tool_done/render_card
+                # contract the frontend already speaks.
                 output = ev_data.get("output") or {}
                 # Emit tool_done for each render_card in this node's output.
                 # NOTE: on_chain_end output contains only THIS invocation's new cards,
