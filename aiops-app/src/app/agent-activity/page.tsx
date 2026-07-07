@@ -462,6 +462,65 @@ function RoundCard({ r }: { r: RoundRow }) {
 }
 
 // ── Tab B: 時間軸概覽 (swim-lane over step events) ───────────────────────
+
+/** 事件 → 人話。回傳 [動作標籤, 細節說明]。未知型別原樣顯示（誠實）。 */
+function describeStep(s: StepRow): [string, string] {
+  const p = (s.payload ?? {}) as Record<string, unknown>;
+  const str = (k: string) => String(p[k] ?? "").trim();
+  switch (s.event_type ?? "") {
+    case "phase_started": return ["開始階段", ""];
+    case "phase_done": {
+      const r = p["rounds_used"];
+      return ["階段完成", r != null ? `用了 ${r} 輪` : ""];
+    }
+    case "block_picked": return ["選用 block", str("block")];
+    case "tool_action": {
+      const t = str("tool");
+      const err = str("error");
+      const suffix = err ? `（失敗：${err.slice(0, 60)}）` : "";
+      switch (t) {
+        case "inspect_block_doc": return ["查閱文件", `${str("block")}${suffix}`];
+        case "inspect_node_output": return ["檢視節點輸出", `${str("node")}${suffix}`];
+        case "add_node": return ["加入節點", `${str("block")}${p["node"] ? ` → ${str("node")}` : ""}${suffix}`];
+        case "commit_pick": return ["決定用 block", `${str("block")}${suffix}`];
+        case "set_param": return ["調整參數", `${str("node")}.${str("param")}${suffix}`];
+        case "connect": return ["連接節點", `${str("from")} → ${str("to")}${suffix}`];
+        case "remove_node": return ["移除節點", `${str("node")}${suffix}`];
+        case "abort_node": return ["放棄此節點", `${str("node")}${suffix}`];
+        case "run_verifier": return ["請求驗證", suffix];
+        case "phase_complete": return ["宣告階段完成", suffix];
+        case "abort_phase": return ["放棄此階段", suffix];
+        default: return [t || "動作", suffix];
+      }
+    }
+    case "llm_usage": {
+      const tok = Number(p["output_tokens"] ?? 0) + Number(p["input_tokens"] ?? 0);
+      return ["LLM 思考", tok ? `${tok} tokens` : ""];
+    }
+    case "memory_recall": {
+      const n = Array.isArray(p["recalled"]) ? (p["recalled"] as unknown[]).length : 0;
+      return ["引用記憶", n ? `${n} 筆` : "無命中"];
+    }
+    case "memory_write": return ["寫入記憶", str("title")];
+    case "verifier_reject": {
+      const why = str("result") || str("error_message");
+      return ["驗證未通過", `${str("block_id")}${why ? ` — ${why.slice(0, 70)}` : ""}`];
+    }
+    case "param_reject_fix": return ["參數修正後通過", ""];
+    case "stuck_escalated": return ["卡住，升級處理", ""];
+    case "repair_triggered": return ["觸發修復 agent", ""];
+    case "repair_outcome": {
+      const r = str("result");
+      return ["修復結果", r === "retry" ? "重試成功路徑" : r === "handover" ? "交回使用者決定" : r];
+    }
+    case "plan_proposed": return ["提出建置計畫", ""];
+    case "plan_confirmed": return ["計畫已確認", ""];
+    case "plan_user_edited": return ["使用者修改了計畫", ""];
+    case "replan": return ["重新規劃", ""];
+    default: return [s.event_type ?? "—", ""];
+  }
+}
+
 function TimelineTab({ episodeKey }: { episodeKey: string }) {
   const [d, setD] = useState<Detail | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -479,19 +538,31 @@ function TimelineTab({ episodeKey }: { episodeKey: string }) {
         {d.steps.map((s, i) => {
           const color = AGENT_COLOR[s.agent ?? ""] ?? "#374151";
           const isRecall = s.event_type === "memory_recall";
+          const isReject = s.event_type === "verifier_reject";
+          const isMilestone = s.event_type === "phase_done" || s.event_type === "phase_started";
+          const [label, detail] = describeStep(s);
           return (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 8px", borderRadius: 6, background: isRecall ? "#faf5ff" : "transparent" }}>
+            <div key={i} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "5px 8px",
+              borderRadius: 6,
+              background: isRecall ? "#faf5ff" : isReject ? "#fff7f5" : "transparent",
+            }}>
               <span style={{ width: 64, fontSize: 11, color: "#9ca3af", flexShrink: 0 }}>
                 {s.ts ? new Date(s.ts).toLocaleTimeString() : "—"}
               </span>
               <span style={{ width: 70, fontWeight: 600, color, fontSize: 12, flexShrink: 0 }}>{s.agent ?? "—"}</span>
-              <span style={{ fontFamily: "monospace", fontSize: 12, color: isRecall ? "#7c3aed" : "#374151" }}>
-                {s.event_type}
+              {s.phase_id && <span style={{ fontSize: 11, color: "#9ca3af", flexShrink: 0 }}>[{s.phase_id}]</span>}
+              <span style={{
+                fontSize: 12.5, flexShrink: 0,
+                fontWeight: isMilestone ? 700 : 500,
+                color: isReject ? "#b42318" : isRecall ? "#7c3aed" : "#1f2937",
+              }}>
+                {label}
               </span>
-              {s.phase_id && <span style={{ fontSize: 11, color: "#9ca3af" }}>[{s.phase_id}]</span>}
-              {isRecall && Array.isArray(s.payload?.recalled) && (
-                <span style={{ fontSize: 11, color: "#7c3aed" }}>
-                  ◎ {(s.payload!.recalled as unknown[]).length} memory
+              {detail && (
+                <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "ui-monospace,monospace",
+                               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {detail}
                 </span>
               )}
             </div>

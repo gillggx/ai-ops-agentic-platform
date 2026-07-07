@@ -775,6 +775,37 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         "result_digest": result_digest,
     }]
 
+    # 2026-07-07 (Agent Activity timeline): record concrete agent actions so
+    # the episode timeline reads「查閱 block_line_chart 文件」/「加入節點」
+    # instead of only opaque llm_usage rows. One event per acted round —
+    # comparable volume to the existing llm_usage stream.
+    try:
+        from python_ai_sidecar.observability import get_current_recorder as _gcr
+        _rec = _gcr()
+        if _rec is not None and tool_name:
+            _tp: dict[str, Any] = {"tool": tool_name}
+            _ta = tool_args or {}
+            if tool_name == "inspect_block_doc":
+                _tp["block"] = str(_ta.get("block_name") or _ta.get("block") or "")
+            elif tool_name in ("add_node", "commit_pick"):
+                _tp["block"] = str(_ta.get("block_name") or _ta.get("block") or "")
+                _nid = (action_result or {}).get("node_id")
+                if _nid:
+                    _tp["node"] = str(_nid)
+            elif tool_name == "set_param":
+                _tp["node"] = str(_ta.get("node_id") or "")
+                _tp["param"] = str(_ta.get("param") or _ta.get("key") or "")
+            elif tool_name == "connect":
+                _tp["from"] = str(_ta.get("from_node") or "")
+                _tp["to"] = str(_ta.get("to_node") or "")
+            elif tool_name in ("remove_node", "inspect_node_output", "abort_node"):
+                _tp["node"] = str(_ta.get("node_id") or "")
+            if isinstance(action_result, dict) and action_result.get("error"):
+                _tp["error"] = str(action_result.get("error"))[:120]
+            _rec.record("tool_action", agent="builder", phase_id=pid, payload=_tp)
+    except Exception:  # noqa: BLE001 — observability never breaks the loop
+        pass
+
     # v30 C-A2: append assistant(tool_use) + user(tool_result + fresh obs diff)
     # to preserve conversation continuity. MUST run before state_update
     # since state_update references new_msgs.
