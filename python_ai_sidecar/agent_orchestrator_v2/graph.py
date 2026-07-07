@@ -32,6 +32,9 @@ from langgraph.graph.message import add_messages
 
 from python_ai_sidecar.agent_orchestrator_v2.state import MAX_ITERATIONS
 from python_ai_sidecar.agent_orchestrator_v2.nodes.load_context import load_context_node
+from python_ai_sidecar.agent_orchestrator_v2.nodes.coordinator_triage import (
+    coordinator_triage_node,
+)
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier import intent_classifier_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier_builder import intent_classifier_builder_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_completeness import intent_completeness_node
@@ -104,6 +107,8 @@ class GraphState(TypedDict, total=False):
     chart_already_rendered: Annotated[bool, _replace]
     last_spc_result: Annotated[Optional[tuple], _replace]
     force_synthesis: Annotated[bool, _replace]
+    # G1 (2026-07-07): Coordinator entry-triage decision (route/reason/fast_path)
+    coordinator_route: Annotated[Optional[Dict[str, Any]], _replace]
     # Set by pre_clarify_check when it short-circuits the LLM; synthesis
     # reads synthesis_text_override to render a canned message.
     clarify_card_emitted: Annotated[bool, _replace]
@@ -236,7 +241,22 @@ def build_graph() -> StateGraph:
     #     │     └─ complete        → llm_call
     #     └─ clarified / knowledge → llm_call
     graph.set_entry_point("load_context")
-    graph.add_edge("load_context", "intent_classifier_builder")
+    # G1 (2026-07-07): entry triage — with an active canvas, presentation-only
+    # asks take the fast path (patch + re-exec + card) and end at synthesis;
+    # everything else passes through to the existing classifiers unchanged.
+    graph.add_node("coordinator_triage", coordinator_triage_node)
+    graph.add_edge("load_context", "coordinator_triage")
+
+    def _route_after_triage(state: Dict[str, Any]) -> Literal["synthesis", "intent_classifier_builder"]:
+        if state.get("force_synthesis") and (state.get("coordinator_route") or {}).get("fast_path"):
+            return "synthesis"
+        return "intent_classifier_builder"
+
+    graph.add_conditional_edges(
+        "coordinator_triage",
+        _route_after_triage,
+        {"synthesis": "synthesis", "intent_classifier_builder": "intent_classifier_builder"},
+    )
 
     def _route_after_builder(state: Dict[str, Any]) -> Literal["intent_classifier", "advisor_dispatch", "pre_clarify_check", "llm_call", "synthesis"]:
         """If builder classifier set a builder_* intent, route directly.

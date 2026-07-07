@@ -147,6 +147,7 @@ async def execute_native(
     inputs: dict[str, Any] | None = None,
     *,
     run_id: int | None = None,
+    source_cache: Any = None,
 ) -> dict[str, Any]:
     """Execute via the ported executor. Returns the executor's full result
     dict (status / node_results / result_summary / duration_ms / ...).
@@ -164,7 +165,7 @@ async def execute_native(
     # pipeline declared resolves. Cheap & safe (extras are ignored).
     expanded_inputs = _expand_trigger_aliases(inputs or {})
     executor = get_real_executor()
-    result = await executor.execute(pipeline, inputs=expanded_inputs, run_id=run_id)
+    result = await executor.execute(pipeline, inputs=expanded_inputs, run_id=run_id, source_cache=source_cache)
     return result
 
 
