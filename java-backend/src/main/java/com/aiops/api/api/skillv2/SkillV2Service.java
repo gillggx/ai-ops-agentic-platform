@@ -90,19 +90,12 @@ public class SkillV2Service {
 	 */
 	@Transactional
 	public SkillFullDto createWithPipeline(Map<String, Object> body, Long callerUserId) {
-		String slug = String.valueOf(body.getOrDefault("slug", "")).trim();
+		String rawSlug = String.valueOf(body.getOrDefault("slug", "")).trim();
 		String name = String.valueOf(body.getOrDefault("name", "")).trim();
 		if (name.isBlank()) throw ApiException.badRequest("name is required");
 		// 真 Skill 化 (2026-07-08): chat 的存為 Skill 不帶 slug — 從 name 衍生
-		// （latent bug: 舊路徑直接 400）。碰撞時加序號。
-		if (slug.isBlank()) {
-			String base = name.toLowerCase().replaceAll("[^a-z0-9\\u4e00-\\u9fff]+", "-")
-					.replaceAll("(^-|-$)", "");
-			if (base.isBlank()) base = "skill";
-			slug = base;
-			int i = 2;
-			while (repo.findBySlug(slug).isPresent()) slug = base + "-" + (i++);
-		}
+		// （latent bug: 舊路徑直接 400）。碰撞時加序號。final 供後續 lambda 引用。
+		final String slug = rawSlug.isBlank() ? deriveSlug(name) : rawSlug;
 		if (repo.findBySlug(slug).isPresent()) {
 			throw ApiException.conflict("slug already exists: " + slug);
 		}
@@ -167,6 +160,17 @@ public class SkillV2Service {
 		}
 		row = repo.save(row);
 		return SkillDto.of(row);
+	}
+
+	/** name → slug（小寫、非字元轉連字號），碰撞加序號。 */
+	private String deriveSlug(String name) {
+		String base = name.toLowerCase().replaceAll("[^a-z0-9\\u4e00-\\u9fff]+", "-")
+				.replaceAll("(^-|-$)", "");
+		if (base.isBlank()) base = "skill";
+		String candidate = base;
+		int i = 2;
+		while (repo.findBySlug(candidate).isPresent()) candidate = base + "-" + (i++);
+		return candidate;
 	}
 
 	// ─── Read ──────────────────────────────────────────────────────────
