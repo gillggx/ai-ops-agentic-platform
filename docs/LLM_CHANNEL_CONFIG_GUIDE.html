@@ -121,7 +121,56 @@ ANTHROPIC_TEMPERATURE=            <span class="cm"># 注意：sonnet-5 完全不
 <tr><td>若要接 Bedrock</td><td>SDK 有 <code>AnthropicBedrock</code> client，llm_client 加一個 provider 分支 + IAM 認證即可，工作量約半天；建議等「進廠/合規」需求明確再做</td></tr>
 </table></div>
 
-<h2><span class="no">05</span>建議</h2>
+
+<h2><span class="no">05</span>具體設定範例 — OpenRouter 與 AWS Bedrock</h2>
+
+<h3>A. OpenRouter（現況已接，打非 Anthropic 模型用）</h3>
+<pre><span class="cm"># python_ai_sidecar/.env — 走 OpenAI 相容路徑（OllamaLLMClient）</span>
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=https://openrouter.ai/api/v1
+OLLAMA_API_KEY=sk-or-v1-...              <span class="cm"># OpenRouter key</span>
+OLLAMA_MODEL=z-ai/glm-5.2                <span class="cm"># 或 anthropic/claude-sonnet-5（不建議，見下）</span>
+OPENROUTER_PROVIDER_ORDER=Fireworks      <span class="cm"># provider pin，速度差可達 8 倍</span></pre>
+<div class="tblwrap"><table>
+<tr><th>要點</th><th>說明</th></tr>
+<tr><td>provider pin</td><td>務必設 <code>provider.order</code> — 我們實測 GLM 在 DeepInfra 299s vs Fireworks 35s</td></tr>
+<tr><td>cache（打 Anthropic 模型時）</td><td>OR 官方做法是 request 頂層加 <code>cache_control</code> 自動模式，或 content block 顯式斷點；<b>但 OpenAI-wire 相容層已知會靜默失效</b>（我們 7/1 實測 0%）。若堅持要走 OR 打 Claude，用 OR 的 anthropic native 端點並逐案驗證 <code>cache_read &gt; 0</code></td></tr>
+<tr><td>thinking（打 Anthropic 模型時）</td><td>用 OR 統一的 <code>reasoning: {"effort": "high"}</code> 參數（OR 轉譯到各家）；新機制（如 Claude 5 adaptive）有轉譯時差</td></tr>
+<tr><td>結論</td><td>OR 的正確用途是「一把 key 打多家模型」（GLM/KIMI/Qwen 等）；<b>Anthropic 模型請直連或走 Bedrock</b></td></tr>
+</table></div>
+
+<h3>B. AWS Bedrock（未接，接法如下 — 平台側約半天工作量）</h3>
+<pre><span class="cm"># 1) AWS 前置（Console 或 IaC）</span>
+<span class="cm">#    - Bedrock console → Model access → 啟用 Anthropic Claude 系列（逐 region）</span>
+<span class="cm">#    - 建 IAM policy：bedrock:InvokeModel + bedrock:InvokeModelWithResponseStream</span>
+<span class="cm">#    - EC2 上建議掛 instance profile（免 key）；本機開發才用 access key</span>
+
+<span class="cm"># 2) python_ai_sidecar/.env（規劃中的開關，接好後生效）</span>
+LLM_PROVIDER=bedrock
+BEDROCK_AWS_REGION=ap-northeast-1        <span class="cm"># 東京；模型可用性逐 region 查 model card</span>
+<span class="cm"># 認證三選一：instance profile（建議，零設定）/ 標準 AWS env vars / ~/.aws/credentials</span>
+<span class="cm"># AWS_ACCESS_KEY_ID=... / AWS_SECRET_ACCESS_KEY=...（僅本機開發）</span>
+LLM_MODEL=global.anthropic.claude-haiku-4-5-20251001-v1:0
+<span class="cm"># 注意：Bedrock 的 model ID 格式不同（region 前綴 + -v1:0 後綴），</span>
+<span class="cm"># 實際 ID 以該 region 的 model card / inference profile 清單為準</span>
+
+<span class="cm"># 3) thinking / cache 環境變數不變 — 同一套 native API</span>
+ANTHROPIC_THINKING_EFFORT=high           <span class="cm"># Claude 5（Bedrock adaptive thinking 文件已上線）</span>
+ANTHROPIC_THINKING_BUDGET=0              <span class="cm"># Claude 4 用 budget 式</span></pre>
+<div class="tblwrap"><table>
+<tr><th>要點</th><th>說明</th></tr>
+<tr><td>平台側改動</td><td><code>llm_client.py</code> 加 provider 分支：SDK 的 <code>AnthropicBedrock(aws_region=...)</code>，其餘 create() 邏輯（cache_control / thinking / signature 回放）<b>原封複用</b> — 這就是走官方 SDK 的好處</td></tr>
+<tr><td>cache</td><td>native payload 的 cache_control 同直連；上線第一件事照舊：驗 <code>cache_read_input_tokens &gt; 0</code></td></tr>
+<tr><td>region 選擇</td><td>先查目標模型在哪些 region 有（新模型常先上 us-east-1）；跨 region 用 global/us/apac inference profile ID</td></tr>
+<tr><td>配額</td><td>Bedrock 有 per-region TPM/RPM 配額（Service Quotas 可申請調升）；agent 迴圈吃 RPM，上線前先估</td></tr>
+<tr><td>成本</td><td>牌價與 Anthropic 直連一致，走 AWS 帳單；企業可談 provisioned throughput</td></tr>
+<tr><td>何時做</td><td>進廠 / 合規 / 私網（PrivateLink）需求明確時 — 現階段直連已是最優，不急著接</td></tr>
+</table></div>
+<div class="note"><b>遷移驗證清單（接好 Bedrock 後照跑）：</b>(1) SMOKE-5 建置案全過；
+(2) cost_json 的 cache_read &gt; 0；(3) thinking 生效（比對 effort 檔位的輸出 token 差）；
+(4) 平均每次 LLM call 延遲與直連比差距 &lt; 20%。四項過才切 default。</div>
+
+<h2><span class="no">06</span>建議</h2>
 <div class="tblwrap"><table>
 <tr><th>情境</th><th>建議通路</th><th>理由</th></tr>
 <tr><td>現在（開發/驗證）</td><td><b>Anthropic 直連</b></td><td>cache 實測最好、thinking 第一手、Day 0 新模型；已驗證 $1–2.3/全量 17 案</td></tr>
