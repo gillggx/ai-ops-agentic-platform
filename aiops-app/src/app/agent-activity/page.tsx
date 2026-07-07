@@ -296,8 +296,13 @@ function MetaBar({ episodeKey }: { episodeKey: string }) {
   return (
     <div style={{ borderBottom: "1px solid #e5e7eb", background: "#fafafa" }}>
       <div style={{ padding: "14px 20px 0" }}>
-        <div style={{ fontSize: 10.5, color: "#9ca3af", marginBottom: 3 }}>
-          使用者的原始指令
+        {/* user first (使用者要求「下 prompt 的 user 顯示在第 1 個」) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <span style={{
+            fontSize: 12, fontWeight: 700, color: "#1e40af", background: "#eff6ff",
+            border: "1px solid #bfdbfe", borderRadius: 999, padding: "1px 10px",
+          }}>{who}</span>
+          <span style={{ fontSize: 10.5, color: "#9ca3af" }}>的原始指令</span>
         </div>
         <div style={{
           fontSize: 15, fontWeight: 700, color: "#111827", lineHeight: 1.5,

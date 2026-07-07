@@ -498,6 +498,9 @@ async def _execute_build_pipeline_live(
             session_id=sid,
             skip_confirm=not _plan_confirm_on,  # v31: pause at plan card (builder-style)
             skill_step_mode=skill_step_mode,
+            # 2026-07-07: was missing — chat-originated builds recorded
+            # episodes with user_id=NULL, so Agent Activity showed 誰觸發=—.
+            user_id=int(chat_user_id) if chat_user_id else None,
         ):
             # v31: intercept goal_plan_confirm_required pause — emit the
             # plan-confirm card (chat session id, same convention as the
