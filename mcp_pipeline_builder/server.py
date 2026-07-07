@@ -580,6 +580,161 @@ async def get_skill_with_pipeline(slug: str) -> dict:
         return await _v2(c, "GET", f"/{slug}/full")
 
 
+# ── 真 Skill 化 + 治理提案 (cowork 開放, 2026-07-08) ─────────────────────────
+
+# 與 sidecar coordinator_triage.apply_presentation_patch 同語意的內聯副本 —
+# MCP venv 只有 mcp+httpx，不能 import sidecar；白名單改動時兩邊要同步。
+_CHART_BLOCKS = {
+    "block_line_chart", "block_bar_chart", "block_xbar_r", "block_imr",
+    "block_spc_panel", "block_apc_panel", "block_box_plot",
+    "block_scatter_chart", "block_histogram_chart", "block_pareto",
+    "block_probability_plot", "block_ewma_cusum", "block_data_view",
+}
+_PATCHABLE = {
+    "style", "tooltip_fields", "weco_annotate", "title", "order",
+    "show_values", "y_label", "x_label", "line_style", "show_markers",
+    "marker_size", "spc_zones", "legend", "series_field", "max_rows",
+}
+
+
+def _apply_presentation_patch(pj: dict, patch: list) -> tuple[dict | None, str]:
+    if not isinstance(patch, list) or not patch:
+        return None, "empty patch"
+    nodes = {str(n.get("id")): n for n in (pj.get("nodes") or [])}
+    out = json.loads(json.dumps(pj))
+    out_nodes = {str(n.get("id")): n for n in (out.get("nodes") or [])}
+    touched = 0
+    for item in patch:
+        if not isinstance(item, dict):
+            return None, "patch item is not an object"
+        nid = str(item.get("node") or "")
+        sets = item.get("set")
+        if nid not in nodes:
+            return None, f"unknown node '{nid}'"
+        if nodes[nid].get("block_id") not in _CHART_BLOCKS:
+            return None, f"node '{nid}' is not a chart block"
+        if not isinstance(sets, dict) or not sets:
+            return None, f"node '{nid}' patch has no set object"
+        illegal = [k for k in sets if k not in _PATCHABLE]
+        if illegal:
+            return None, f"params {illegal} not presentation-patchable"
+        params = dict(out_nodes[nid].get("params") or {})
+        for k, v in sets.items():
+            if k == "style" and isinstance(v, dict) and isinstance(params.get("style"), dict):
+                params["style"] = {**params["style"], **v}
+            else:
+                params[k] = v
+        out_nodes[nid]["params"] = params
+        touched += 1
+    if touched == 0:
+        return None, "patch touched nothing"
+    return out, ""
+
+
+
+@mcp.tool()
+async def parameterize_pipeline(pipeline_json: dict, accept: list[str] | None = None) -> dict:
+    """把 pipeline 寫死的 source 身分參數（tool_id/step/time_range/limit…）升級成
+    可帶參數的 inputs（$name）。不帶 accept → 回候選清單（含建議名稱與預設值）；
+    帶 accept（候選名稱清單）→ 回參數化後的 pipeline_json。
+    典型流程：build → parameterize_pipeline(pj) 看候選 → parameterize_pipeline(pj,
+    accept=[...]) → 用回傳的 pipeline_json 走 create_skill_with_pipeline。
+    完全確定性 — 不會動資料結構，只把具體值換成 $ 變數並加宣告。"""
+    async with httpx.AsyncClient() as c:
+        body: dict = {"pipeline_json": pipeline_json}
+        if accept:
+            body["accept"] = accept
+        return await _post(c, f"{SIDECAR}/internal/pipeline/parameterize",
+                           {"X-Service-Token": SVC}, body)
+
+
+@mcp.tool()
+async def draft_skill_doc(name: str, pipeline_json: dict, nl: str = "") -> dict:
+    """為 skill 草擬說明書（use_case / when_to_use[] / distinction /
+    example_invocation / tags[]）。這是「草稿」— 請把它呈現給 human 修改確認後，
+    再放進 create_skill_with_pipeline 的 doc 欄位；不要未經確認直接存。"""
+    async with httpx.AsyncClient() as c:
+        return await _post(c, f"{SIDECAR}/internal/pipeline/skill-draft-doc",
+                           {"X-Service-Token": SVC},
+                           {"name": name, "nl": nl, "pipeline_json": pipeline_json},
+                           timeout=60)
+
+
+@mcp.tool()
+async def patch_chart_style(pipeline_json: dict, patch: list[dict]) -> dict:
+    """對 pipeline 的 chart 節點打「呈現層」參數 patch — 只能動樣式面：
+    style:{spc_zones,line_style,show_markers,marker_size,x_label,y_label} /
+    tooltip_fields / weco_annotate / title / order / show_values。
+    patch 形狀：[{"node": "<chart node id>", "set": {"style": {...}, ...}}]。
+    資料參數（ucl_column、x、y、tool_id…）從白名單層就擋掉 — 要改資料請重建。
+    回傳 {pipeline_json} 供後續 execute / save_pipeline。"""
+    patched, why = _apply_presentation_patch(pipeline_json, patch)
+    if patched is None:
+        return {"error": f"patch rejected: {why}",
+                "hint": "只能動 chart 節點的呈現參數；節點 id 要存在"}
+    return {"pipeline_json": patched}
+
+
+@mcp.tool()
+async def propose_knowledge(memo_class: str, title: str, body: str,
+                            applies_to: str = "execute",
+                            subject_kind: str | None = None,
+                            subject_id: str | None = None) -> dict:
+    """向平台知識庫「提案」一條 knowledge（進 Supervisor 審核佇列，人審後才生效 —
+    你永遠是提案者，不能直接寫入）。memo_class 限 domain | procedure | correction。
+    body 建議含 **Why:** 與 **How to apply:** 兩段。subject_kind/subject_id 標註
+    這條知識關於什麼（例 block / block_line_chart）。"""
+    if memo_class not in ("domain", "procedure", "correction"):
+        return {"error": "memo_class 限 domain | procedure | correction（preference 不開放外部代理）"}
+    async with httpx.AsyncClient() as c:
+        out = await _post(c, f"{JAVA}/internal/memory/knowledge",
+                          {"X-Internal-Token": JIT}, {
+                              "user_id": None,
+                              "memo_class": memo_class,
+                              "title": title[:200],
+                              "body": body[:4000],
+                              "applies_to": applies_to,
+                              "source": "cowork",
+                              "active": False,          # 治理紅線: 草稿, 零直寫
+                              "written_by": "cowork",
+                              "status": "draft",
+                              "subject_kind": subject_kind,
+                              "subject_id": subject_id,
+                          })
+        d = _unwrap(out)
+        return {"status": "proposed", "id": (d or {}).get("id"),
+                "note": "已進審核佇列（draft）— Supervisor/PE 核准後才會生效。"}
+
+
+@mcp.tool()
+async def propose_doc_revision(block_id: str, revised_doc_draft: str, rationale: str) -> dict:
+    """對某個 block 的官方文件提出「修訂提案」（DOC_REVISE）。提案會出現在
+    Supervisor 工作台，由 IT_ADMIN 簽核後才落地 — document 是系統資產，
+    你永遠是提案者。revised_doc_draft 是修訂後的段落草稿（markdown），
+    rationale 說明為什麼要改（引具體證據）。"""
+    async with httpx.AsyncClient() as c:
+        out = await _post(c, f"{JAVA}/internal/supervisor/proposals",
+                          {"X-Internal-Token": JIT}, {
+                              "action_type": "DOC_REVISE",
+                              "target_ids": [],
+                              "proposal": json.dumps({
+                                  "block_id": block_id,
+                                  "revised_doc_draft": revised_doc_draft[:6000],
+                              }, ensure_ascii=False),
+                              "rationale": rationale[:1000],
+                              "proposer_meta": {"source": "cowork", "proposer": "cowork-mcp"},
+                              "narrative": json.dumps({
+                                  "happened": f"cowork 對 {block_id} 文件提出修訂",
+                                  "observed": rationale[:400],
+                                  "action": f"以修訂草案更新 {block_id} 的 block 文件（IT_ADMIN 簽核後生效）",
+                                  "subject": {"kind": "block", "id": block_id, "label": block_id},
+                              }, ensure_ascii=False),
+                          })
+        d = _unwrap(out)
+        return {"status": "proposed", "id": (d or {}).get("id"),
+                "note": "DOC_REVISE 提案已建立 — 到 Supervisor 工作台由 IT_ADMIN 簽核後才會更新文件。"}
+
+
 @mcp.tool()
 async def list_event_sources(exclude_slug: str | None = None) -> list[dict]:
     """List Skills that are currently active patrols AND have an alarm
