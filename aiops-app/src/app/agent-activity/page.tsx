@@ -517,6 +517,10 @@ function describeStep(s: StepRow): [string, string] {
     case "plan_confirmed": return ["計畫已確認", ""];
     case "plan_user_edited": return ["使用者修改了計畫", ""];
     case "replan": return ["重新規劃", ""];
+    case "source_cache_stats": {
+      const h = Number(p["hits"] ?? 0), f = Number(p["fetches"] ?? 0);
+      return ["資料重用統計", `實際取資料 ${f} 次、重用 ${h} 次`];
+    }
     default: return [s.event_type ?? "—", ""];
   }
 }

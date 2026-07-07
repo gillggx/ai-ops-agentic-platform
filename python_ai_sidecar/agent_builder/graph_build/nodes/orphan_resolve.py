@@ -107,7 +107,11 @@ async def maybe_resolve_orphans(state: dict) -> dict[str, Any]:
         session = AgentBuilderSession.new(
             user_prompt=state.get("instruction", ""), base_pipeline=pj,
         )
-        toolset = BuilderToolset(session, registry)
+        from python_ai_sidecar.pipeline_builder.source_cache import get_session_cache
+        toolset = BuilderToolset(
+            session, registry,
+            source_cache=get_session_cache(str(state.get("session_id") or "anon")),
+        )
 
         client = get_llm_client()
         resp = await client.create(

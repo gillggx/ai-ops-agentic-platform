@@ -53,7 +53,11 @@ async def call_tool_node(state: BuildGraphState) -> dict[str, Any]:
     )
     registry = SeedlessBlockRegistry()
     registry.load()
-    toolset = BuilderToolset(transient, registry)
+    from python_ai_sidecar.pipeline_builder.source_cache import get_session_cache
+    toolset = BuilderToolset(
+        transient, registry,
+        source_cache=get_session_cache(str(state.get("session_id") or "anon")),
+    )
 
     op_type = op.get("type")
     args = _build_tool_args(op_type, op, logical_to_real)

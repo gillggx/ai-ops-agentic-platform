@@ -647,10 +647,14 @@ class BuilderToolset:
         self,
         session: AgentBuilderSession,
         registry: BlockRegistry,
+        source_cache: Any = None,
     ) -> None:
         self.session = session
         self.registry = registry
         self.executor = PipelineExecutor(registry)
+        # 成本結構修正 波1: session-scoped source cache — previews within one
+        # build session reuse fetched source data (see source_cache.py).
+        self.source_cache = source_cache
 
     # ----------------------------------------------------------------------
     # Dispatch
@@ -1245,7 +1249,7 @@ class BuilderToolset:
                 "errors": errors,
             }
 
-        result = await self.executor.execute(truncated, preview_sample_size=sample_size)
+        result = await self.executor.execute(truncated, preview_sample_size=sample_size, source_cache=self.source_cache)
         node_result = result["node_results"].get(node_id) or {}
         return {
             "status": node_result.get("status", "unknown"),

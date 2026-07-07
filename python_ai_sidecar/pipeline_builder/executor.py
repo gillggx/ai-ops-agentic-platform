@@ -523,6 +523,7 @@ class PipelineExecutor:
         preview_sample_size: int = _PREVIEW_ROWS_DEFAULT,
         inputs: Optional[dict[str, Any]] = None,
         on_event: Optional[Any] = None,
+        source_cache: Optional[Any] = None,
     ) -> dict[str, Any]:
         """Run the pipeline end-to-end.
 
@@ -665,6 +666,33 @@ class PipelineExecutor:
                 error_message = error_message or f"{node_id}: {e.message}"
                 continue
 
+            # 成本結構修正 波1 (2026-07-07): session-scoped source cache.
+            # Pure-source nodes (no inbound edges) are deterministic functions
+            # of their params within one build session — the auto-preview loop
+            # re-executed them every round (7-round phase = 7 identical MCP
+            # fetches). Cache hit skips the fetch entirely; params change =
+            # new key = automatic invalidation. See source_cache.py.
+            _is_source = not inbound.get(node_id)
+            if source_cache is not None and _is_source:
+                _cached = source_cache.get(node.block_id, node.block_version, resolved_params)
+                if _cached is not None:
+                    cache.set(node_id, _cached)
+                    rows = _rows_count(_cached)
+                    node_results[node_id] = {
+                        "status": "success",
+                        "error": None,
+                        "rows": rows,
+                        "duration_ms": 0.0,
+                        "preview": _preview_output(_cached, sample_size=preview_sample_size),
+                        "from_source_cache": True,
+                    }
+                    _emit({
+                        "type": "pb_node_done", "node_id": node_id,
+                        "status": "success", "rows": rows, "duration_ms": 0.0,
+                        "error": None,
+                    })
+                    continue
+
             node_started = time.perf_counter()
             try:
                 outputs = await executor.execute(
@@ -710,6 +738,8 @@ class PipelineExecutor:
                 continue
 
             cache.set(node_id, outputs)
+            if source_cache is not None and _is_source:
+                source_cache.put(node.block_id, node.block_version, resolved_params, outputs)
             dur = (time.perf_counter() - node_started) * 1000.0
             rows = _rows_count(outputs)
             node_results[node_id] = {

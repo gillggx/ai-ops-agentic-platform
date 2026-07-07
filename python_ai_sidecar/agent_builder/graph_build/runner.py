@@ -199,6 +199,18 @@ async def stream_graph_build(
                 # resume; just flush what we have.
                 await recorder.flush()
             else:
+                # 波1: drop the session source cache + surface its stats in
+                # the timeline (「取資料 N 次、重用 M 次」acceptance evidence).
+                try:
+                    from python_ai_sidecar.pipeline_builder.source_cache import (
+                        drop_session_cache,
+                    )
+                    _cs = drop_session_cache(sid)
+                    if _cs and (_cs.get("hits") or _cs.get("fetches")):
+                        recorder.record("source_cache_stats", agent="builder",
+                                        payload=_cs)
+                except Exception:  # noqa: BLE001 — stats never block finalize
+                    pass
                 _st = str(last_state.get("status") or "failed")
                 await recorder.finalize(
                     status=_st,
@@ -729,6 +741,17 @@ async def resume_graph_v30(
             if interrupted:
                 await recorder.flush()
             else:
+                # 波1: same drop+stats as run_graph_build (resume completes here).
+                try:
+                    from python_ai_sidecar.pipeline_builder.source_cache import (
+                        drop_session_cache,
+                    )
+                    _cs = drop_session_cache(session_id)
+                    if _cs and (_cs.get("hits") or _cs.get("fetches")):
+                        recorder.record("source_cache_stats", agent="builder",
+                                        payload=_cs)
+                except Exception:  # noqa: BLE001
+                    pass
                 _st = str(last_state.get("status") or "failed")
                 await recorder.finalize(
                     status=_st,

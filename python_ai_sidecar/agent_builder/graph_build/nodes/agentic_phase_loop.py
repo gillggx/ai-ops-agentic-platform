@@ -374,7 +374,9 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     transient = AgentBuilderSession.new(
         user_prompt=state.get("instruction", ""), base_pipeline=pipeline,
     )
-    toolset = BuilderToolset(transient, registry)
+    from python_ai_sidecar.pipeline_builder.source_cache import get_session_cache
+    _sc = get_session_cache(str(state.get("session_id") or "anon"))
+    toolset = BuilderToolset(transient, registry, source_cache=_sc)
 
     # ── LLM call with tools ───────────────────────────────────────────
     # v30 C-A2: maintain Anthropic tool-use loop properly across rounds.
