@@ -20,6 +20,23 @@ HDR = {"X-Service-Token": SVC, "Content-Type": "application/json",
 CHART_BLOCKS = {"block_line_chart", "block_xbar_r", "block_imr", "block_spc_panel"}
 
 
+
+STYLE_KEYS = ("spc_zones", "line_style", "show_markers", "marker_size",
+              "show_values", "x_label", "y_label", "legend")
+
+
+def eff_style(params):
+    """Effective style — mirrors sidecar _chart_style.parse_style alias
+    tolerance (top-level keys accepted; nested style wins)."""
+    nested = params.get("style") if isinstance(params.get("style"), dict) else {}
+    out = {}
+    for k in STYLE_KEYS:
+        if k in nested:
+            out[k] = nested[k]
+        elif k in params:
+            out[k] = params[k]
+    return out
+
 def _chart_nodes(pj):
     return [n for n in (pj.get("nodes") or [])
             if n.get("block_id") in CHART_BLOCKS]
@@ -32,7 +49,7 @@ def _first_chart_params(pj):
 
 def a_s1(pj):
     p = _first_chart_params(pj)
-    zones = (p.get("style") or {}).get("spc_zones")
+    zones = eff_style(p).get("spc_zones")
     has_limits = (p.get("ucl_column") and p.get("lcl_column")) \
         or any(n.get("block_id") in ("block_xbar_r", "block_spc_panel", "block_imr")
                for n in _chart_nodes(pj))
@@ -59,13 +76,13 @@ def a_s3(pj):
 
 def a_s4(pj):
     p = _first_chart_params(pj)
-    yl = (p.get("style") or {}).get("y_label") or ""
+    yl = eff_style(p).get("y_label") or ""
     return "xbar" in yl and "nm" in yl, f"y_label={yl!r}"
 
 
 def a_s5(pj):
     p = _first_chart_params(pj)
-    zones = (p.get("style") or {}).get("spc_zones")
+    zones = eff_style(p).get("spc_zones")
     return zones is False, f"spc_zones={zones}"
 
 
@@ -75,7 +92,7 @@ def a_s9(pj):
         return False, "no spc_panel node"
     p = ns[0].get("params") or {}
     tf = p.get("tooltip_fields") or []
-    zones = (p.get("style") or {}).get("spc_zones")
+    zones = eff_style(p).get("spc_zones")
     return ("lotID" in tf) and zones is not False, f"tooltip={tf} zones={zones}"
 
 
