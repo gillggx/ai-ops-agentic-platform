@@ -1,0 +1,319 @@
+<title>圖表樣式 Agent 化 — 視覺規格書（前後對照 + STYLE-10）</title>
+<style>
+  :root{
+    --ink:#191d17; --muted:#5d675e; --faint:#96a097;
+    --bg:#f7f8f6; --card:#fff; --bd:#e2e6e1;
+    --accent:#166747; --accent-soft:#e8f2ec;
+    --bad:#b3372a; --bad-soft:#fbeeec;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);margin:0;padding:0 20px 80px;
+    font-family:-apple-system,"Noto Sans TC","PingFang TC",system-ui,sans-serif;line-height:1.65}
+  main{max-width:1080px;margin:0 auto}
+  header{padding:42px 0 12px;border-bottom:2px solid var(--ink);margin-bottom:6px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  h1{font-size:28px;margin:8px 0 6px;line-height:1.25;text-wrap:balance}
+  .sub{color:var(--muted);font-size:14px;max-width:68ch}
+  h2{font-size:19px;margin:46px 0 4px;padding-top:20px;border-top:1px solid var(--bd)}
+  h2 .no{font-family:var(--mono);color:var(--accent);font-size:14px;margin-right:8px}
+  h3{font-size:15px;margin:20px 0 8px}
+  .lede{color:var(--muted);font-size:13.5px;margin:0 0 14px;max-width:74ch}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  @media(max-width:860px){.pair{grid-template-columns:1fr}}
+  .fig{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px 14px 8px}
+  .fig .cap{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .fig .tag{font-size:11px;font-weight:800;border-radius:999px;padding:1px 10px}
+  .tag.now{background:#eef0ee;color:#5d675e}
+  .tag.next{background:var(--accent-soft);color:var(--accent)}
+  .fig .t{font-size:13px;font-weight:700}
+  .fig .d{font-size:12px;color:var(--faint);margin-top:4px;line-height:1.5}
+  .fig svg{width:100%;height:auto;display:block}
+  code{font-family:var(--mono);font-size:12px;background:#eef0ee;border-radius:4px;padding:1px 6px}
+  pre{background:#141a16;color:#dbe6dd;border-radius:10px;padding:13px 15px;font-family:var(--mono);
+    font-size:12px;line-height:1.6;overflow-x:auto;margin:10px 0}
+  pre b{color:#8fd6ae;font-weight:700}
+  table{border-collapse:collapse;width:100%;font-size:13px;background:var(--card);
+    border:1px solid var(--bd);border-radius:10px;overflow:hidden}
+  .tblwrap{overflow-x:auto;border-radius:10px;margin:12px 0}
+  th{background:#edf0ec;text-align:left;padding:8px 12px;font-size:12px;color:var(--muted);font-weight:700;white-space:nowrap}
+  td{padding:8px 12px;border-top:1px solid var(--bd);vertical-align:top}
+  td.c{font-family:var(--mono);font-size:11.5px}
+  .good{background:var(--accent-soft);border:1px solid #c3ddd0;border-radius:10px;padding:12px 16px;font-size:13px;margin:14px 0}
+  .hint{font-size:12px;color:var(--faint);font-style:normal}
+  #tt{position:fixed;display:none;z-index:50;background:#191d17;color:#f2f5f1;border-radius:8px;
+    padding:8px 12px;font-size:12px;line-height:1.55;pointer-events:none;max-width:260px;
+    box-shadow:0 6px 20px rgba(0,0,0,.25)}
+  #tt .r1{color:#ff9d8a;font-weight:700}
+  #tt .dim{color:#9fb0a3}
+  .foot{margin-top:56px;padding-top:14px;border-top:1px solid var(--bd);color:var(--faint);font-size:12px;font-family:var(--mono)}
+</style>
+<main>
+<header>
+  <div class="eyebrow">AIOps Platform · Chart Style Spec (Visual)</div>
+  <h1>圖表樣式 Agent 化 — 前後對照視覺規格</h1>
+  <div class="sub">左邊是<b>現在</b> agent 能畫出來的極限，右邊是補完參數後<b>同一句指令</b>該得到的圖。
+  所有圖都可互動：<b>把滑鼠移到資料點上</b>，親自感受 tooltip 前後的差異。資料為模擬的 EQP-01 STEP_001 xbar 序列。</div>
+</header>
+
+<h2><span class="no">01</span>主戰場：趨勢圖 line_chart —「畫 EQP-01 STEP_001 標準 SPC 管制圖，提示顯示 lotID」</h2>
+<div class="pair">
+  <div class="fig"><div class="cap"><span class="tag now">現況</span><span class="t">簡配版：只有三條線 + 紅圈</span></div>
+    <div id="f1"></div>
+    <div class="d">滑過點只看到「x / value」。沒有 σ 區帶、軸沒有名字、紅圈不解釋原因 — 不是標準管制圖。</div></div>
+  <div class="fig"><div class="cap"><span class="tag next">期望</span><span class="t">標準 SPC：區帶 + 可解釋違規 + 指定欄位提示</span></div>
+    <div id="f2"></div>
+    <div class="d">Zone C/B/A 三層 σ 區帶、CL 實線、UCL/LCL 紅虛線帶值、<b>滑過紅點顯示違反哪條 WECO 規則 + lotID/recipe</b>、y 軸有名字有單位。</div></div>
+</div>
+<pre><span style="color:#7d8799"># agent 對這句指令該下的參數（粗體 = 本次新增）</span>
+{ "x": "eventTime", "y": "value",
+  "ucl_column": "ucl", "lcl_column": "lcl", "center_column": "center",
+  "highlight_field": "is_ooc",
+  <b>"style": { "spc_zones": true, "y_label": "xbar (nm)" },
+  "tooltip_fields": ["lotID", "recipe"],
+  "weco_annotate": true</b> }</pre>
+
+<h3>反向指令也要會 —「簡潔版管制圖，不要區帶」（STYLE-10 的 S5）</h3>
+<div class="pair">
+  <div class="fig"><div class="cap"><span class="tag next">期望</span><span class="t">agent 下 <code>style.spc_zones=false</code></span></div>
+    <div id="f3"></div>
+    <div class="d">管制線照畫、tooltip 照給，只拿掉區帶 — 測 agent 是「聽懂指令」還是「無腦開全套」。</div></div>
+  <div class="fig" style="display:flex;flex-direction:column;justify-content:center">
+    <div class="good" style="margin:0"><b>為什麼 S5 是關鍵題：</b>如果文件只寫「標準管制圖 = 開 spc_zones」，
+    agent 會把每張圖都開區帶。文件必須寫成<b>原則</b>（「spc_zones 控制 σ 區帶顯示，預設跟隨管制線」），
+    agent 才能雙向操作。這正是 STYLE-10 要驗的「有沒有看懂 document」。</div></div>
+</div>
+
+<h2><span class="no">02</span>X̄-R 管制圖 xbar_r —「違規點要能看出違反哪條規則」</h2>
+<div class="pair">
+  <div class="fig"><div class="cap"><span class="tag now">現況</span><span class="t">WECO 紅點會標，但滑過<b>毫無反應</b></span></div>
+    <div id="f4"></div>
+    <div class="d">這張圖現在完全沒有 tooltip（試試看 — 滑過任何點都沒有提示）。紅點知其然不知其所以然。</div></div>
+  <div class="fig"><div class="cap"><span class="tag next">期望</span><span class="t">σ 區帶 + 違規原因進提示</span></div>
+    <div id="f5"></div>
+    <div class="d">σ 本來就算好了（WECO 判定在用），補畫區帶零成本；滑過紅點顯示「違反 R2：連續 9 點同側」這類可行動資訊。</div></div>
+</div>
+<pre>{ "value_column": "value", "weco_rules": ["R1","R2","R3"],
+  <b>"weco_annotate": true, "style": { "spc_zones": true },
+  "tooltip_fields": ["subgroup", "n"]</b> }</pre>
+
+<h2><span class="no">03</span>直方圖 histogram_chart —「xbar 分佈，規格線 LSL 48 / USL 52」</h2>
+<div class="pair">
+  <div class="fig"><div class="cap"><span class="tag now">現況</span><span class="t">只有 bins 跟單位，沒有規格線、沒有提示</span></div>
+    <div id="f6"></div>
+    <div class="d">Cpk 討論一定要看「分佈壓不壓得進規格」— 現在畫不出 LSL/USL。</div></div>
+  <div class="fig"><div class="cap"><span class="tag next">期望</span><span class="t">LSL/USL 規格線 + 常態曲線 + bin 提示</span></div>
+    <div id="f7"></div>
+    <div class="d">紅虛線規格界線、常態疊線看偏態、滑過每根柱顯示區間與筆數。</div></div>
+</div>
+<pre>{ "value_column": "value", "bins": 18, <b>"lsl": 48, "usl": 52, "normal_overlay": true</b> }</pre>
+
+<h2><span class="no">04</span>長條圖 bar_chart —「各機台 OOC 次數由多到少，柱上標數值」</h2>
+<div class="pair">
+  <div class="fig"><div class="cap"><span class="tag now">現況</span><span class="t">排序可以，數值要滑過才看得到</span></div>
+    <div id="f8"></div></div>
+  <div class="fig"><div class="cap"><span class="tag next">期望</span><span class="t"><code>show_values=true</code> 一眼讀值 + y 軸名</span></div>
+    <div id="f9"></div></div>
+</div>
+<pre>{ "x": "toolID", "y": "ooc_count", "order": "desc", <b>"show_values": true, "style": { "y_label": "OOC 次數" }</b> }</pre>
+
+<h2><span class="no">05</span>STYLE-10 測試集 — 每題的指令、參數、判分</h2>
+<p class="lede">資料側全部固定（EQP-01 STEP_001 最近 7 天，3-4 nodes），變因只有 style 指令。
+判分機械式：assert 產出的 chart_spec 含預期參數 — 測的是 agent 讀文件轉參數的能力，不是圖漂不漂亮。</p>
+<div class="tblwrap"><table>
+<tr><th>#</th><th>指令（原話）</th><th>期望參數（判分 assert）</th><th>對應圖例</th></tr>
+<tr><td>S1</td><td>畫 EQP-01 STEP_001 標準 SPC 管制圖</td><td class="c">style.spc_zones=true 且含 UCL/LCL/CL</td><td>圖 01 右</td></tr>
+<tr><td>S2</td><td>xbar 趨勢圖，提示顯示 lotID 和 recipe</td><td class="c">tooltip_fields ⊇ [lotID, recipe]</td><td>圖 01 右（滑點體驗）</td></tr>
+<tr><td>S3</td><td>X̄-R 管制圖，違規點要能看出違反哪條規則</td><td class="c">weco_annotate=true</td><td>圖 02 右</td></tr>
+<tr><td>S4</td><td>xbar 趨勢圖，y 軸標「xbar (nm)」</td><td class="c">style.y_label="xbar (nm)"</td><td>圖 01 右 y 軸</td></tr>
+<tr><td>S5</td><td>簡潔版管制圖，<b>不要</b> sigma 區帶</td><td class="c">style.spc_zones=false</td><td>圖 01 下（S5）</td></tr>
+<tr><td>S6</td><td>xbar 直方圖，規格線 LSL 48、USL 52</td><td class="c">lsl=48, usl=52</td><td>圖 03 右</td></tr>
+<tr><td>S7</td><td>各機台 OOC 長條圖由多到少，柱上標數值</td><td class="c">order=desc, show_values=true</td><td>圖 04 右</td></tr>
+<tr><td>S8</td><td>散佈圖 x=壓力 y=蝕刻率，加趨勢線</td><td class="c">trend_line=true</td><td>—（同機制）</td></tr>
+<tr><td>S9</td><td>三站 xbar 面板，每格含區帶、提示顯示 lotID</td><td class="c">panel 子 spec 透傳 spc_zones + tooltip_fields</td><td>—（圖 01 右 × 3 格）</td></tr>
+<tr><td>S10</td><td>標準管制圖 + 提示 lotID + y 軸標單位（一句全套）</td><td class="c">S1+S2+S4 全部成立</td><td>圖 01 右</td></tr>
+</table></div>
+<div class="good"><b>跑法：</b>復用 SLASH-17 driver 骨架，判分函式改為 chart_spec assert；chat 路徑跑全部 10 題，
+cowork（MCP）抽 S1/S2 驗證 explain_block 讀到的新文件同樣可用。<b>通過標準：10/10（機械判分無 flake 藉口）。</b></div>
+
+<div class="foot">互動說明：所有圖的資料點都可滑鼠 hover · 圖為規格示意（inline SVG 模擬本平台 SVG engine 慣例）· 2026-07-07</div>
+</main>
+
+<div id="tt"></div>
+<script>
+(function(){
+"use strict";
+// ── 模擬資料：40 點 xbar 序列，CL=50 σ=1，含 R1 突破點與 R2 連續同側 ──
+var LOTS=["LOT-2210","LOT-2211","LOT-2214","LOT-2217","LOT-2221","LOT-2223","LOT-2226","LOT-2231"];
+var RECIPES=["R-01","R-03","R-05"];
+var seedv=42; function rnd(){seedv=(seedv*1103515245+12345)%2147483648; return seedv/2147483648;}
+var data=[]; var base=50;
+for(var i=0;i<40;i++){
+  var v=base+(rnd()*2-1)*1.15;
+  if(i>=14&&i<=22) v=base+0.9+rnd()*0.9;          // R2: 連續同側(zone C 上)
+  if(i===27) v=53.6;                               // R1: 突破 UCL
+  if(i===33) v=46.6;                               // R1: 跌破 LCL
+  data.push({i:i, v:Math.round(v*100)/100,
+    lot:LOTS[i%LOTS.length], recipe:RECIPES[i%RECIPES.length],
+    t:"07-0"+(1+Math.floor(i/6))+" "+String(8+(i%6)*2).padStart(2,"0")+":00"});
+}
+var CL=50, SIG=1, UCL=CL+3*SIG, LCL=CL-3*SIG;
+function weco(d){ if(d.v>UCL||d.v<LCL) return "R1：單點超出 3σ";
+  if(d.i>=16&&d.i<=22) return "R2：連續 9 點落在中心線同一側"; return null; }
+
+var tt=document.getElementById("tt");
+function ttShow(html,ev){ tt.innerHTML=html; tt.style.display="block";
+  var x=Math.min(ev.clientX+14, innerWidth-280), y=Math.min(ev.clientY+14, innerHeight-120);
+  tt.style.left=x+"px"; tt.style.top=y+"px"; }
+function ttHide(){ tt.style.display="none"; }
+
+var NS="http://www.w3.org/2000/svg";
+function el(tag,attrs,parent){ var n=document.createElementNS(NS,tag);
+  for(var k in attrs){ if(k==="text"){n.textContent=attrs[k];} else n.setAttribute(k,attrs[k]); }
+  parent.appendChild(n); return n; }
+
+// ── 主圖函式：opts 直接對應提案中的 block 參數 ──
+function drawTrend(hostId, opts){
+  var host=document.getElementById(hostId); if(!host) return;
+  var W=500,H=250,L=52,R=14,T=16,B=34;
+  var svg=el("svg",{viewBox:"0 0 "+W+" "+H},host);
+  var ymin=45.4,ymax=54.6;
+  function Y(v){ return T+(ymax-v)/(ymax-ymin)*(H-T-B); }
+  function X(i){ return L+i/(data.length-1)*(W-L-R); }
+  // σ 區帶
+  if(opts.zones){
+    var zs=[[2,3,"#f4dedb"],[1,2,"#efe9df"],[0,1,"#e9efe6"]];
+    zs.forEach(function(z){
+      el("rect",{x:L,width:W-L-R,y:Y(CL+z[1]*SIG),height:Y(CL+z[0]*SIG)-Y(CL+z[1]*SIG),fill:z[2],opacity:.75},svg);
+      el("rect",{x:L,width:W-L-R,y:Y(CL-z[0]*SIG),height:Y(CL-z[1]*SIG)-Y(CL-z[0]*SIG),fill:z[2],opacity:.75},svg);
+    });
+    el("text",{x:W-R-4,y:Y(CL+2.5*SIG)+3,"text-anchor":"end","font-size":8,fill:"#b08a84",text:"A"},svg);
+    el("text",{x:W-R-4,y:Y(CL+1.5*SIG)+3,"text-anchor":"end","font-size":8,fill:"#a89e8b",text:"B"},svg);
+    el("text",{x:W-R-4,y:Y(CL+0.5*SIG)+3,"text-anchor":"end","font-size":8,fill:"#8fa387",text:"C"},svg);
+  }
+  // 格線 + y 刻度
+  for(var g=46;g<=54;g+=2){
+    el("line",{x1:L,x2:W-R,y1:Y(g),y2:Y(g),stroke:"#eceeeb","stroke-width":1},svg);
+    el("text",{x:L-6,y:Y(g)+3,"text-anchor":"end","font-size":9,fill:"#96a097",text:g.toFixed(0)},svg);
+  }
+  // 管制線
+  function rule(v,label,cls){
+    var red=cls==="danger";
+    el("line",{x1:L,x2:W-R,y1:Y(v),y2:Y(v),stroke:red?"#b3372a":"#166747",
+      "stroke-width":red?1.2:1.4,"stroke-dasharray":red?"5 3":"none",opacity:.85},svg);
+    el("text",{x:L+3,y:Y(v)-3,"font-size":8.5,fill:red?"#b3372a":"#166747","font-weight":"700",
+      text:label+" "+v.toFixed(1)},svg);
+  }
+  rule(UCL,"UCL","danger"); rule(CL,"CL","center"); rule(LCL,"LCL","danger");
+  // 折線
+  var pts=data.map(function(d){return X(d.i)+","+Y(d.v);}).join(" ");
+  el("polyline",{points:pts,fill:"none",stroke:"#2563EB","stroke-width":1.4},svg);
+  // 點
+  data.forEach(function(d){
+    var bad=weco(d)!==null && (d.v>UCL||d.v<LCL||opts.zones);
+    var isOOC=(d.v>UCL||d.v<LCL);
+    var r=opts.markers?3:2.2;
+    var c=el("circle",{cx:X(d.i),cy:Y(d.v),r:isOOC?4:r,
+      fill:isOOC?"#b3372a":"#2563EB",stroke:"#fff","stroke-width":.7,cursor:"pointer"},svg);
+    if(isOOC) el("circle",{cx:X(d.i),cy:Y(d.v),r:7,fill:"none",stroke:"#b3372a","stroke-width":1.2},svg);
+    if(opts.tooltip!=="none"){
+      c.addEventListener("mouseenter",function(ev){
+        var h="";
+        if(opts.tooltip==="rich"){
+          var w=weco(d);
+          if(w&&opts.weco) h+='<div class="r1">違反 '+w+'</div>';
+          h+='<div class="dim">'+d.t+'</div><div>value: <b>'+d.v.toFixed(2)+'</b>'+(d.v>UCL?'（UCL '+UCL.toFixed(1)+'）':'')+'</div>';
+          h+='<div class="dim">lotID: '+d.lot+' · recipe: '+d.recipe+'</div>';
+        } else {
+          h='<div class="dim">'+d.t+'</div><div>value: '+d.v.toFixed(2)+'</div>';
+        }
+        ttShow(h,ev);
+      });
+      c.addEventListener("mouseleave",ttHide);
+    }
+  });
+  // 軸標籤
+  if(opts.yLabel){
+    var t=el("text",{x:12,y:(T+H-B)/2,"font-size":10,fill:"#5d675e","font-weight":"700",text:opts.yLabel},svg);
+    t.setAttribute("transform","rotate(-90 12 "+((T+H-B)/2)+")");
+    t.setAttribute("text-anchor","middle");
+  }
+  el("text",{x:(L+W-R)/2,y:H-8,"text-anchor":"middle","font-size":9,fill:"#96a097",
+    text:opts.xLabel||""},svg);
+}
+
+// F1 現況 / F2 期望 / F3 S5 簡潔版
+drawTrend("f1",{zones:false,markers:false,tooltip:"plain",weco:false,yLabel:null,xLabel:""});
+drawTrend("f2",{zones:true, markers:true, tooltip:"rich", weco:true, yLabel:"xbar (nm)",xLabel:"時間"});
+drawTrend("f3",{zones:false,markers:true, tooltip:"rich", weco:true, yLabel:"xbar (nm)",xLabel:"時間"});
+// F4/F5 XbarR：現況無 tooltip / 期望 rich
+drawTrend("f4",{zones:false,markers:true,tooltip:"none",weco:false,yLabel:null,xLabel:"subgroup"});
+drawTrend("f5",{zones:true, markers:true,tooltip:"rich", weco:true, yLabel:"X̄",xLabel:"subgroup"});
+
+// ── 直方圖 ──
+function drawHist(hostId,opts){
+  var host=document.getElementById(hostId); if(!host)return;
+  var W=500,H=230,L=44,R=14,T=14,B=30;
+  var svg=el("svg",{viewBox:"0 0 "+W+" "+H},host);
+  var bins=[],BN=18,lo=45.5,hi=54.5,bw=(hi-lo)/BN;
+  for(var b=0;b<BN;b++) bins.push(0);
+  data.forEach(function(d){var bi=Math.min(BN-1,Math.max(0,Math.floor((d.v-lo)/bw))); bins[bi]++;});
+  var maxN=Math.max.apply(null,bins);
+  function X(v){return L+(v-lo)/(hi-lo)*(W-L-R);}
+  function Y(n){return T+(1-n/(maxN+1))*(H-T-B);}
+  for(var g2=0;g2<=maxN;g2+=2){ el("line",{x1:L,x2:W-R,y1:Y(g2),y2:Y(g2),stroke:"#eceeeb"},svg);
+    el("text",{x:L-5,y:Y(g2)+3,"text-anchor":"end","font-size":9,fill:"#96a097",text:g2},svg);}
+  bins.forEach(function(n,bi){
+    var x0=X(lo+bi*bw), x1=X(lo+(bi+1)*bw);
+    var rct=el("rect",{x:x0+1,y:Y(n),width:x1-x0-2,height:Y(0)-Y(n),fill:"#7aa5e8",opacity:.85,cursor:"pointer"},svg);
+    if(opts.tooltip){ rct.addEventListener("mouseenter",function(ev){
+      ttShow('<div class="dim">'+(lo+bi*bw).toFixed(1)+' – '+(lo+(bi+1)*bw).toFixed(1)+'</div><div>'+n+' 筆</div>',ev);});
+      rct.addEventListener("mouseleave",ttHide);}
+  });
+  if(opts.normal){
+    var pts2=[];
+    for(var xx=lo;xx<=hi;xx+=0.1){
+      var pdf=Math.exp(-Math.pow(xx-CL,2)/(2*1.3))*(40*bw)/Math.sqrt(2*Math.PI*1.3);
+      pts2.push(X(xx)+","+Y(pdf));
+    }
+    el("polyline",{points:pts2.join(" "),fill:"none",stroke:"#166747","stroke-width":1.5,opacity:.8},svg);
+  }
+  if(opts.spec){
+    [[48,"LSL"],[52,"USL"]].forEach(function(s){
+      el("line",{x1:X(s[0]),x2:X(s[0]),y1:T,y2:H-B,stroke:"#b3372a","stroke-width":1.3,"stroke-dasharray":"5 3"},svg);
+      el("text",{x:X(s[0])+3,y:T+10,"font-size":9,fill:"#b3372a","font-weight":"700",text:s[1]+" "+s[0]},svg);
+    });
+  }
+  for(var tick=46;tick<=54;tick+=2)
+    el("text",{x:X(tick),y:H-10,"text-anchor":"middle","font-size":9,fill:"#96a097",text:tick},svg);
+}
+drawHist("f6",{spec:false,normal:false,tooltip:false});
+drawHist("f7",{spec:true, normal:true, tooltip:true});
+
+// ── 長條圖 ──
+function drawBar(hostId,opts){
+  var host=document.getElementById(hostId); if(!host)return;
+  var W=500,H=230,L=48,R=14,T=14,B=32;
+  var svg=el("svg",{viewBox:"0 0 "+W+" "+H},host);
+  var rows=[["EQP-03",14],["EQP-01",11],["EQP-07",8],["EQP-02",5],["EQP-05",2]];
+  var maxV=16;
+  function Y(v){return T+(1-v/maxV)*(H-T-B);}
+  for(var g3=0;g3<=16;g3+=4){ el("line",{x1:L,x2:W-R,y1:Y(g3),y2:Y(g3),stroke:"#eceeeb"},svg);
+    el("text",{x:L-5,y:Y(g3)+3,"text-anchor":"end","font-size":9,fill:"#96a097",text:g3},svg);}
+  var bw2=(W-L-R)/rows.length;
+  rows.forEach(function(rw,ri){
+    var x=L+ri*bw2+bw2*0.18;
+    var rc=el("rect",{x:x,y:Y(rw[1]),width:bw2*0.64,height:Y(0)-Y(rw[1]),fill:ri===0?"#b3372a":"#2563EB",opacity:.85,cursor:"pointer"},svg);
+    rc.addEventListener("mouseenter",function(ev){ttShow("<div><b>"+rw[0]+"</b></div><div>"+rw[1]+" 次</div>",ev);});
+    rc.addEventListener("mouseleave",ttHide);
+    if(opts.values) el("text",{x:x+bw2*0.32,y:Y(rw[1])-4,"text-anchor":"middle","font-size":10,
+      "font-weight":"700",fill:"#191d17",text:rw[1]},svg);
+    el("text",{x:x+bw2*0.32,y:H-12,"text-anchor":"middle","font-size":9,fill:"#5d675e",text:rw[0]},svg);
+  });
+  if(opts.yLabel){var t2=el("text",{x:12,y:(T+H-B)/2,"font-size":10,fill:"#5d675e","font-weight":"700",text:opts.yLabel},svg);
+    t2.setAttribute("transform","rotate(-90 12 "+((T+H-B)/2)+")"); t2.setAttribute("text-anchor","middle");}
+}
+drawBar("f8",{values:false,yLabel:null});
+drawBar("f9",{values:true, yLabel:"OOC 次數"});
+})();
+</script>
