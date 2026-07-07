@@ -1,0 +1,163 @@
+<title>單/多代理 × 模型效能分析 — SLASH-17</title>
+<style>
+  :root{
+    --ink:#16211c; --muted:#5c6b63; --faint:#93a29a;
+    --bg:#f7f8f6; --card:#ffffff; --bd:#e3e8e4;
+    --accent:#0f6b4f; --accent-soft:#e7f2ed;
+    --warn:#9a5b00; --warn-soft:#fdf3e3;
+    --bad:#a03123; --bad-soft:#fbeeec;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Noto Sans TC","PingFang TC",system-ui,sans-serif;
+    line-height:1.65;margin:0;padding:0 20px 80px}
+  main{max-width:1060px;margin:0 auto}
+  header{padding:44px 0 10px;border-bottom:2px solid var(--ink);margin-bottom:8px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  h1{font-size:30px;line-height:1.25;margin:8px 0 6px;text-wrap:balance}
+  .sub{color:var(--muted);font-size:14px;max-width:64ch}
+  h2{font-size:19px;margin:44px 0 4px;padding-top:20px;border-top:1px solid var(--bd)}
+  h2 .no{font-family:var(--mono);color:var(--accent);font-size:14px;margin-right:8px}
+  .lede{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:70ch}
+  table{border-collapse:collapse;width:100%;font-size:13px;background:var(--card);
+    border:1px solid var(--bd);border-radius:10px;overflow:hidden}
+  .tblwrap{overflow-x:auto;border-radius:10px}
+  th{background:#eef1ee;text-align:left;padding:8px 12px;font-size:12px;color:var(--muted);
+    font-weight:700;letter-spacing:.02em;white-space:nowrap}
+  td{padding:8px 12px;border-top:1px solid var(--bd);vertical-align:top;
+    font-variant-numeric:tabular-nums}
+  td.num{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+  .pill{display:inline-block;border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:700}
+  .ok{background:var(--accent-soft);color:var(--accent)}
+  .warn{background:var(--warn-soft);color:var(--warn)}
+  .bad{background:var(--bad-soft);color:var(--bad)}
+  .kcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:16px 0}
+  .kcard{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px 16px}
+  .kcard .t{font-size:12px;color:var(--muted);font-weight:700}
+  .kcard .v{font-size:22px;font-weight:800;margin-top:2px}
+  .kcard .d{font-size:12px;color:var(--faint);margin-top:2px}
+  .note{background:var(--warn-soft);border:1px solid #efd9b0;border-radius:10px;
+    padding:12px 16px;font-size:13px;margin:14px 0}
+  .good{background:var(--accent-soft);border:1px solid #c4dfd3;border-radius:10px;
+    padding:12px 16px;font-size:13px;margin:14px 0}
+  .bar{height:14px;border-radius:4px;background:var(--accent);display:inline-block;vertical-align:middle}
+  .bar.b2{background:#3d8f74}.bar.b3{background:#7ab89f}.bar.b4{background:#b9d8c9}
+  .barrow{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12.5px}
+  .barrow .lbl{width:220px;flex:none;color:var(--muted)}
+  .barrow .val{font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .foot{margin-top:56px;padding-top:14px;border-top:1px solid var(--bd);
+    color:var(--faint);font-size:12px;font-family:var(--mono)}
+  .est{color:var(--faint);font-size:11px}
+  b.hl{color:var(--accent)}
+</style>
+<main>
+<header>
+  <div class="eyebrow">AIOps Platform · Performance Analysis</div>
+  <h1>單代理 → 多代理 × 建置模型效能分析</h1>
+  <div class="sub">基準：SLASH-17 全量建置回歸（17 個生產級指令）。涵蓋 2026-06 至 07-07 的六個模型配置、
+  兩代 agent 架構，以及本週 thinking 開關實驗的翻盤結果。</div>
+</header>
+
+<h2><span class="no">01</span>結論速覽</h2>
+<div class="kcards">
+  <div class="kcard"><div class="t">首輪全過的配置</div><div class="v">3 個</div>
+    <div class="d">GLM-5.2（正常期）、Sonnet 5 + thinking、Haiku 4.5 + thinking</div></div>
+  <div class="kcard"><div class="t">最佳綜合（建議 default）</div><div class="v">Sonnet 5 + thinking</div>
+    <div class="d">17/17 首輪 · 24.5 分 · $2.23 · DAG 最精簡</div></div>
+  <div class="kcard"><div class="t">最省錢可用解</div><div class="v">Haiku 4.5 快答</div>
+    <div class="d">$1.02 / 全量 · 25.2 分 · 偶發 flake 重試即過</div></div>
+  <div class="kcard"><div class="t">多代理改造品質代價</div><div class="v">零回歸</div>
+    <div class="d">17/17 不變，換得逐 agent 觀測與治理能力</div></div>
+</div>
+<div class="good"><b>本週最大發現：</b>模型的「好壞」大半是<b class="hl">供應鏈與設定問題</b>，不是模型本身 —
+(1) Sonnet 之前被判「不如 GLM」，是走 OpenRouter cache 全滅 + thinking 未開的雙重誤判；
+直連 + adaptive thinking 後 patrol-status 從 0/2 變 3/3、全量首輪 17/17。
+(2) GLM 7/6 的「大退步」實為 Fireworks 端間歇空回應風暴（16–18%），模型能力未變。</div>
+
+<h2><span class="no">02</span>兩代架構：單代理 vs 多代理</h2>
+<p class="lede">多代理 Phase 0（2026-07-02）把單一 builder 迴圈拆成 Planner / Builder / Repair 角色代理 +
+Verifier（無 LLM 確定性閘門）+ Supervisor（事後鑑識）。改造目標不是跑分，是可觀測與可治理。</p>
+<div class="tblwrap"><table>
+<tr><th></th><th>單代理（≤ 2026-07-01）</th><th>多代理（2026-07-02 起）</th></tr>
+<tr><td><b>SLASH-17 品質</b></td><td class="num">17/17（GLM 基線）</td><td class="num">17/17（同模型零回歸）</td></tr>
+<tr><td><b>cache 命中</b></td><td class="num">54.7%（GLM@Fireworks）</td><td class="num">54.7%（不變）／ 98–99.7%（Anthropic 直連原生 cache）</td></tr>
+<tr><td><b>成本歸因</b></td><td>單一數字，無法拆</td><td>逐 agent（planner/builder/repair）tokens + calls + latency 入庫</td></tr>
+<tr><td><b>失敗查案</b></td><td>翻 raw trace 檔</td><td>Agent Activity 逐案（誰觸發、幾次 LLM、卡哪個 phase）+ Supervisor 自動鑑識提案</td></tr>
+<tr><td><b>學習閉環</b></td><td>無</td><td>W1/W2/W3 三層記憶 + 知識治理（人審後生效）</td></tr>
+<tr><td><b>本報告的數據來源</b></td><td>—</td><td>正是多代理觀測層（cost_json calls/latency）產出</td></tr>
+</table></div>
+
+<h2><span class="no">03</span>模型 × 架構 總表</h2>
+<p class="lede">同一套 SLASH-17。上半：單代理時代（多走 OpenRouter）；下半：多代理時代（Anthropic 直連 + 原生 cache）。
+標 * 為當時報告的估算值。</p>
+<div class="tblwrap"><table>
+<tr><th>配置</th><th>日期</th><th>通過</th><th>總耗時</th><th>成本 / 17 案</th><th>cache</th><th>備註</th></tr>
+<tr><td colspan="7" style="background:#eef1ee;font-weight:700;font-size:12px;color:#5c6b63">單代理時代</td></tr>
+<tr><td>KIMI K2.5（OpenRouter/Fireworks）</td><td class="num">06-11</td><td><span class="pill warn">~14/17 嚴格</span></td>
+  <td class="num">73 分</td><td class="num">$3–4</td><td class="num">0%</td><td>已淘汰</td></tr>
+<tr><td>GLM-5.2（OpenRouter/Fireworks）</td><td class="num">06-25</td><td><span class="pill ok">17/17</span></td>
+  <td class="num">22.3 分</td><td class="num">~$1.3</td><td class="num">54.7%</td><td>成為 prod 預設</td></tr>
+<tr><td>Sonnet 5（OpenRouter，無 thinking）</td><td class="num">07-01</td><td><span class="pill warn">15/17 嚴格</span></td>
+  <td class="num">24.4 分</td><td class="num">$11.6 <span class="est">*</span></td><td class="num">63% <span class="est">*</span></td><td>cache 失效 → 誤判「被 GLM 支配」</td></tr>
+<tr><td>Opus 4.8（無 thinking）</td><td class="num">07-01</td><td><span class="pill warn">16/17 嚴格</span></td>
+  <td class="num">23.5 分</td><td class="num">$52 <span class="est">*</span></td><td class="num">52% <span class="est">*</span></td><td>品質天花板但 20–30× 成本</td></tr>
+<tr><td colspan="7" style="background:#eef1ee;font-weight:700;font-size:12px;color:#5c6b63">多代理時代（Anthropic 直連）</td></tr>
+<tr><td>GLM-5.2（Phase 0 驗證）</td><td class="num">07-02</td><td><span class="pill ok">17/17</span></td>
+  <td class="num">~22 分</td><td class="num">~$1.3</td><td class="num">54.7%</td><td>零回歸基線；07-06 起遇供應端風暴</td></tr>
+<tr><td>Haiku 4.5 快答</td><td class="num">07-06</td><td><span class="pill warn">16/17（重跑過）</span></td>
+  <td class="num">25.2 分</td><td class="num">$1.02</td><td class="num">99.7%</td><td>356 calls · 3.6s/call；patrol 幻覺參數被 C16 攔（flake）</td></tr>
+<tr><td>Sonnet 5 快答</td><td class="num">07-06</td><td><span class="pill bad">16/17（重跑仍敗）</span></td>
+  <td class="num">30.2 分</td><td class="num">$2.27</td><td class="num">98.4%</td><td>patrol 0/2 — 深思模型被迫快答的病徵</td></tr>
+<tr><td><b>Sonnet 5 + adaptive thinking(high)</b></td><td class="num">07-07</td><td><span class="pill ok">17/17 首輪</span></td>
+  <td class="num"><b>24.5 分</b></td><td class="num"><b>$2.23</b></td><td class="num">~98%</td><td><b>205 calls · 5.5s/call；DAG 全程 3–6 nodes 最精簡</b></td></tr>
+<tr><td>Haiku 4.5 + thinking(6000)</td><td class="num">07-07</td><td><span class="pill ok">17/17 首輪</span></td>
+  <td class="num">43.9 分</td><td class="num">$1.35</td><td class="num">~99%</td><td>228 calls · 9.4s/call；patrol 90s 全場最快單案，但整體最慢</td></tr>
+</table></div>
+
+<h2><span class="no">04</span>thinking 開關實驗 — 本週翻盤主角</h2>
+<p class="lede">同一顆模型、同一套 prompt、只差一個開關。對照組 GLM 的內部推理是預設開的，
+先前所有 Anthropic 模型卻都在「快答模式」下被評測 — 不公平的比較。</p>
+<div class="tblwrap"><table>
+<tr><th>指標</th><th>Sonnet 5 快答</th><th>Sonnet 5 + thinking</th><th>Haiku 4.5 快答</th><th>Haiku 4.5 + thinking</th></tr>
+<tr><td>patrol-status（最難分辨案）</td><td><span class="pill bad">0/2</span></td><td><span class="pill ok">3/3 + 全量過</span></td>
+  <td><span class="pill warn">flake 後過</span></td><td><span class="pill ok">90s 直過</span></td></tr>
+<tr><td>全量首輪</td><td class="num">16/17</td><td class="num">17/17</td><td class="num">16/17</td><td class="num">17/17</td></tr>
+<tr><td>總耗時</td><td class="num">30.2 分</td><td class="num">24.5 分</td><td class="num">25.2 分</td><td class="num">43.9 分</td></tr>
+<tr><td>平均每次 LLM call</td><td class="num">5.8s</td><td class="num">5.5s</td><td class="num">3.6s</td><td class="num">9.4s</td></tr>
+<tr><td>成本 / 17 案</td><td class="num">$2.27</td><td class="num">$2.23</td><td class="num">$1.02</td><td class="num">$1.35</td></tr>
+</table></div>
+<div class="barrow"><span class="lbl">全量耗時對比</span><span class="bar" style="width:245px"></span><span class="val">Sonnet+think 24.5 分</span></div>
+<div class="barrow"><span class="lbl"></span><span class="bar b2" style="width:252px"></span><span class="val">Haiku 快答 25.2 分</span></div>
+<div class="barrow"><span class="lbl"></span><span class="bar b3" style="width:302px"></span><span class="val">Sonnet 快答 30.2 分</span></div>
+<div class="barrow"><span class="lbl"></span><span class="bar b4" style="width:439px"></span><span class="val">Haiku+think 43.9 分</span></div>
+<div class="note"><b>解讀：</b>Sonnet 開 thinking 後反而<b>更快</b>（少走冤枉 round，總 call 數 193→205 幾乎持平、
+DAG 更精簡）；Haiku 開 thinking 換到首輪全過，但每 call 慢 2.6 倍、整體慢 74% — 划算度低。
+thinking 適合「為深思設計的模型」，不是萬靈丹。</div>
+
+<h2><span class="no">05</span>GLM 供應端風暴（07-05 ～ 07-06）</h2>
+<p class="lede">07-06 兩個測試案「卡住」的真因。短 prompt 探測 8/8 正常、0 個 HTTP 錯誤 —
+只有長 context 建置 prompt 觸發空回應（finish=stop、零內容），指向 Fireworks 端高負載降級。</p>
+<div class="tblwrap"><table>
+<tr><th>時段</th><th>空回應率</th><th>影響</th></tr>
+<tr><td>正常期（06-25 ～ 07-04）</td><td class="num">低（17/17 可重現）</td><td>—</td></tr>
+<tr><td>07-05 早上</td><td class="num">間歇（9+3 次 escalate）</td><td>零星 handover</td></tr>
+<tr><td>07-06 下午～晚間</td><td class="num"><b>16–18%</b>（區間峰值 ~30%）</td><td>簡單 xbar 案也 handover；17 案跑不完</td></tr>
+</table></div>
+<div class="note">已有防線：空回應率日統計（S3 rollup）+ 連 3 空 escalate 守門。
+待議：空回應率超標自動 fallback 到 Anthropic 的保險絲。</div>
+
+<h2><span class="no">06</span>建議</h2>
+<div class="tblwrap"><table>
+<tr><th>層級</th><th>配置</th><th>理由</th></tr>
+<tr><td><b>Default（建議）</b></td><td><b>Sonnet 5 + adaptive thinking(high)，直連</b></td>
+  <td>唯一「首輪 17/17 + 最快 + DAG 最精簡」三者兼得；$2.23/17 案（單案約 $0.13）在互動建置情境可接受</td></tr>
+<tr><td>成本優先備選</td><td>Haiku 4.5 快答，直連</td><td>$1.02 便宜一半、同速；偶發 flake 由既有 C16 閘門攔下重試即可</td></tr>
+<tr><td>備援</td><td>GLM-5.2（OpenRouter/Fireworks）</td><td>正常期 17/17 且最便宜；受供應端風暴影響，降為備援並持續監測空回應率</td></tr>
+<tr><td>退役</td><td>KIMI K2.5 / Sonnet 走 OpenRouter</td><td>前者品質落後；後者 cache 失效使成本假性膨脹 5 倍</td></tr>
+</table></div>
+
+<div class="foot">資料來源：SLASH-17 driver 逐案輸出 + agent_episodes.cost_json（多代理觀測層）·
+單代理時代數字引自 06-11 baseline 與 07-01 四模型 bake-off 報告（標 * 為估算）·
+成本以官方牌價計（Sonnet $3/$15/M cache$0.3；Haiku $1/$5/M cache$0.1）· 2026-07-07</div>
+</main>
