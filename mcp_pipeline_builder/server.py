@@ -676,6 +676,36 @@ async def patch_chart_style(pipeline_json: dict, patch: list[dict]) -> dict:
 
 
 @mcp.tool()
+async def list_agent_activity(limit: int = 20) -> list[dict]:
+    """列出平台 agent 最近的建置活動（episodes）— 每筆含 episode_key、使用者
+    原始指令、狀態（finished/failed/interrupted/running）、觸發來源、步驟數與
+    開始時間。用來了解「平台的 agent 最近做了什麼、成功率如何、有沒有卡住的
+    case」。要看單筆細節用 get_agent_activity(episode_key)。唯讀。"""
+    async with httpx.AsyncClient() as c:
+        out = await _get(c, f"{JAVA}/internal/agent-episodes?limit={int(limit)}",
+                         {"X-Internal-Token": JIT})
+        return _unwrap(out) or []
+
+
+@mcp.tool()
+async def get_agent_activity(episode_key: str, include_rounds: bool = False) -> dict:
+    """單一建置活動的完整記錄：使用者指令、計畫 phases、逐步事件時間軸
+    （選了哪個 block、查了什麼文件、驗收拒絕原因、修理工單、計畫修訂、
+    引用了哪些記憶）、各 agent 的 LLM 成本。include_rounds=True 再附
+    逐輪 prompt/回應（很大，除錯才開）。唯讀。"""
+    async with httpx.AsyncClient() as c:
+        detail = _unwrap(await _get(
+            c, f"{JAVA}/internal/agent-episodes/{episode_key}",
+            {"X-Internal-Token": JIT})) or {}
+        if include_rounds:
+            rounds = _unwrap(await _get(
+                c, f"{JAVA}/internal/agent-episodes/{episode_key}/rounds",
+                {"X-Internal-Token": JIT})) or {}
+            detail["rounds"] = rounds
+        return detail
+
+
+@mcp.tool()
 async def propose_knowledge(memo_class: str, title: str, body: str,
                             applies_to: str = "execute",
                             subject_kind: str | None = None,

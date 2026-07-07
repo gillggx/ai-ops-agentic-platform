@@ -102,7 +102,10 @@ export default function PbPipelineCard({ card, onExpand }: Props) {
           background: "#F8FAFC",
         }}
       >
-        <span style={{ fontSize: 14 }}>{isAdHoc ? "🛠️" : "📌"}</span>
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#4F46E5", background: "#EEF2FF",
+                       padding: "1px 6px", borderRadius: 4, letterSpacing: 0.5 }}>
+          {isAdHoc ? "PIPELINE" : "SKILL"}
+        </span>
         <span style={{ fontSize: 12, fontWeight: 600, color: "#0F172A", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {pipelineName}
         </span>
@@ -151,7 +154,7 @@ export default function PbPipelineCard({ card, onExpand }: Props) {
       {/* Evidence hint */}
       {triggered && evidenceRows > 0 && (
         <div style={{ padding: "6px 12px", fontSize: 11, color: "#B91C1C", background: "#FEF2F2", borderTop: "1px solid #FECACA" }}>
-          ⚠ 觸發條件命中 · {evidenceRows} 筆佐證事件
+          [!] 觸發條件命中 · {evidenceRows} 筆佐證事件
         </div>
       )}
 
@@ -176,7 +179,7 @@ function TriggeredBadge({ triggered }: { triggered: boolean }) {
       ? { background: "#FEF2F2", color: "#B91C1C", borderColor: "#FECACA" }
       : { background: "#F0FDF4", color: "#166534", borderColor: "#BBF7D0" }),
   };
-  return <span style={style}>{triggered ? "🔴 Triggered" : "✅ OK"}</span>;
+  return <span style={style}>{triggered ? "Triggered" : "OK"}</span>;
 }
 
 function ChartList({ charts }: { charts: PipelineChartSummary[] }) {
@@ -366,14 +369,14 @@ function ActionBar({ card }: { card: PbPipelineCardData }) {
             onClick={handleEditInBuilder}
             style={actionBtnStyle("secondary")}
           >
-            ✏️ Edit in Builder
+            Edit in Builder
           </button>
           <button
             onClick={handleSaveAsSkill}
             disabled={saving || saved}
             style={actionBtnStyle(saved ? "done" : "primary")}
           >
-            {saved ? "✓ 已儲存" : saving ? "儲存中…" : "📌 存為 Skill"}
+            {saved ? "已儲存" : saving ? "儲存中…" : "存為 Skill"}
           </button>
         </>
       )}

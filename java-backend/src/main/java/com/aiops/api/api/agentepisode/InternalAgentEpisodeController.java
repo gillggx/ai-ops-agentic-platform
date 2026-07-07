@@ -24,11 +24,33 @@ public class InternalAgentEpisodeController {
 
     private final AgentEpisodeService service;
     private final SupervisorReportService reports;
+    private final AgentActivityService activity;
 
     public InternalAgentEpisodeController(AgentEpisodeService service,
-                                          SupervisorReportService reports) {
+                                          SupervisorReportService reports,
+                                          AgentActivityService activity) {
         this.service = service;
         this.reports = reports;
+        this.activity = activity;
+    }
+
+    // ── Read path (2026-07-08, cowork requirement #1) — 唯讀觀測，供外部
+    // Claude (MCP) 查建置軌跡；與 /api/v1/agent-activity 同一個 service。 ──
+
+    @GetMapping
+    public ApiResponse<List<Map<String, Object>>> list(
+            @RequestParam(name = "limit", defaultValue = "20") int limit) {
+        return ApiResponse.ok(activity.list(Math.min(Math.max(limit, 1), 100)));
+    }
+
+    @GetMapping("/{key}")
+    public ApiResponse<Map<String, Object>> detail(@PathVariable("key") String key) {
+        return ApiResponse.ok(activity.detail(key));
+    }
+
+    @GetMapping("/{key}/rounds")
+    public ApiResponse<Map<String, Object>> rounds(@PathVariable("key") String key) {
+        return ApiResponse.ok(activity.rounds(key));
     }
 
     /** Supervisor v1 aggregates (spec §5) — read-only, report material. */
