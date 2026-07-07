@@ -517,6 +517,11 @@ function describeStep(s: StepRow): [string, string] {
     case "plan_confirmed": return ["計畫已確認", ""];
     case "plan_user_edited": return ["使用者修改了計畫", ""];
     case "replan": return ["重新規劃", ""];
+    case "work_order": {
+      const ops = Array.isArray(p["ops"]) ? (p["ops"] as unknown[]).join("、") : "";
+      const failed = str("failed_op");
+      return ["修理工單", `[${str("kind")}] ${str("diagnosis").slice(0, 60)} → ${ops}${failed ? `（中斷於 ${failed.slice(0, 40)}）` : ""}`];
+    }
     case "plan_patch": {
       const ops = Array.isArray(p["ops"]) ? (p["ops"] as Array<Record<string, unknown>>) : [];
       const kept = Array.isArray(p["preserved"]) ? (p["preserved"] as unknown[]).join(",") : "";

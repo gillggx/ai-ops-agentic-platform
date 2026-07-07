@@ -79,6 +79,9 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.phase_revise import (
 from python_ai_sidecar.agent_builder.graph_build.nodes.plan_patch import (
     plan_patch_node,
 )
+from python_ai_sidecar.agent_builder.graph_build.nodes.coordinator_diagnose import (
+    coordinator_diagnose_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.halt_handover import (
     halt_handover_node,
 )
@@ -377,7 +380,9 @@ def _route_after_phase_loop(state: BuildGraphState) -> str:
     """
     status = state.get("status")
     if status == "phase_revise_pending":
-        return "phase_revise"
+        # 波2 G2: stuck phases go to the Coordinator (diagnose + work order)
+        # instead of the old narrative phase_revise retry.
+        return "coordinator_diagnose"
     if state.get("v30_verify_now"):
         return "phase_verifier"
     return "agentic_phase_loop"
@@ -760,6 +765,21 @@ def build_graph():
     g.add_node("phase_verifier", _verifier_observed)
     g.add_node("step_pause_gate", step_pause_gate_node)
     g.add_node("phase_revise", _repair_delegate)
+    # 波2 G2: Coordinator diagnose + mechanical work order. Attributed to the
+    # repair role (Coordinator is repair's evolved job) so console/cost
+    # rollups keep working; timeline shows work_order events.
+    async def _coordinator_delegate(state: BuildGraphState) -> dict[str, Any]:
+        tok = set_current_agent("repair")
+        try:
+            rec = get_current_recorder()
+            pid = _phase_of(state)
+            if rec is not None:
+                rec.record("repair_triggered", agent="repair", phase_id=pid,
+                           payload={"source": "coordinator_g2"})
+            return _drain_console(await coordinator_diagnose_node(state))
+        finally:
+            reset_current_agent(tok)
+    g.add_node("coordinator_diagnose", _coordinator_delegate)
     # 波2 M2: Planner-attributed plan patch (計畫修訂) — escalation target of
     # a revise-exhausted phase; falls back to halt_handover.
     async def _plan_patch_delegate(state: BuildGraphState) -> dict[str, Any]:
@@ -820,7 +840,7 @@ def build_graph():
         _route_after_phase_loop,
         {
             "phase_verifier": "phase_verifier",
-            "phase_revise": "phase_revise",
+            "coordinator_diagnose": "coordinator_diagnose",
             # v30.22: self-loop so agent can build multi-block chains
             # (filter → step_check) within one phase without verifier
             # interrupting after every action.
@@ -876,6 +896,25 @@ def build_graph():
         _route_after_plan_patch,
         {"agentic_phase_loop": "agentic_phase_loop", "plan_patch": "plan_patch",
          "halt_handover": "halt_handover"},
+    )
+
+    # 波2 G2: coordinator -> verify (order applied) / plan_patch (escalate)
+    # / self (retry with different diagnosis) / loop (degenerate)
+    def _route_after_coordinator(state: BuildGraphState) -> str:
+        status = state.get("status")
+        if status == "plan_patch_pending":
+            return "plan_patch"
+        if state.get("v30_verify_now"):
+            return "phase_verifier"
+        if status == "phase_revise_pending":
+            return "coordinator_diagnose"
+        return "agentic_phase_loop"
+    g.add_conditional_edges(
+        "coordinator_diagnose",
+        _route_after_coordinator,
+        {"phase_verifier": "phase_verifier", "plan_patch": "plan_patch",
+         "coordinator_diagnose": "coordinator_diagnose",
+         "agentic_phase_loop": "agentic_phase_loop"},
     )
     # v30: handover -> finalize (build_partial / failed / take_over) or
     # back to ReAct loop (edit_goal chosen + new goal supplied)

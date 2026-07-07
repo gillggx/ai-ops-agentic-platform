@@ -309,6 +309,10 @@ class BuildGraphState(TypedDict, total=False):
     # diagnosis envelope carries why/tried so Planner never re-diagnoses.
     v30_plan_patch_count: int
     v30_patch_diagnosis: Optional[dict]
+    # 波2 G2 (2026-07-07) — Coordinator work orders. Per-phase order count +
+    # last order digest (fed back into the next diagnosis as「已試過」).
+    v30_work_order_counts: dict
+    v30_last_work_order: Optional[dict]
     # v30.22 (2026-05-19) — agent-driven verify trigger. When the loop
     # round emits run_verifier (or phase_complete legacy, or hits round
     # budget), this is set True and router sends graph to phase_verifier.
