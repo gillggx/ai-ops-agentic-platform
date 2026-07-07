@@ -65,7 +65,11 @@ route 判準：
 - new_build：跟現有 pipeline 無關的新需求。patch 留空。
 - fix_request：使用者說結果錯了/圖不對。patch 留空。
 - question：純提問。patch 留空。
-patch 的參數值必須具體可用（tooltip_fields 用資料真實欄位名）。只輸出 JSON。"""
+patch 的參數值必須具體可用（tooltip_fields 用資料真實欄位名）。
+呈現參數面（只能動這些）：style:{spc_zones,line_style,show_markers,marker_size,x_label,y_label} /
+tooltip_fields / weco_annotate / title / order / show_values。
+「不要區帶/簡潔版」→ style:{"spc_zones":false}；「軸標籤」→ style:{"y_label":...} —
+一律用 style 開關，不要動資料欄位參數（ucl_column 等是資料，不是樣式）。只輸出 JSON。"""
 
 _CTRL_PREFIX = re.compile(r"^\s*\[(intent_confirmed|plan_decision|judge_decision|resume)")
 _DIM_TOKEN = re.compile(r"(EQP-\d+|STEP_\d+)", re.IGNORECASE)
