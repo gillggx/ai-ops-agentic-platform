@@ -328,6 +328,86 @@ async def preview(req: PreviewRequest, caller: CallerContext = ServiceAuth) -> d
     }
 
 
+# ── Skill 參數化 + 說明書 (真 Skill 化, 2026-07-08) ─────────────────────────
+
+class ParameterizeRequest(BaseModel):
+    pipeline_json: dict
+    # 空 accept → 只回候選清單；有 accept → 回套用後的 pipeline
+    accept: list[str] | None = None
+
+
+@router.post("/parameterize")
+async def parameterize(req: ParameterizeRequest, caller: CallerContext = ServiceAuth) -> dict:
+    """真 Skill 化 F1: source 身分參數 → 宣告式 inputs（$name）。
+    候選辨識與套用皆為確定性（parameterize.py 純函式，有單元測試）。"""
+    from python_ai_sidecar.pipeline_builder.parameterize import (
+        apply_parameterize, find_candidates,
+    )
+    if not req.accept:
+        return {"candidates": find_candidates(req.pipeline_json)}
+    patched, err = apply_parameterize(req.pipeline_json, req.accept)
+    if patched is None:
+        raise HTTPException(status_code=422, detail=err)
+    return {"pipeline_json": patched,
+            "inputs": patched.get("inputs") or []}
+
+
+class DraftDocRequest(BaseModel):
+    name: str
+    nl: str = ""
+    pipeline_json: dict
+    siblings: list[dict] | None = None  # [{name, use_case}] 供「與相似 skill 區別」
+
+
+@router.post("/skill-draft-doc")
+async def skill_draft_doc(req: DraftDocRequest, caller: CallerContext = ServiceAuth) -> dict:
+    """真 Skill 化 F2: 草擬 skill 說明書（做什麼/輸入/輸出/何時用+區別）。
+    裁決 2: 固定用 Haiku（同 V54 慣例，可由 env SKILL_DOC_LLM_MODEL 覆蓋）。
+    草稿必須經人編修後儲存 — 這裡只產草稿。"""
+    import os as _os
+    from python_ai_sidecar.agent_helpers_native.llm_client import AnthropicLLMClient
+    from python_ai_sidecar.pipeline_builder._sidecar_deps import get_settings
+
+    settings = get_settings()
+    model = _os.environ.get("SKILL_DOC_LLM_MODEL", "claude-haiku-4-5-20251001")
+    client = AnthropicLLMClient(api_key=settings.ANTHROPIC_API_KEY, model=model)
+
+    inputs = req.pipeline_json.get("inputs") or []
+    nodes = [{"id": n.get("id"), "block": n.get("block_id"), "params": n.get("params")}
+             for n in (req.pipeline_json.get("nodes") or [])]
+    system = (
+        "你是技術文件作者。為一個資料分析 Skill 草擬說明書（JSON），"
+        "讀者是「要選用 skill 的 agent 與工程師」。輸出：\n"
+        '{"use_case": "一句話說這個 skill 做什麼、輸出什麼",\n'
+        ' "when_to_use": ["情境1", "情境2", "…max 4 — 什麼樣的問題該用它"],\n'
+        ' "distinction": "與相似 skill 的區別（若提供了 siblings）；沒有就寫它的獨特點",\n'
+        ' "example_invocation": {"inputs": {…用 inputs 的實際名稱與 example 值…}},\n'
+        ' "tags": ["…max 5 檢索關鍵字（中英混合）"]}\n'
+        "規則：寫能力與時機，不寫 block 名；inputs 名稱必須與宣告一致；只輸出 JSON。"
+    )
+    user = json.dumps({
+        "name": req.name, "nl": req.nl,
+        "inputs": inputs, "nodes": nodes,
+        "siblings": (req.siblings or [])[:8],
+    }, ensure_ascii=False, default=str)[:5000]
+    try:
+        resp = await client.create(system=system,
+                                   messages=[{"role": "user", "content": user}],
+                                   max_tokens=900)
+        raw = (resp.text or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1]
+            if raw.rstrip().endswith("```"):
+                raw = raw.rstrip()[:-3]
+        doc = json.loads(raw)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("skill_draft_doc: LLM failed: %s", ex)
+        raise HTTPException(status_code=502, detail=f"doc draft failed: {ex}"[:200])
+    if not isinstance(doc, dict) or not doc.get("use_case"):
+        raise HTTPException(status_code=502, detail="doc draft unusable")
+    return {"doc": doc, "model": model}
+
+
 # ── Full-data CSV export (2026-07-07) ─────────────────────────────────────
 # UI tables ship at most ~100 rows for render performance; users who need
 # the complete dataset download it here instead. Re-executes the subgraph

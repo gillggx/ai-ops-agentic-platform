@@ -92,8 +92,17 @@ public class SkillV2Service {
 	public SkillFullDto createWithPipeline(Map<String, Object> body, Long callerUserId) {
 		String slug = String.valueOf(body.getOrDefault("slug", "")).trim();
 		String name = String.valueOf(body.getOrDefault("name", "")).trim();
-		if (slug.isBlank()) throw ApiException.badRequest("slug is required");
 		if (name.isBlank()) throw ApiException.badRequest("name is required");
+		// 真 Skill 化 (2026-07-08): chat 的存為 Skill 不帶 slug — 從 name 衍生
+		// （latent bug: 舊路徑直接 400）。碰撞時加序號。
+		if (slug.isBlank()) {
+			String base = name.toLowerCase().replaceAll("[^a-z0-9\\u4e00-\\u9fff]+", "-")
+					.replaceAll("(^-|-$)", "");
+			if (base.isBlank()) base = "skill";
+			slug = base;
+			int i = 2;
+			while (repo.findBySlug(slug).isPresent()) slug = base + "-" + (i++);
+		}
 		if (repo.findBySlug(slug).isPresent()) {
 			throw ApiException.conflict("slug already exists: " + slug);
 		}
@@ -123,11 +132,41 @@ public class SkillV2Service {
 		row.setHasAlarm(Boolean.FALSE);
 		row.setRole("tool");
 		row.setStatus("draft");
+		Object docObj = body.get("doc");
+		if (docObj != null) {
+			String docJson = (docObj instanceof String ds) ? ds : JsonUtils.safeWrite(mapper, docObj);
+			if (docJson != null && !docJson.isBlank()) row.setDoc(docJson);
+		}
 		row = repo.save(row);
 
 		// 3. Bind (derives pipeline_nodes + has_alarm + in/out types).
 		SkillDto bound = bindPipeline(slug, pipeline.getId());
 		return new SkillFullDto(bound, pipelineJson);
+	}
+
+	/** 真 Skill 化 F4 (2026-07-08): 參數化精靈的更新出口 — 覆寫綁定 pipeline 的
+	 *  pipeline_json（含 inputs 宣告與 $refs）與/或說明書 doc。 */
+	public SkillDto updatePipelineAndDoc(String slug, Map<String, Object> body) {
+		SkillV2Entity row = loadBySlug(slug);
+		Object pjObj = body.get("pipeline_json");
+		if (pjObj != null) {
+			if (row.getPipelineId() == null) throw ApiException.badRequest("skill has no bound pipeline");
+			PipelineEntity pipeline = pipelineRepo.findById(row.getPipelineId())
+					.orElseThrow(() -> ApiException.notFound("pipeline " + row.getPipelineId()));
+			String pipelineJson = (pjObj instanceof String s) ? s : JsonUtils.safeWrite(mapper, pjObj);
+			if (pipelineJson == null || pipelineJson.isBlank()) {
+				throw ApiException.badRequest("pipeline_json could not be serialized");
+			}
+			pipeline.setPipelineJson(pipelineJson);
+			pipelineRepo.save(pipeline);
+		}
+		Object docObj = body.get("doc");
+		if (docObj != null) {
+			String docJson = (docObj instanceof String ds) ? ds : JsonUtils.safeWrite(mapper, docObj);
+			row.setDoc(docJson);
+		}
+		row = repo.save(row);
+		return SkillDto.of(row);
 	}
 
 	// ─── Read ──────────────────────────────────────────────────────────
@@ -580,7 +619,7 @@ public class SkillV2Service {
 			String nl, Long pipelineId, String pipelineNodes,
 			Boolean hasAlarm, String inType, String outType,
 			String role, String triggerConfig, String alarmGate, String outcome,
-			String status, String testCases, ToolBindingDto toolBinding
+			String status, String testCases, String doc, ToolBindingDto toolBinding
 	) {
 		static SkillDto of(SkillV2Entity e) {
 			return of(e, null);
@@ -592,7 +631,7 @@ public class SkillV2Service {
 					e.getNl(), e.getPipelineId(), e.getPipelineNodes(),
 					e.getHasAlarm(), e.getInType(), e.getOutType(),
 					e.getRole(), e.getTriggerConfig(), e.getAlarmGate(), e.getOutcome(),
-					e.getStatus(), e.getTestCases(), toolBinding
+					e.getStatus(), e.getTestCases(), e.getDoc(), toolBinding
 			);
 		}
 	}

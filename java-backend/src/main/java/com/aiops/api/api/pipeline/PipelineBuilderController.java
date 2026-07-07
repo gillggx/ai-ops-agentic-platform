@@ -135,6 +135,32 @@ public class PipelineBuilderController {
 				.block();
 	}
 
+	/** 真 Skill 化 (2026-07-08): source 身分參數 → 宣告式 inputs（確定性）。 */
+	@PostMapping("/parameterize")
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public Map<String, Object> parameterize(@RequestBody Map<String, Object> body) {
+		return sidecarClient.post()
+				.uri("/internal/pipeline/parameterize")
+				.header("Content-Type", "application/json")
+				.bodyValue(body)
+				.retrieve()
+				.bodyToMono(Map.class)
+				.block();
+	}
+
+	/** 真 Skill 化 (2026-07-08): Haiku 草擬 skill 說明書（人審後儲存）。 */
+	@PostMapping("/skill-draft-doc")
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public Map<String, Object> skillDraftDoc(@RequestBody Map<String, Object> body) {
+		return sidecarClient.post()
+				.uri("/internal/pipeline/skill-draft-doc")
+				.header("Content-Type", "application/json")
+				.bodyValue(body)
+				.retrieve()
+				.bodyToMono(Map.class)
+				.block();
+	}
+
 	/** Full-data CSV export (2026-07-07). UI tables render at most ~100 rows
 	 *  for performance; the complete dataset downloads here. The sidecar
 	 *  re-executes the subgraph and streams text/csv — passed through as a

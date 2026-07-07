@@ -166,6 +166,38 @@ public class PipelineBuilderService {
 		e.setPipelineId(sk.getPipelineId());
 		e.setStatus("active");
 		e.setSource("skill_v2");
+		// 真 Skill 化 (2026-07-08): doc（人審過的說明書）優先於 sub/nl；
+		// inputs_schema 直接取綁定 pipeline 的 inputs 宣告 — agent 據此帶參數。
+		if (sk.getDoc() != null && !sk.getDoc().isBlank()) {
+			Map<String, Object> doc = JsonUtils.parseObject(mapper, sk.getDoc());
+			Object uc = doc.get("use_case");
+			if (uc instanceof String u && !u.isBlank()) e.setUseCase(u);
+			Object wtu = doc.get("when_to_use");
+			if (wtu != null) {
+				String w = JsonUtils.safeWrite(mapper, wtu);
+				if (w != null) e.setWhenToUse(w);
+			}
+			Object tags = doc.get("tags");
+			if (tags != null) {
+				String t = JsonUtils.safeWrite(mapper, tags);
+				if (t != null) e.setTags(t);
+			}
+			Object ex = doc.get("example_invocation");
+			if (ex != null) {
+				String x = JsonUtils.safeWrite(mapper, ex);
+				if (x != null) e.setExampleInvocation(x);
+			}
+		}
+		if (sk.getPipelineId() != null) {
+			pipelineRepo.findById(sk.getPipelineId()).ifPresent(pl -> {
+				Map<String, Object> pj = JsonUtils.parseObject(mapper, pl.getPipelineJson());
+				Object inputs = pj.get("inputs");
+				if (inputs instanceof java.util.List<?> l && !l.isEmpty()) {
+					String is = JsonUtils.safeWrite(mapper, inputs);
+					if (is != null) e.setInputsSchema(is);
+				}
+			});
+		}
 		return e;
 	}
 

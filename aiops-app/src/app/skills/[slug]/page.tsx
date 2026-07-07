@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import SkillParameterizeModal, { type SkillDoc } from "@/components/skills-v2/SkillParameterizeModal";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -33,6 +34,42 @@ export default function SkillEditorPage() {
   const [saving, setSaving] = useState(false);
   const [opening, setOpening] = useState(false);
   const [activating, setActivating] = useState(false);
+  // 真 Skill 化 F4 (2026-07-08): 舊 skill 回補參數化 + 說明書
+  const [paramWizardOpen, setParamWizardOpen] = useState(false);
+  const [wizardPipeline, setWizardPipeline] = useState<Record<string, unknown> | null>(null);
+
+  const openParamWizard = useCallback(async () => {
+    if (!skill?.pipeline_id) return;
+    try {
+      const res = await fetch(`/api/pipeline-builder/pipelines/${skill.pipeline_id}`);
+      const data = await res.json();
+      const raw = data?.data?.pipeline_json ?? data?.pipeline_json;
+      const pj = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!pj?.nodes) throw new Error("pipeline_json unavailable");
+      setWizardPipeline(pj as Record<string, unknown>);
+      setParamWizardOpen(true);
+    } catch (e) {
+      alert(`載入 pipeline 失敗：${e instanceof Error ? e.message : e}`);
+    }
+  }, [skill?.pipeline_id]);
+
+  const saveParamWizard = useCallback(async ({ pipelineJson, doc }: { pipelineJson: Record<string, unknown>; doc: SkillDoc | null }) => {
+    setParamWizardOpen(false);
+    try {
+      const res = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/pipeline`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipeline_json: pipelineJson, doc: doc ?? undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || res.statusText);
+      }
+      alert("已更新：開放參數與說明書已存檔。");
+    } catch (e) {
+      alert(`更新失敗：${e instanceof Error ? e.message : e}`);
+    }
+  }, [slug]);
   const [toast, setToast] = useState("");
   const nlRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -243,6 +280,14 @@ export default function SkillEditorPage() {
                     }}>
                       {opening ? t("opening") : t("editPipeline")}
                     </button>
+                    <button onClick={() => { void openParamWizard(); }} title="開放可換參數 + 草擬說明書" style={{
+                      font: `600 11.5px ${FONT.sans}`,
+                      color: TK.indigo, background: "#eef2ff",
+                      border: "1px solid #c7d2fe",
+                      padding: "6px 11px", borderRadius: 7, cursor: "pointer",
+                    }}>
+                      參數化
+                    </button>
                   </>
                 ) : (
                   <button onClick={() => handleOpenBuilder("compile")} disabled={opening} style={{
@@ -268,6 +313,18 @@ export default function SkillEditorPage() {
 
         {/* System alarm check */}
         <AlarmCheck hasAlarm={hasAlarm} />
+
+        {paramWizardOpen && wizardPipeline && (
+          <SkillParameterizeModal
+            open={paramWizardOpen}
+            skillName={skill.name}
+            nl={skill.nl}
+            pipelineJson={wizardPipeline}
+            onClose={() => setParamWizardOpen(false)}
+            onConfirm={saveParamWizard}
+            confirmLabel="更新 Skill"
+          />
+        )}
 
         {/* Activation gate — only meaningful once a pipeline is bound */}
         {skill.pipeline_id != null && (

@@ -47,6 +47,14 @@ public class SkillV2Controller {
 	 * Lands as status='draft' (NOT active). Body:
 	 * {slug, name, sub?, nl?, pipeline_json, pipeline_kind?}.
 	 */
+	/** 真 Skill 化 F4: 參數化精靈更新（pipeline_json 與/或 doc）。 */
+	@PutMapping("/{slug}/pipeline")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> updatePipeline(
+			@PathVariable String slug, @RequestBody Map<String, Object> body) {
+		return ApiResponse.ok(service.updatePipelineAndDoc(slug, body));
+	}
+
 	@PostMapping("/with-pipeline")
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public ApiResponse<SkillV2Service.SkillFullDto> createWithPipeline(

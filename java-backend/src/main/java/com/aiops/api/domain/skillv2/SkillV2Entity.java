@@ -91,6 +91,11 @@ public class SkillV2Entity {
 	@Column(name = "test_cases", nullable = false, columnDefinition = "text")
 	private String testCases = "[]";
 
+	/** 真 Skill 化 (2026-07-08): JSON {use_case, when_to_use[], distinction,
+	 *  example_invocation, tags[]} — agent 選 skill 的說明書（人審後儲存）。 */
+	@Column(name = "doc", columnDefinition = "text")
+	private String doc;
+
 	@Column(name = "created_by")
 	private Long createdBy;
 

@@ -18,6 +18,7 @@
 import { useState } from "react";
 import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
 import DataResultView from "@/components/common/DataResultView";
+import SkillParameterizeModal, { type SkillDoc } from "@/components/skills-v2/SkillParameterizeModal";
 import type {
   NodeResult,
   PipelineResultSummary,
@@ -278,29 +279,38 @@ function DataViewTable({ dv, pipelineJson }: { dv: PipelineDataView; pipelineJso
 
 function ActionBar({ card }: { card: PbPipelineCardData }) {
   const isAdHoc = card.type === "pb_pipeline";
+  const adhoc = card.type === "pb_pipeline" ? card : null;  // TS narrowing for goal/pipeline_json
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // 真 Skill 化 (2026-07-08): 存檔前走參數化精靈（開放參數 + 說明書）
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [pendingName, setPendingName] = useState<string>("");
 
-  async function handleSaveAsSkill() {
+  function handleSaveAsSkill() {
     if (!isAdHoc) return;
     const defaultName = card.pipeline_json.name || "Chat-built Pipeline";
     const name = window.prompt("儲存為 Skill（草稿）\n\n名稱：", defaultName);
     if (!name) return;
+    setPendingName(name);
+    setWizardOpen(true);
+  }
+
+  async function saveSkill(pj: Record<string, unknown>, doc: SkillDoc | null) {
+    setWizardOpen(false);
     setSaving(true);
     try {
       // 2026-06-28: route through the v2 atomic endpoint (pipeline + skill +
-      // bind in one txn) instead of the old /pipelines call that left an
-      // orphan in the PB Library and never appeared under /skills. Carry the
-      // user's original prompt as the skill's NL so it isn't lost.
+      // bind in one txn). 2026-07-08: pipeline 已參數化、doc 為人審過的說明書。
       const res = await fetch("/api/skills-v2/with-pipeline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name,
-          nl: card.goal ?? "",
-          sub: card.goal ? card.goal.slice(0, 60) : "從 Agent 對話建立",
-          pipeline_json: card.pipeline_json,
+          name: pendingName,
+          nl: adhoc?.goal ?? "",
+          sub: adhoc?.goal ? adhoc.goal.slice(0, 60) : "從 Agent 對話建立",
+          pipeline_json: pj,
           pipeline_kind: "skill",
+          doc: doc ?? undefined,
         }),
       });
       if (!res.ok) {
@@ -339,6 +349,17 @@ function ActionBar({ card }: { card: PbPipelineCardData }) {
 
   return (
     <div style={{ display: "flex", gap: 8, padding: "8px 12px", borderTop: "1px solid #F1F5F9", background: "#FAFBFC" }}>
+      {isAdHoc && (
+        <SkillParameterizeModal
+          open={wizardOpen}
+          skillName={pendingName}
+          nl={adhoc?.goal ?? ""}
+          pipelineJson={(adhoc?.pipeline_json ?? {}) as unknown as Record<string, unknown>}
+          onClose={() => setWizardOpen(false)}
+          onConfirm={({ pipelineJson: pj, doc }) => { void saveSkill(pj, doc); }}
+          confirmLabel="建立 Skill"
+        />
+      )}
       {isAdHoc && (
         <>
           <button
