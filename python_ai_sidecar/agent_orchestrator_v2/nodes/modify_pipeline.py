@@ -40,6 +40,33 @@ from python_ai_sidecar.agent_orchestrator_v2.nodes.coordinator_triage import (
     _CHART_BLOCKS,
     _PATCHABLE as _CHART_PRESENTATION_PARAMS,
 )
+# The REAL adjustable style sub-keys — single source is the chart-style parser.
+# The Planner must be told these EXACT keys so it doesn't invent unsupported
+# ones (e.g. `color` / `background_color`, which parse_style silently drops).
+from python_ai_sidecar.pipeline_builder.blocks._chart_style import _STYLE_KEYS
+
+_VALID_STYLE_SUBKEYS = set(_STYLE_KEYS.keys())
+
+# Plain-language description of what each adjustable knob does — fed to the
+# Planner so it can (a) map a request to the right param, or (b) recognise a
+# request that maps to NOTHING and ask instead of faking a no-op delta.
+_STYLE_HELP = {
+    "spc_zones": "SPC 管制區帶（Zone A/B/C 彩色分層）開關 — 圖上那塊彩色背景就是它",
+    "line_style": "線型：solid / dash / step",
+    "show_markers": "資料點標記開關",
+    "marker_size": "標記大小：small / medium / large",
+    "show_values": "點上數值開關",
+    "x_label": "X 軸標籤文字",
+    "y_label": "Y 軸標籤文字",
+    "legend": "圖例位置：none / top / right",
+}
+# Things users often ASK for that the chart surface does NOT support — so the
+# Planner clarifies instead of pretending. (principle, not a case list)
+_NOT_ADJUSTABLE = (
+    "圖表線色 / 背景色無法自由更改（沒有 color / background 參數）。"
+    "使用者說「改顏色」時，多半是指圖上那塊彩色分區 = SPC 管制區帶（spc_zones），"
+    "那個只能開 / 關，不能換色。遇到這種請求要 clarify 反問，不要硬套 delta。"
+)
 
 # Source-node identity params a delta may set (data-scope change = delta,
 # not rebuild — user decision 2026-07-08).
@@ -97,6 +124,8 @@ def build_situation_report(
             "output_columns": columns.get(nid, []),
             "editable_params": _editable_params(n, sources),
         })
+    has_chart = any(n.get("block_id") in _CHART_BLOCKS
+                    for n in (snapshot.get("nodes") or []))
     return {
         "user_request": user_request,
         "route": route,
@@ -104,8 +133,17 @@ def build_situation_report(
         "edges": [(e.get("from", {}).get("node"), e.get("to", {}).get("node"))
                   for e in (snapshot.get("edges") or [])],
         "rules": {
-            "chart_presentation_params": sorted(_CHART_PRESENTATION_PARAMS),
+            # The EXACT adjustable style knobs + what each does (not the opaque
+            # "style" token) — so the Planner maps requests correctly or knows
+            # when to clarify.
+            "adjustable_chart_style": _STYLE_HELP if has_chart else {},
+            "adjustable_chart_other": {
+                "tooltip_fields": "hover 提示顯示的欄位（用 output_columns 的真實欄位名，上限 5）",
+                "weco_annotate": "標注 WECO 違規點（true/false）",
+                "title": "圖表標題文字",
+            } if has_chart else {},
             "source_identity_params": sorted(_SOURCE_IDENTITY_PARAMS),
+            "not_adjustable": _NOT_ADJUSTABLE if has_chart else "",
             "note": "tooltip/欄位引用只能用該節點 output_columns 裡真實存在的欄位名。",
         },
     }
@@ -116,23 +154,27 @@ _PLANNER_SYS = """你是 Planner（修改模式，純推理，禁止呼叫任何
 該節點的 output_columns（實際有的欄位）、以及該節點在修改模式下可改的
 editable_params。
 
-針對使用者這句修改請求，輸出「最小增量」JSON：
-{"mode": "delta" | "rebuild",
+針對使用者這句修改請求，輸出 JSON（三選一）：
+{"mode": "delta" | "clarify" | "rebuild",
  "reason": "一句話",
- "ops": [{"op":"set_param","node":"<id>","params":{...}}]}
+ "ops": [{"op":"set_param","node":"<id>","params":{...}}],   // 只有 delta 要
+ "question": "要反問使用者的一句話"}                          // 只有 clarify 要
 
 規則（硬性）：
-- 只要在現有節點上改參數就能達成 → mode=delta，絕不 rebuild。
-- 只能動報告裡該節點的 editable_params 列出的參數。
-- tooltip / 欲顯示的欄位，若某節點的 output_columns 已含該欄位 → 直接
-  set tooltip_fields，用真實欄位名；不要新增 select 或任何節點。
-- 換機台 / 站點 / 時間窗 → 改來源節點的身分參數（如 tool_id / step /
-  time_range），結構不動，這也是 delta。
-- 只有當現有結構「根本無法」達成（需要全新的資料來源結構、或需要的欄位
-  任何現有節點的 output_columns 都沒有且無法用改參數取得）才 mode=rebuild、
-  ops 留空。
-- style 類參數用巢狀物件，例如關掉區帶 = {"style":{"spc_zones":false}}。
-只輸出 JSON，不要解釋。"""
+- 能用現有節點改參數達成 → mode=delta，絕不 rebuild。
+- delta 只能動報告 rules 裡列出的可調項：chart 節點 =
+  adjustable_chart_style 的 key（用巢狀 {"style":{...}}）+ adjustable_chart_other；
+  source 節點 = source_identity_params。**不得發明沒列出的參數名**。
+- tooltip / 欲顯示欄位若某節點 output_columns 已含 → set tooltip_fields，用真實
+  欄位名，不要加 select 或任何節點。
+- 換機台 / 站點 / 時間窗 → 改來源節點身分參數（tool_id / step / time_range），
+  結構不動，也是 delta。
+- **mode=clarify（重要，別再裝死）**：使用者要的東西**對不到任何可調項**（典型
+  是「改顏色 / 換背景色 / 換線色」——見 rules.not_adjustable），或語意含糊到
+  猜不準時 → 不要硬套一個無效 delta。回 mode=clarify + 一句 question 誠實說明
+  「這個不能直接改」並提供**真的做得到**的替代（例：關/開 SPC 區帶）。ops 留空。
+- 只有現有結構根本無法達成（要全新資料結構）才 mode=rebuild、ops 留空。
+只輸出 JSON，不要多餘解釋。"""
 
 
 async def planner_delta(report: Dict[str, Any], user_msg: str) -> Dict[str, Any]:
@@ -184,6 +226,16 @@ def apply_delta(
         illegal = [k for k in sets if k not in allowed]
         if illegal:
             return None, f"params {illegal} not editable on node '{nid}' (allowed: {sorted(allowed)})"
+        # Validate STYLE SUB-KEYS too — parse_style silently drops unknown ones
+        # (e.g. `color`/`background_color`), which is exactly how a delta used to
+        # "succeed" while changing nothing. Reject so run_modify can fall through
+        # to clarify instead of faking success.
+        style_val = sets.get("style")
+        if isinstance(style_val, dict):
+            bad = [k for k in style_val if k not in _VALID_STYLE_SUBKEYS]
+            if bad:
+                return None, (f"style sub-keys {bad} not supported on '{nid}' "
+                              f"(valid: {sorted(_VALID_STYLE_SUBKEYS)})")
         params = dict(out_nodes[nid].get("params") or {})
         for k, v in sets.items():
             if k == "style" and isinstance(v, dict) and isinstance(params.get("style"), dict):
@@ -243,11 +295,27 @@ async def run_modify(
         return None
     mode = str((delta or {}).get("mode") or "")
     ops = (delta or {}).get("ops") or []
+    question = str((delta or {}).get("question") or "").strip()
     if rec:
         rec.record("modify_plan", agent="planner", payload={
             "mode": mode, "reason": str((delta or {}).get("reason") or "")[:200],
-            "ops": ops,
+            "ops": ops, "question": question[:200],
         })
+
+    # 3b. clarify — the request maps to nothing adjustable (e.g. 改顏色) or is
+    # ambiguous. Ask honestly instead of faking a no-op delta. No card, no
+    # rebuild; just a question back to the user.
+    if mode == "clarify":
+        msg = question or (
+            "這個調整目前無法直接做到。圖表顏色不能自由更改；你看到的彩色分區是 "
+            "SPC 管制區帶，我可以幫你「關掉區帶」變白底或保留。要怎麼處理？")
+        logger.info("modify: clarify — %s", msg[:80])
+        return {
+            "force_synthesis": True,
+            "messages": [AIMessage(content=msg)],
+            "coordinator_route": {"route": route, "reason": "clarify", "fast_path": True},
+        }
+
     if mode != "delta" or not ops:
         logger.info("modify: planner says mode=%s — pass through to rebuild (G3)", mode)
         return None
@@ -255,6 +323,20 @@ async def run_modify(
     # 4. apply (deterministic, whitelisted)
     patched, why = apply_delta(snapshot, ops)
     if patched is None:
+        # Unsupported style sub-key (e.g. color) → don't rebuild, don't fake it:
+        # tell the user honestly what IS adjustable. Other rejects → G3 rebuild.
+        if "style sub-keys" in why:
+            logger.info("modify: unsupported style ask (%s) — clarify", why)
+            return {
+                "force_synthesis": True,
+                "messages": [AIMessage(content=(
+                    "這個樣式目前無法直接調整（例如顏色 / 背景色沒有對應設定）。"
+                    "圖上的彩色分區是 SPC 管制區帶，我可以幫你開 / 關它；"
+                    "其他可調的有：線型、標記、點上數值、軸標籤、圖例、提示欄位。"
+                    "你想改哪一個？"))],
+                "coordinator_route": {"route": route, "reason": "unsupported_style",
+                                      "fast_path": True},
+            }
         logger.info("modify: delta rejected (%s) — pass through (G3)", why)
         return None
 
