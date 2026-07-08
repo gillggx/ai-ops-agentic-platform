@@ -1595,6 +1595,25 @@ export function AIAgentPanel({
             const doneStatus = (ev.status as string) ?? "finished";
             // v1.4 — stash for the edit-link card later.
             if (ev.pipeline_json) lastBuiltPipelineRef.current = ev.pipeline_json;
+            // 2026-07-08 modify-mode fix: a Lite Canvas build completes via
+            // pb_glass_done (NOT a pb_pipeline render_card), so the render_card
+            // capture below never ran and lastChatPipelineRef stayed null — the
+            // next follow-up shipped no snapshot and every edit rebuilt. Capture
+            // the built pipeline here too so「拿掉區帶」/「加 tooltip」/「換機台」
+            // reach the Coordinator triage as deltas.
+            {
+              const pjDone = ev.pipeline_json as {
+                nodes?: unknown[]; node_results?: Record<string, { preview?: Record<string, { columns?: string[] }> | null }>;
+              } | undefined;
+              if (doneStatus !== "refused" && doneStatus !== "failed"
+                  && (pjDone?.nodes?.length ?? 0) > 0) {
+                lastChatPipelineRef.current = pjDone as unknown as Record<string, unknown>;
+                // glass_done usually has no node_results; leave columns null so
+                // the backend harvests them once (run_modify fallback).
+                lastChatColumnsRef.current = pjDone?.node_results
+                  ? columnsFromNodeResults(pjDone.node_results) : null;
+              }
+            }
             onGlassDone?.({
               status: doneStatus,
               summary,
