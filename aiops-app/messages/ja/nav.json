@@ -21,5 +21,6 @@
   "collapseMenu": "メニューを折りたたむ",
   "expandCopilot": "Copilot を展開",
   "collapseCopilot": "Copilot を折りたたむ",
-  "buildIncomplete": "ビルドが完了しませんでした（status={status}）"
+  "buildIncomplete": "ビルドが完了しませんでした（status={status}）",
+  "draftShelf": "下書き棚"
 }

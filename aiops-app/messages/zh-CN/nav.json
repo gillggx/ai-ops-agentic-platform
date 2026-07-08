@@ -21,5 +21,6 @@
   "collapseMenu": "收起菜单",
   "expandCopilot": "展开 Copilot",
   "collapseCopilot": "收起 Copilot",
-  "buildIncomplete": "构建未完成（status={status}）"
+  "buildIncomplete": "构建未完成（status={status}）",
+  "draftShelf": "草稿暂存区"
 }

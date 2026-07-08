@@ -21,5 +21,6 @@
   "collapseMenu": "Collapse menu",
   "expandCopilot": "Expand Copilot",
   "collapseCopilot": "Collapse Copilot",
-  "buildIncomplete": "Build incomplete (status={status})"
+  "buildIncomplete": "Build incomplete (status={status})",
+  "draftShelf": "Draft Shelf"
 }

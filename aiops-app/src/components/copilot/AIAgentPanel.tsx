@@ -57,6 +57,48 @@ function columnsFromNodeResults(
   return out;
 }
 
+/** 草稿暫存區 (V78): thumbnail hint from the terminal chart block. */
+function deriveDraftKind(pj: { nodes?: Array<{ block_id?: string }> } | undefined): string {
+  const blocks = (pj?.nodes ?? []).map((n) => n.block_id ?? "");
+  if (blocks.some((b) => b.includes("pareto"))) return "pareto";
+  if (blocks.some((b) => b.includes("bar_chart"))) return "bar";
+  if (blocks.some((b) => b.includes("data_view"))) return "table";
+  if (blocks.some((b) => b.includes("panel"))) return "panel";
+  if (blocks.some((b) => b.includes("line_chart") || b.includes("xbar") || b.includes("imr"))) return "spc_trend";
+  if (blocks.some((b) => b.includes("chart"))) return "chart";
+  return "";
+}
+
+/** 草稿暫存區 (V78): auto-park a chat-built pipeline. Fire-and-forget —
+ *  a draft-save failure must never disrupt the chat. Dedupe by node signature
+ *  so the same pipeline re-rendering doesn't create duplicate drafts. */
+async function autoSaveDraft(
+  pj: Record<string, unknown> | null,
+  columns: Record<string, string[]> | null,
+  nl: string,
+): Promise<void> {
+  const nodes = (pj?.nodes as unknown[]) ?? [];
+  const edges = (pj?.edges as unknown[]) ?? [];
+  if (!pj || nodes.length === 0) return;
+  try {
+    await fetch("/api/chat-drafts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: (pj.name as string) || nl.slice(0, 60) || "Chat 草稿",
+        nl,
+        pipeline_json: pj,
+        columns: columns ?? {},
+        kind: deriveDraftKind(pj as { nodes?: Array<{ block_id?: string }> }),
+        node_count: nodes.length,
+        edge_count: edges.length,
+      }),
+    });
+  } catch {
+    // ignore — draft staging is best-effort
+  }
+}
+
 interface StageState {
   stage: number;
   label: string;
@@ -767,6 +809,9 @@ export function AIAgentPanel({
   // shipped so the Coordinator situation report is column-aware (knows a
   // tooltip field like lotID/RECIPE already flows to the chart node).
   const lastChatColumnsRef = useRef<Record<string, string[]> | null>(null);
+  // 草稿暫存區 (V78): signature of the last auto-saved pipeline, so the same
+  // build re-rendering doesn't create duplicate drafts.
+  const lastSavedDraftSigRef = useRef<string>("");
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1168,6 +1213,22 @@ export function AIAgentPanel({
                 lastChatPipelineRef.current =
                   pbCard.pipeline_json as unknown as Record<string, unknown>;
                 lastChatColumnsRef.current = columnsFromNodeResults(pbCard.node_results);
+                // 草稿暫存區 (V78): auto-park ONLY a standalone fresh build.
+                // In Lite Canvas / session mode this render_card is a modify
+                // DELTA (a tweak), and Lite Canvas fresh builds are already
+                // saved via pb_glass_done — so don't create a draft per tweak.
+                if (!liteCanvasActive && mode !== "session") {
+                  const sig = JSON.stringify(
+                    (pbCard.pipeline_json?.nodes ?? []).map((n) => [n.id, n.block_id]));
+                  if (sig !== lastSavedDraftSigRef.current) {
+                    lastSavedDraftSigRef.current = sig;
+                    void autoSaveDraft(
+                      pbCard.pipeline_json as unknown as Record<string, unknown>,
+                      lastChatColumnsRef.current,
+                      (pbCard.goal || lastUserPromptRef.current).replace(/^\s*\[[^\]]*\]\s*/, "").trim(),
+                    );
+                  }
+                }
               }
               // Thread the user's original prompt (intent prefix stripped) so
               // 存為 Skill records it as the skill's NL instead of losing it.
@@ -1620,6 +1681,16 @@ export function AIAgentPanel({
                 // the backend harvests them once (run_modify fallback).
                 lastChatColumnsRef.current = pjDone?.node_results
                   ? columnsFromNodeResults(pjDone.node_results) : null;
+                // 草稿暫存區 (V78): auto-park this fresh build (dedupe by nodes).
+                const sig = JSON.stringify(pjDone?.nodes ?? []);
+                if (sig !== lastSavedDraftSigRef.current) {
+                  lastSavedDraftSigRef.current = sig;
+                  void autoSaveDraft(
+                    pjDone as unknown as Record<string, unknown>,
+                    lastChatColumnsRef.current,
+                    lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "").trim(),
+                  );
+                }
               }
             }
             onGlassDone?.({
