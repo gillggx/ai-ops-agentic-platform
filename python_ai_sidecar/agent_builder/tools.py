@@ -1222,6 +1222,46 @@ class BuilderToolset:
         if node_id not in node_ids:
             raise ToolError(code="NODE_NOT_FOUND", message=f"Node '{node_id}' not in pipeline")
 
+        # ── No-upstream guard (2026-07-08) ────────────────────────────────
+        # A data-consuming node (category != source) with NO inbound edge has
+        # an empty `data` port — executing it fails with the cryptic
+        # "'data' must be a DataFrame". Agents then flail, guessing a data
+        # source *param* (upstream/data/source/connect/…) for many rounds
+        # (real trace: 9 wasted rounds on block_line_chart). Warn FIRST,
+        # structurally: name the missing connection instead of running to a
+        # DataFrame error. Deterministic — keyed on (category, inbound edge),
+        # so it holds for every consumer block and every language.
+        target = next((n for n in pipeline.nodes if n.id == node_id), None)
+        if target is not None:
+            spec = self.registry.get_spec(target.block_id, target.block_version) or {}
+            category = (spec.get("category") or "").lower()
+            has_inbound = any(e.to.node == node_id for e in pipeline.edges)
+            if category and category != "source" and not has_inbound:
+                # Suggest a concrete upstream to connect: prefer a node that
+                # already produces data (a source, or one with its own inbound
+                # edge) and isn't itself an orphan target.
+                def _produces_data(n: PipelineNode) -> bool:
+                    if n.id == node_id:
+                        return False
+                    if any(e.to.node == n.id for e in pipeline.edges):
+                        return True
+                    cat = (self.registry.get_spec(n.block_id, n.block_version) or {}).get("category", "")
+                    return str(cat).lower() == "source"
+                candidates = [n.id for n in pipeline.nodes if _produces_data(n)]
+                pick = candidates[-1] if candidates else "<上游節點>"
+                return {
+                    "status": "no_upstream",
+                    "warning": (
+                        f"'{node_id}' ({target.block_id}) 尚未連上游，data port 是空的——"
+                        "所以還不能 preview/執行。"
+                    ),
+                    "hint": (
+                        "這類節點的資料是從 inbound 連線流進來的，不是參數。"
+                        f"先接上游，例如 connect(from_node='{pick}', to_node='{node_id}')。"
+                        "不要去找 data/upstream/source/connect 這種參數（它們不存在）。"
+                    ),
+                }
+
         # Truncate to ancestors + target
         ancestors = {node_id}
         frontier = {node_id}
