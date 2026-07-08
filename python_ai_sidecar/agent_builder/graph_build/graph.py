@@ -79,6 +79,9 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.phase_revise import (
 from python_ai_sidecar.agent_builder.graph_build.nodes.plan_patch import (
     plan_patch_node,
 )
+from python_ai_sidecar.agent_builder.graph_build.nodes.build_postmortem import (
+    build_postmortem_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.coordinator_diagnose import (
     coordinator_diagnose_node,
 )
@@ -431,6 +434,11 @@ def _route_after_phase_revise(state: BuildGraphState) -> str:
     if status == "plan_patch_pending":
         return "plan_patch"
     if status == "handover_pending":
+        # build-failure recovery (2026-07-09): before giving up, let the
+        # Coordinator do ONE holistic post-mortem → replan + retry. Capped so
+        # a second give-up goes straight to handover.
+        if int(state.get("v30_postmortem_count") or 0) < 1:
+            return "build_postmortem"
         return "halt_handover"
     return "agentic_phase_loop"
 
@@ -446,6 +454,11 @@ def _route_after_plan_patch(state: BuildGraphState) -> str:
     if status == "plan_patch_pending":
         return "plan_patch"
     if status == "handover_pending":
+        # build-failure recovery (2026-07-09): before giving up, let the
+        # Coordinator do ONE holistic post-mortem → replan + retry. Capped so
+        # a second give-up goes straight to handover.
+        if int(state.get("v30_postmortem_count") or 0) < 1:
+            return "build_postmortem"
         return "halt_handover"
     return "agentic_phase_loop"
 
@@ -789,6 +802,15 @@ def build_graph():
         finally:
             reset_current_agent(tok)
     g.add_node("plan_patch", _plan_patch_delegate)
+    # build-failure recovery (2026-07-09): Coordinator-attributed holistic
+    # post-mortem → replan hint → retry once, before halt_handover.
+    async def _postmortem_delegate(state: BuildGraphState) -> dict[str, Any]:
+        tok = set_current_agent("repair")
+        try:
+            return _drain_console(await build_postmortem_node(state))
+        finally:
+            reset_current_agent(tok)
+    g.add_node("build_postmortem", _postmortem_delegate)
     g.add_node("halt_handover", halt_handover_node)
     # v30.17j: deficit pause node — interrupt() + wait for user action
     from python_ai_sidecar.agent_builder.graph_build.nodes.judge_clarify_pause import (
@@ -888,15 +910,17 @@ def build_graph():
         "phase_revise",
         _route_after_phase_revise,
         {"agentic_phase_loop": "agentic_phase_loop", "halt_handover": "halt_handover",
-         "plan_patch": "plan_patch"},
+         "plan_patch": "plan_patch", "build_postmortem": "build_postmortem"},
     )
     # 波2 M2: plan_patch -> loop (applied) / self-retry (rejected) / handover
     g.add_conditional_edges(
         "plan_patch",
         _route_after_plan_patch,
         {"agentic_phase_loop": "agentic_phase_loop", "plan_patch": "plan_patch",
-         "halt_handover": "halt_handover"},
+         "halt_handover": "halt_handover", "build_postmortem": "build_postmortem"},
     )
+    # build-failure recovery: post-mortem → replan WITH the correction hint.
+    g.add_edge("build_postmortem", "goal_plan")
 
     # 波2 G2: coordinator -> verify (order applied) / plan_patch (escalate)
     # / self (retry with different diagnosis) / loop (degenerate)

@@ -313,6 +313,12 @@ class BuildGraphState(TypedDict, total=False):
     # last order digest (fed back into the next diagnosis as「已試過」).
     v30_work_order_counts: dict
     v30_last_work_order: Optional[dict]
+    # build-failure recovery (2026-07-09) — when even G2/M2 exhaust and the
+    # build would give up (handover_pending), the Coordinator does ONE holistic
+    # post-mortem (建到哪 / 卡在哪 / 少什麼) → correction direction → replan +
+    # retry, before halt_handover. Capped at 1 so it never loops.
+    v30_postmortem_count: int
+    v30_postmortem: Optional[dict]
     # v30.22 (2026-05-19) — agent-driven verify trigger. When the loop
     # round emits run_verifier (or phase_complete legacy, or hits round
     # budget), this is set True and router sends graph to phase_verifier.
@@ -502,6 +508,8 @@ def initial_state(
         v30_judge_decisions={},
         v30_replan_hint=None,
         v30_judge_replan_count=0,
+        v30_postmortem_count=0,
+        v30_postmortem=None,
         v30_verify_now=False,
         # multi-agent collaboration (Phase 0 — fields only, no writers yet)
         ma_handoff=None,
