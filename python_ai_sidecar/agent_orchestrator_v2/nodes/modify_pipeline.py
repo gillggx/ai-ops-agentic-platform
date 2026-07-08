@@ -253,6 +253,44 @@ async def run_modify(
     state: Dict[str, Any], snapshot: Dict[str, Any], route: str,
     reason: str, user_msg: str,
 ) -> Optional[Dict[str, Any]]:
+    """Wrap the modify flow in its own Agent-Activity episode so「看現況」/
+    「微調計畫」/「clarify」show up in /agent-activity — the chat orchestrator
+    doesn't attach a recorder (only the build runner does), so the fast path
+    was invisible before. Only finalize when the modify path actually PRODUCED
+    a result; on fall-through to rebuild we discard the episode so the rebuild's
+    own episode is the single record (no orphan)."""
+    import uuid as _uuid
+    from python_ai_sidecar.observability import (
+        make_recorder, set_current_recorder,
+    )
+    ep_rec = make_recorder(
+        session_id=_uuid.uuid4().hex,
+        instruction=(user_msg or "")[:200],
+        user_id=state.get("user_id"),
+        trigger_source="chat",
+    )
+    prev_rec = get_current_recorder()
+    if ep_rec is not None:
+        set_current_recorder(ep_rec)
+    out: Optional[Dict[str, Any]] = None
+    try:
+        out = await _run_modify_inner(state, snapshot, route, reason, user_msg)
+        return out
+    finally:
+        if ep_rec is not None:
+            try:
+                if out is not None:
+                    await ep_rec.finalize(status="finished")
+            except Exception as ex:  # noqa: BLE001 — observability never blocks
+                logger.warning("modify: episode finalize failed (%s)", ex)
+            finally:
+                set_current_recorder(prev_rec)
+
+
+async def _run_modify_inner(
+    state: Dict[str, Any], snapshot: Dict[str, Any], route: str,
+    reason: str, user_msg: str,
+) -> Optional[Dict[str, Any]]:
     """Orchestrate report → planner delta → apply → execute. Returns the
     node dict on success, or None to fall through to rebuild (G3)."""
     from python_ai_sidecar.executor.real_executor import (
