@@ -62,6 +62,10 @@ async def halt_handover_node(state: BuildGraphState) -> dict[str, Any]:
         "reason": handover.get("reason"),
         "tried_summary": handover.get("tried_summary"),
         "missing_capabilities": handover.get("missing_capabilities", []),
+        # build-failure recovery (2026-07-09): if a post-mortem ran (and the
+        # informed retry still failed), surface it so the user sees 建到哪/卡在
+        # 哪/少什麼/試過什麼修正 — not a blank "failed".
+        "postmortem": state.get("v30_postmortem"),
         "options": list(VALID_CHOICES),
     })
 
