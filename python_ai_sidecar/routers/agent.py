@@ -50,6 +50,11 @@ class ChatRequest(BaseModel):
     # opening message — same context the Glass Box subsession used to get
     # via /agent/build's pipelineSnapshot param.
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
+    # 2026-07-08 modify-mode: per-node output columns of the on-screen
+    # pipeline (from the last card's node_results), so the Coordinator
+    # situation report knows what a tooltip/field can resolve to without a
+    # harvest re-execute. {node_id: [col, ...]}.
+    pipeline_columns: dict | None = Field(default=None, alias="pipelineColumns")
 
 
 def _normalize_snapshot(snap: dict | None) -> dict | None:
@@ -123,6 +128,7 @@ async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncG
         client_context=req.client_context,
         mode=req.mode or "chat",
         pipeline_snapshot=req.pipeline_snapshot,
+        pipeline_columns=req.pipeline_columns,
     ):
         # AgentOrchestratorV2 yields v1-style {type, ...} dicts; convert to SSE
         ev_type = v1_event.get("type") or "message"

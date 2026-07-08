@@ -52,24 +52,20 @@ _PATCHABLE = {
 }
 
 _SYSTEM = """你是 Coordinator（入口分診）。對話中已經有一條建好的 pipeline（會給你摘要）。
-判斷使用者這句話屬於哪一類，輸出 JSON：
+只判斷使用者這句話屬於哪一類，輸出 JSON（不要給任何修改內容，那是後面 Planner 的事）：
 
 {"route": "presentation_change" | "data_scope_change" | "new_build" | "fix_request" | "question",
- "reason": "一句話",
- "patch": [{"node": "<chart node id>", "set": {"<param>": <value>}}]}
+ "reason": "一句話"}
 
 route 判準：
-- presentation_change：只改「呈現」— 樣式/區帶/提示欄位/標題/軸標籤/排序/柱上數值等，
-  資料範圍（機台/站點/時間/指標）完全不變。此時必須給 patch（只能動 chart 節點的呈現參數）。
-- data_scope_change：換機台/站點/時間窗/指標，或要新的資料。patch 留空。
-- new_build：跟現有 pipeline 無關的新需求。patch 留空。
-- fix_request：使用者說結果錯了/圖不對。patch 留空。
-- question：純提問。patch 留空。
-patch 的參數值必須具體可用（tooltip_fields 用資料真實欄位名）。
-呈現參數面（只能動這些）：style:{spc_zones,line_style,show_markers,marker_size,x_label,y_label} /
-tooltip_fields / weco_annotate / title / order / show_values。
-「不要區帶/簡潔版」→ style:{"spc_zones":false}；「軸標籤」→ style:{"y_label":...} —
-一律用 style 開關，不要動資料欄位參數（ucl_column 等是資料，不是樣式）。只輸出 JSON。"""
+- presentation_change：只改「呈現」— 樣式/區帶/提示欄位(tooltip)/標題/軸標籤/排序/柱上數值等，
+  資料範圍不變。
+- data_scope_change：換機台/站點/時間窗/指標，只是換「看誰的資料」，pipeline 結構不變。
+- new_build：跟現有 pipeline 無關的全新需求。
+- fix_request：使用者說結果錯了 / 圖不對 / 要修。
+- question：純提問，不要求改東西。
+presentation_change 與 data_scope_change 都會走「微調（delta）」路徑，
+不會重建；其餘走既有流程。只輸出 JSON。"""
 
 _CTRL_PREFIX = re.compile(r"^\s*\[(intent_confirmed|plan_decision|judge_decision|resume)")
 _DIM_TOKEN = re.compile(r"(EQP-\d+|STEP_\d+)", re.IGNORECASE)
@@ -118,6 +114,15 @@ def apply_presentation_patch(
 
 
 async def coordinator_triage_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """G1 entry triage — classify the follow-up against the on-screen
+    pipeline. presentation_change / data_scope_change both delegate to the
+    modify-mode delta flow (Coordinator report → Planner delta → Builder
+    apply). Every other route (and any modify failure) falls through to the
+    existing rebuild path.
+
+    2026-07-08: triage now classifies ROUTE ONLY — the actual edit is the
+    Planner's job (column-aware delta), so data-scope changes (換機台/站點)
+    become deltas too instead of triggering a rebuild."""
     # ── deterministic pre-checks — zero LLM, zero latency ────────────
     snap = state.get("pipeline_snapshot")
     msg = str(state.get("user_message") or "")
@@ -125,34 +130,20 @@ async def coordinator_triage_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     if not msg.strip() or _CTRL_PREFIX.match(msg):
         return {}
-    msg_dims = {m.upper() for m in _DIM_TOKEN.findall(msg)}
-    new_dims = msg_dims - _pipeline_dims(snap)
-    if new_dims:
-        logger.info("triage[deterministic]: new data dims %s → rebuild path", new_dims)
-        return {}  # data-scope change — existing flow owns it
 
-    # ── narrow LLM classify (one call) ───────────────────────────────
-    chart_nodes = [
-        {"id": n.get("id"), "block": n.get("block_id"), "params": n.get("params")}
-        for n in (snap.get("nodes") or [])
-        if n.get("block_id") in _CHART_BLOCKS
-    ]
-    if not chart_nodes:
-        return {}
+    # ── narrow LLM classify (route only, one call) ───────────────────
     user_msg = (
         "== 使用者這句話 ==\n" + msg[:400]
-        + "\n\n== 現役 pipeline 的 chart 節點 ==\n"
-        + json.dumps(chart_nodes, ensure_ascii=False, default=str)[:1800]
-        + "\n\n== 全部節點（id/block）==\n"
+        + "\n\n== 現役 pipeline 節點（id/block）==\n"
         + json.dumps([{"id": n.get("id"), "block": n.get("block_id")}
-                      for n in (snap.get("nodes") or [])], ensure_ascii=False)[:600]
+                      for n in (snap.get("nodes") or [])], ensure_ascii=False)[:800]
     )
     try:
         client = get_llm_client()
         resp = await client.create(
             system=_SYSTEM,
             messages=[{"role": "user", "content": user_msg}],
-            max_tokens=700,
+            max_tokens=300,
         )
         raw = (resp.text or "").strip()
         if raw.startswith("```"):
@@ -167,47 +158,15 @@ async def coordinator_triage_node(state: Dict[str, Any]) -> Dict[str, Any]:
     route = str((decision or {}).get("route") or "")
     reason = str((decision or {}).get("reason") or "")[:200]
     logger.info("triage: route=%s reason=%s", route, reason[:80])
-    if route != "presentation_change":
-        return {}  # existing flow owns every other route (v1 pass-through)
+    if route not in ("presentation_change", "data_scope_change"):
+        return {}  # existing flow owns new_build / fix_request / question
 
-    patched, why = apply_presentation_patch(
-        snap, (decision or {}).get("patch") or [])
-    if patched is None:
-        logger.info("triage: patch rejected (%s) — pass through (G3)", why)
-        return {}
-
-    # ── FAST PATH: re-execute with the wave-1 source cache ───────────
-    try:
-        from python_ai_sidecar.executor.real_executor import (
-            all_blocks_native, execute_native,
-        )
-        from python_ai_sidecar.pipeline_builder.source_cache import get_session_cache
-        if not all_blocks_native(patched):
-            return {}
-        sc = get_session_cache("chat-" + str(state.get("session_id") or "anon"))
-        result = await execute_native(patched, source_cache=sc)
-        if result.get("status") != "success":
-            logger.info("triage: fast-path exec %s — pass through (G3)",
-                        result.get("status"))
-            return {}
-    except Exception as ex:  # noqa: BLE001
-        logger.warning("triage: fast-path exec failed (%s) — pass through", ex)
-        return {}
-
-    ops_txt = "、".join(
-        f"{i.get('node')}: {', '.join((i.get('set') or {}).keys())}"
-        for i in (decision or {}).get("patch") or [] if isinstance(i, dict))
-    logger.info("triage: presentation patch applied (%s)", ops_txt)
-    return {
-        "pipeline_snapshot": patched,
-        "render_cards": [{
-            "type": "pb_pipeline",
-            "pipeline_json": patched,
-            "node_results": result.get("node_results") or {},
-            "result_summary": result.get("result_summary"),
-            "run_id": None,
-        }],
-        "force_synthesis": True,
-        "messages": [AIMessage(content=f"已更新圖表樣式（{reason or ops_txt}）。")],
-        "coordinator_route": {"route": route, "reason": reason, "fast_path": True},
-    }
+    # ── delegate to modify-mode delta flow (Coordinator → Planner) ───
+    from python_ai_sidecar.agent_orchestrator_v2.nodes.modify_pipeline import (
+        run_modify,
+    )
+    out = await run_modify(state, snap, route, reason, msg)
+    if out is None:
+        logger.info("triage: modify fell through (G3) — rebuild path")
+        return {}  # G3 structural fallback: existing rebuild flow
+    return out

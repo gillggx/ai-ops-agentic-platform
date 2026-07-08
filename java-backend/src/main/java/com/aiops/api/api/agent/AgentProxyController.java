@@ -81,8 +81,11 @@ public class AgentProxyController {
 		// sidecar's mode-aware prompt never activates.
 		String mode = pickAlias(body, "mode");
 		Map<String, Object> pipelineSnapshot = pickMapAlias(body, "pipelineSnapshot", "pipeline_snapshot");
+		// 2026-07-08 modify-mode: forward per-node output columns so the
+		// sidecar Coordinator can build a column-aware situation report.
+		Map<String, Object> pipelineColumns = pickMapAlias(body, "pipelineColumns", "pipeline_columns");
 		AgentProxyDtos.ChatRequest req = new AgentProxyDtos.ChatRequest(
-				message, sessionId, clientContext, mode, pipelineSnapshot);
+				message, sessionId, clientContext, mode, pipelineSnapshot, pipelineColumns);
 		return sseBridge.bridge(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
 	}
 

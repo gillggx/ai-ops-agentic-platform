@@ -52,6 +52,7 @@ DEFAULT_STATE: Dict[str, Any] = {
     "plan_items": [],
     "mode": "chat",
     "pipeline_snapshot": None,
+    "pipeline_columns": None,
 }
 
 

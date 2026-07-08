@@ -18,7 +18,13 @@ public final class AgentProxyDtos {
 
 	public record ChatRequest(@NotBlank String message, String sessionId,
 	                          Map<String, Object> clientContext,
-	                          String mode, Map<String, Object> pipelineSnapshot) {}
+	                          String mode, Map<String, Object> pipelineSnapshot,
+	                          // 2026-07-08 modify-mode: per-node output columns of
+	                          // the on-screen pipeline (from the last card's
+	                          // node_results) — lets the sidecar Coordinator build
+	                          // a column-aware situation report without a harvest
+	                          // re-execute. {node_id: [col, ...]}.
+	                          Map<String, Object> pipelineColumns) {}
 
 	public record BuildRequest(@NotBlank String instruction,
 	                           Long pipelineId,

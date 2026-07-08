@@ -82,6 +82,11 @@ class GraphState(TypedDict, total=False):
     # AND tool_execute injects it as _state_pipeline_snapshot for build_pipeline_live
     # so Glass Box sub-agent reuses $name references instead of writing literals.
     pipeline_snapshot: Annotated[Optional[Dict[str, Any]], _replace]
+    # 2026-07-08 modify-mode: per-node OUTPUT columns of the on-screen pipeline
+    # (from the last execution's node_results). Shipped alongside the snapshot
+    # so the Coordinator situation report knows what a tooltip/field can resolve
+    # to without a harvest re-execute. {node_id: [col, ...]}.
+    pipeline_columns: Annotated[Optional[Dict[str, Any]], _replace]
     # Part A — intent classifier output. "clear_chart" / "clear_rca" /
     # "clear_status" / "vague" / "clarified" (re-submit). Read by llm_call to
     # tweak guidance; read by graph routing to short-circuit on vague.

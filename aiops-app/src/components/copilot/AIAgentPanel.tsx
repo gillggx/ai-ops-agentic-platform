@@ -40,6 +40,23 @@ import remarkGfm from "remark-gfm";
 // Types
 // ---------------------------------------------------------------------------
 
+/** modify-mode (2026-07-08): pull per-node OUTPUT columns from a pb card's
+ *  node_results so a chat follow-up ships them for the column-aware
+ *  situation report. Mirrors the sidecar's columns_from_node_results
+ *  (reads preview.<port>.columns). */
+function columnsFromNodeResults(
+  nodeResults: Record<string, { preview?: Record<string, { columns?: string[] }> | null }> | undefined,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [nid, nr] of Object.entries(nodeResults ?? {})) {
+    const preview = nr?.preview;
+    if (!preview) continue;
+    const port = preview.data ?? Object.values(preview).find((p) => (p?.columns?.length ?? 0) > 0);
+    if (port?.columns?.length) out[nid] = port.columns;
+  }
+  return out;
+}
+
 interface StageState {
   stage: number;
   label: string;
@@ -743,6 +760,10 @@ export function AIAgentPanel({
   // what the G1 coordinator_triage fast path needs to recognise a chart
   // tweak (else it falls to a full rebuild + plan-confirm card).
   const lastChatPipelineRef = useRef<Record<string, unknown> | null>(null);
+  // 2026-07-08 modify-mode: per-node output columns of that same pipeline,
+  // shipped so the Coordinator situation report is column-aware (knows a
+  // tooltip field like lotID/RECIPE already flows to the chart node).
+  const lastChatColumnsRef = useRef<Record<string, string[]> | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -875,6 +896,8 @@ export function AIAgentPanel({
           // so the orchestrator's mode-aware system prompt section kicks in.
           mode: agentMode,
           ...(sendSnapshot ? { pipeline_snapshot: snapshot } : {}),
+          ...(sendSnapshot && agentMode !== "builder" && lastChatColumnsRef.current
+            ? { pipeline_columns: lastChatColumnsRef.current } : {}),
         }),
       });
 
@@ -1137,10 +1160,11 @@ export function AIAgentPanel({
             } else if (card?.type === "pb_pipeline" || card?.type === "pb_pipeline_published") {
               const pbCard = card as unknown as PbPipelineCardData;
               // A1 fix: remember the freshest ad-hoc pipeline so a chat
-              // follow-up can ship it as the triage snapshot.
+              // follow-up can ship it as the triage snapshot + its columns.
               if (pbCard.type === "pb_pipeline" && (pbCard.pipeline_json?.nodes?.length ?? 0) > 0) {
                 lastChatPipelineRef.current =
                   pbCard.pipeline_json as unknown as Record<string, unknown>;
+                lastChatColumnsRef.current = columnsFromNodeResults(pbCard.node_results);
               }
               // Thread the user's original prompt (intent prefix stripped) so
               // 存為 Skill records it as the skill's NL instead of losing it.

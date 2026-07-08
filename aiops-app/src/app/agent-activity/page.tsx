@@ -532,6 +532,18 @@ function describeStep(s: StepRow): [string, string] {
       const h = Number(p["hits"] ?? 0), f = Number(p["fetches"] ?? 0);
       return ["資料重用統計", `實際取資料 ${f} 次、重用 ${h} 次`];
     }
+    case "situation_report": {
+      const nodes = Array.isArray(p["nodes"]) ? (p["nodes"] as Array<Record<string, unknown>>) : [];
+      const withCols = nodes.filter((n) => Array.isArray(n["output_columns"]) && (n["output_columns"] as unknown[]).length);
+      const cols = withCols.map((n) => `${n["id"]}: ${(n["output_columns"] as string[]).slice(0, 6).join("/")}`).join("；");
+      return ["看現況（交給 Planner）", `${str("route")}｜${nodes.length} 節點${cols ? `｜欄位 ${cols.slice(0, 120)}` : ""}`];
+    }
+    case "modify_plan": {
+      const ops = Array.isArray(p["ops"]) ? (p["ops"] as Array<Record<string, unknown>>) : [];
+      const opsTxt = ops.map((o) => `${o["node"]}: ${Object.keys((o["params"] as Record<string, unknown>) ?? {}).join(",")}`).join("、");
+      const mode = str("mode");
+      return ["微調計畫", `${mode === "delta" ? "增量" : mode}｜${opsTxt || str("reason").slice(0, 60)}`];
+    }
     default: return [s.event_type ?? "—", ""];
   }
 }
