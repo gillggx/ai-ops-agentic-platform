@@ -830,6 +830,59 @@ export function AIAgentPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerMessage]);
 
+  // 草稿暫存區 P2 (V78, 2026-07-08): "打開" a draft from /drafts stashes it and
+  // navigates here. Load it as the on-screen pipeline so the agent co-designs
+  // it via modify-mode: seed the snapshot refs (so「拿掉區帶」/「換機台」reach
+  // coordinator_triage as deltas), execute once to render the chart inline,
+  // and greet with the adjustable options. Inline card (not Lite Canvas) keeps
+  // it robust — modify deltas then render as fresh inline cards too.
+  const openDraftFiredRef = useRef(false);
+  useEffect(() => {
+    if (openDraftFiredRef.current || agentMode === "builder") return;
+    let raw: string | null = null;
+    try { raw = sessionStorage.getItem("pb:open_draft"); } catch { return; }
+    if (!raw) return;
+    openDraftFiredRef.current = true;
+    try { sessionStorage.removeItem("pb:open_draft"); } catch { /* ignore */ }
+    let d: { id?: number; name?: string; nl?: string;
+             pipeline_json?: { nodes?: Array<{ id?: string; block_id?: string }> };
+             columns?: Record<string, string[]> };
+    try { d = JSON.parse(raw); } catch { return; }
+    const pj = d.pipeline_json;
+    if (!pj || !(pj.nodes?.length)) return;
+    // seed modify-mode context
+    lastChatPipelineRef.current = pj as unknown as Record<string, unknown>;
+    lastChatColumnsRef.current = d.columns ?? null;
+    lastSavedDraftSigRef.current = JSON.stringify((pj.nodes ?? []).map((n) => [n.id, n.block_id]));
+    sessionIdRef.current = `draft-${d.id ?? "adhoc"}`;
+    const title = d.name || d.nl || "草稿";
+    void (async () => {
+      let card: PbPipelineCardData | null = null;
+      try {
+        const r = await fetch("/api/pipeline-builder/execute", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pipeline_json: pj }),
+        });
+        const res = await r.json();
+        const data = (res.data ?? res) as { node_results?: Record<string, unknown>; result_summary?: unknown };
+        card = {
+          type: "pb_pipeline",
+          pipeline_json: pj as never,
+          node_results: (data.node_results ?? {}) as never,
+          result_summary: (data.result_summary ?? null) as never,
+          goal: d.nl || title,
+        } as PbPipelineCardData;
+      } catch { /* execute failed — still greet so the user can drive */ }
+      setChatHistory((prev) => [
+        ...prev,
+        ...(card ? [{ id: nextId(), role: "pb_pipeline" as const, content: "", pbPipeline: card }] : []),
+        { id: nextId(), role: "agent" as const,
+          content: `已載入草稿「${title}」。想怎麼調直接說 —— 例如「拿掉區帶」「加 tooltip 顯示 lotID」「換成 EQP-05」。` },
+      ]);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Phase 5-UX-3b: session mode — auto-send the seed prompt once when the
   // panel first mounts (from /chat/new?prompt=... flow).
   // Phase 11 v6 — also auto-fires for Skill embed (BuilderLayout passes

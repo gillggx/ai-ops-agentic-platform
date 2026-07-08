@@ -148,17 +148,18 @@ export default function DraftsPage() {
     setBusy(false); void load();
   };
   const open = async (d: Draft) => {
-    // Phase 2 preview: stash the full pipeline + open the builder so the agent
-    // can co-design it. Reuses the ephemeral-pipeline handoff used by chat's
-    // "Edit in Builder".
+    // Phase 2 (V78): stash the full draft + navigate to the operations chat so
+    // the agent co-designs it via modify-mode (拿掉區帶 / 加 tooltip / 換機台
+    // → deltas, no rebuild). AIAgentPanel's open-draft effect loads it.
     try {
       const r = await fetch(`/api/chat-drafts/${d.id}`, { cache: "no-store" });
       const j = await r.json();
-      const full = (j.data ?? j) as { pipeline_json?: unknown };
-      sessionStorage.setItem("pb:ephemeral_pipeline", JSON.stringify({
-        pipeline_json: full.pipeline_json, inputs: {}, ts: Date.now(),
+      const full = (j.data ?? j) as { pipeline_json?: unknown; columns?: unknown };
+      sessionStorage.setItem("pb:open_draft", JSON.stringify({
+        id: d.id, name: d.name, nl: d.nl,
+        pipeline_json: full.pipeline_json, columns: full.columns ?? {},
       }));
-      router.push("/admin/pipeline-builder/new?from=draft");
+      router.push("/");
     } catch {
       alert("打開草稿失敗");
     }
