@@ -382,14 +382,20 @@ async def _emit_plan_brief(
 
     plan_steps = brief.get("plan_steps") or []
     clarifications = clarifications_from_plan(plan_steps)
-    # 2026-07-08 (issue#2): a design-intent card with ZERO decisions to make
-    # is pure friction — a single「開始建立」button, nothing to answer. Skip it
-    # and let the build proceed; it still pauses at the real editable P1..PN
-    # goal_plan_confirm gate (CHAT_PLAN_CONFIRM_ENABLED), so nothing builds
-    # un-gated. Only emit this card when there is something to actually ask.
-    if not clarifications:
-        logger.info("intent_completeness: no clarifications — skip design-intent "
-                    "card, proceed to build (goal_plan gate still confirms)")
+    # 2026-07-08 (issue#2): brief_planner ALWAYS appends a `__confirm__`
+    # pseudo-decision (a single「開始建立」option — not a real question). A card
+    # whose only "decision" is that confirm button is pure friction. Keep only
+    # clarifications that are genuine choices (>=2 options and not __confirm__).
+    def _is_real(c: dict) -> bool:
+        return (isinstance(c, dict) and c.get("dimension") != "__confirm__"
+                and len(c.get("options") or []) >= 2)
+    real = [c for c in clarifications if _is_real(c)]
+    # Nothing genuine to ask → skip this card and let the build proceed; it
+    # still pauses at the real editable P1..PN goal_plan_confirm gate
+    # (CHAT_PLAN_CONFIRM_ENABLED), so nothing builds un-gated.
+    if not real:
+        logger.info("intent_completeness: no real clarifications (only __confirm__ "
+                    "/ single-option) — skip design-intent card, proceed to build")
         return {}
     spec_payload = {
         "card_id": f"intent-{uuid.uuid4().hex[:8]}",
