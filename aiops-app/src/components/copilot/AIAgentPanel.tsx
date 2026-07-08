@@ -1183,6 +1183,14 @@ export function AIAgentPanel({
                 onPipelineUpdate(pbCard);
               }
               if ((sessionMode || liteCanvasActive) && pbCard.type === "pb_pipeline") {
+                // 2026-07-08 modify-mode fix: a delta result arrives as a
+                // pb_pipeline render_card (NOT pb_run_done), so the Lite Canvas
+                // "結果" tab was never refreshed — the user saw the OLD chart and
+                // thought the edit failed. Push the new results into the overlay
+                // so「拿掉區帶」/「改虛線」visibly update in place.
+                if (liteCanvasActive && pbCard.result_summary) {
+                  onPipelineResult?.(pbCard.result_summary, pbCard.node_results ?? {});
+                }
                 // issue#1 (2026-07-08): the DAG/charts already live in the Lite
                 // Canvas / host canvas — but the ad-hoc pipeline still needs its
                 // 存為 Skill / Edit-in-Builder actions (otherwise D-class
