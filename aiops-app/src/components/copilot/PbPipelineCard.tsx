@@ -59,9 +59,14 @@ interface Props {
   /** Phase 5-UX-5: optional "↗ 展開 canvas" button; fires when user wants the
    *  full BuilderLayout overlay to mount on top of the current page. */
   onExpand?: (card: PbPipelineCardData) => void;
+  /** 2026-07-08 (issue#1): compact mode — the charts/tables already live in
+   *  the Lite Canvas overlay, so skip re-rendering them here but KEEP the
+   *  header + ActionBar (存為 Skill / Edit in Builder). Without this, builds
+   *  that stream into Lite Canvas lost the 存為 Skill button entirely. */
+  compact?: boolean;
 }
 
-export default function PbPipelineCard({ card, onExpand }: Props) {
+export default function PbPipelineCard({ card, onExpand, compact = false }: Props) {
   const isAdHoc = card.type === "pb_pipeline";
 
   // Resolve charts + data_views + evidence from whichever shape we got
@@ -136,13 +141,20 @@ export default function PbPipelineCard({ card, onExpand }: Props) {
         )}
       </div>
 
+      {/* Compact mode: charts/tables are already in Lite Canvas — just note it. */}
+      {compact && (
+        <div style={{ padding: "6px 12px", fontSize: 11, color: "#64748B", borderTop: "1px solid #F1F5F9" }}>
+          結果已呈現在 Lite Canvas。
+        </div>
+      )}
+
       {/* Charts */}
-      {charts.length > 0 && (
+      {!compact && charts.length > 0 && (
         <ChartList charts={charts} />
       )}
 
       {/* DataViews */}
-      {dataViews.length > 0 && (
+      {!compact && dataViews.length > 0 && (
         <div style={{ padding: "8px 12px", borderTop: "1px solid #F1F5F9" }}>
           {dataViews.map((dv, i) => (
             <DataViewTable key={i} dv={dv}
@@ -152,13 +164,13 @@ export default function PbPipelineCard({ card, onExpand }: Props) {
       )}
 
       {/* Evidence hint */}
-      {triggered && evidenceRows > 0 && (
+      {!compact && triggered && evidenceRows > 0 && (
         <div style={{ padding: "6px 12px", fontSize: 11, color: "#B91C1C", background: "#FEF2F2", borderTop: "1px solid #FECACA" }}>
           [!] 觸發條件命中 · {evidenceRows} 筆佐證事件
         </div>
       )}
 
-      {/* Actions */}
+      {/* Actions — always shown, incl. compact (this restores 存為 Skill) */}
       <ActionBar card={card} />
     </div>
   );

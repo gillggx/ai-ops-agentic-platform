@@ -381,6 +381,16 @@ async def _emit_plan_brief(
         return {}
 
     plan_steps = brief.get("plan_steps") or []
+    clarifications = clarifications_from_plan(plan_steps)
+    # 2026-07-08 (issue#2): a design-intent card with ZERO decisions to make
+    # is pure friction — a single「開始建立」button, nothing to answer. Skip it
+    # and let the build proceed; it still pauses at the real editable P1..PN
+    # goal_plan_confirm gate (CHAT_PLAN_CONFIRM_ENABLED), so nothing builds
+    # un-gated. Only emit this card when there is something to actually ask.
+    if not clarifications:
+        logger.info("intent_completeness: no clarifications — skip design-intent "
+                    "card, proceed to build (goal_plan gate still confirms)")
+        return {}
     spec_payload = {
         "card_id": f"intent-{uuid.uuid4().hex[:8]}",
         "inputs": [],
@@ -388,7 +398,7 @@ async def _emit_plan_brief(
         "presentation": "mixed",
         "alternatives": [],
         "plan_steps": plan_steps,
-        "clarifications": clarifications_from_plan(plan_steps),
+        "clarifications": clarifications,
         "interactive_brief": True,
     }
     logger.info(

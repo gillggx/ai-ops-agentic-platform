@@ -143,6 +143,9 @@ interface ChatMessage {
   chartIntents?: ChartIntent[];
   renderDecision?: RenderDecisionMeta;
   pbPipeline?: PbPipelineCardData;
+  /** issue#1 (2026-07-08): render the pb card compact (header + actions only,
+   *  no charts) because the DAG/results already live in the Lite Canvas. */
+  pbCompact?: boolean;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -1179,21 +1182,23 @@ export function AIAgentPanel({
                 // + leave a compact chip in chat so the user sees what changed.
                 onPipelineUpdate(pbCard);
               }
-              if (sessionMode || liteCanvasActive) {
-                // Either the host page (BuilderLayout) or the Lite Canvas
-                // overlay is already drawing the DAG + results. Avoid echoing a
-                // second copy of the charts in chat — leave a compact chip
-                // instead so the user still has a trace of the event.
-                const nodeCount = pbCard.type === "pb_pipeline"
-                  ? (pbCard.pipeline_json?.nodes?.length ?? 0)
-                  : 0;
-                const edgeCount = pbCard.type === "pb_pipeline"
-                  ? (pbCard.pipeline_json?.edges?.length ?? 0)
-                  : 0;
-                const where = sessionMode ? t("appliedToCanvas") : t("shownInLiteCanvas");
-                const chipText = pbCard.type === "pb_pipeline"
-                  ? t("pipelineDoneChip", { nodes: nodeCount, edges: edgeCount, where })
-                  : t("skillExecuted", { name: pbCard.skill_name ?? pbCard.slug ?? "" });
+              if ((sessionMode || liteCanvasActive) && pbCard.type === "pb_pipeline") {
+                // issue#1 (2026-07-08): the DAG/charts already live in the Lite
+                // Canvas / host canvas — but the ad-hoc pipeline still needs its
+                // 存為 Skill / Edit-in-Builder actions (otherwise D-class
+                // parameterize is untestable from Lite Canvas). Render a COMPACT
+                // card (header + ActionBar, no duplicate charts) instead of a
+                // bare text chip.
+                setChatHistory((prev) => [...prev, {
+                  id: nextId(),
+                  role: "pb_pipeline",
+                  content: "",
+                  pbPipeline: pbCard,
+                  pbCompact: true,
+                }]);
+              } else if ((sessionMode || liteCanvasActive) && pbCard.type === "pb_pipeline_published") {
+                // Published-skill invoke has no save action — keep the chip.
+                const chipText = t("skillExecuted", { name: pbCard.skill_name ?? pbCard.slug ?? "" });
                 setChatHistory((prev) => [...prev, {
                   id: nextId(),
                   role: "agent",
@@ -2311,7 +2316,7 @@ export function AIAgentPanel({
                 </div>
               ) : msg.role === "pb_pipeline" && msg.pbPipeline ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <PbPipelineCard card={msg.pbPipeline} onExpand={onPbPipelineExpand} />
+                  <PbPipelineCard card={msg.pbPipeline} onExpand={onPbPipelineExpand} compact={msg.pbCompact} />
                 </div>
               ) : msg.role === "chart_explorer" && msg.flatData && msg.flatMetadata ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
