@@ -54,7 +54,7 @@
 <header class="hero">
   <div class="kic">Multi-Agent Programme · Progress</div>
   <h1>Multi-Agent 進度總表</h1>
-  <div class="sub">對照 <code>AGENT_HARNESS_DESIGN.html</code> 大項的完成度 · 每次交付後更新 · Updated 2026-07-04</div>
+  <div class="sub">對照 <code>AGENT_HARNESS_DESIGN.html</code> 大項的完成度 · 每次交付後更新 · Updated 2026-07-08</div>
 </header>
 
 <!-- 0 overall -->
@@ -142,8 +142,37 @@
     <tr><td>07-04</td><td><b>Phase 6 Monitor 指揮層(A 版:自省觸發器)</b>:V73 <code>monitor_requests</code>;確定性掃描(無 LLM)三指標 — DOC_GAP(block ≥3 pending memo)/ DIVERGENCE(7天 ≥2)/ REPAIR_HANDOVER(7天 ≥3)→ 改善請求 → 人工核准取得 Planner 指令;<code>/supervisor</code> 頁雙區(蒸餾提案+改善請求)</td>
         <td><span class="badge ok">E2E 全過</span> scan 產 3 請求(2 DOC_GAP + 1 REPAIR_HANDOVER 14次/7天)· approve 回建議指令 · dedup 生效 · Java 5/5</td>
         <td><code>cb1c93ab</code> <code>1b60367b</code></td></tr>
+    <tr><td>07-06</td><td><b>Agent Activity 兩修 + plan-gate 收斂</b>:MetaBar 切換堆疊(重複兄弟 key,修 3 次才根治 — Playwright DOM 實證 N 次點擊 N 條)以 <code>meta-${id}</code>/<code>tab-${id}</code> 前綴修好;chat plan-confirm 結尾改由 graph 決定(<code>_force_synthesis</code>+空 AIMessage)而非叫 LLM 回空字串(舊法觸發 empty_output 假失敗)</td>
+        <td><span class="badge ok">PASS</span> Playwright:N 次點擊 = 恰好 1 條 MetaBar · plan gate 不再噴 empty_output</td>
+        <td><code>7a5825df</code> <code>23bfaf77</code></td></tr>
+    <tr><td>07-07</td><td><b>Coordinator 分診制(修理與迭代的成本結構修正,三波)</b>:把「Repair 每次都重拉整條 pipeline」的錯誤分工改成<b>分診 + 分工</b> — G1 入口分診(<code>coordinator_triage</code>,load_context 後,確定性預檢 + 窄 LLM 五分類)判斷是<b>調圖(呈現)/換資料範圍/新建/修錯/提問</b>;呈現變更走<b>秒改快路</b>(白名單 chart 參數 patch + 波1 source cache 重跑,7s vs 60-150s 重建);G2 卡關診斷(<code>coordinator_diagnose</code>)出<b>機械式工單</b>(≤5 ops、零 LLM round 執行);G3 結構兜底。分工:Coordinator 判為何+找誰、Planner(M2 <code>plan_patch</code>)決定改什麼、Builder 是唯一的手、Verifier 不變</td>
+        <td><span class="badge ok">E2E 全過</span> Wave1:8 輪 build = 1 fetch+7 reuse(時間軸 <code>source_cache_stats</code>)· Wave2:工單白名單擋掉幻覺 op(Haiku 幻覺 <code>three_separate_charts</code> 被驗證器擋)· Wave3:調圖秒改 7s 實測 · G3:zones-off 誤刪 ucl 欄被白名單擋→兜底重建</td>
+        <td><code>9ad6a3c5</code> <code>8aab1695</code> <code>dd1eee2b</code> <code>3ce49a2d</code></td></tr>
+    <tr><td>07-07</td><td><b>Agent Activity 可讀性 + Topic 化</b>:時間軸從 <code>llm_usage</code> 這種內部詞翻成人話(選了哪個 block / 查了什麼文件 / 驗收拒絕原因 / 修理工單 / 計畫修訂 / 引用了哪些記憶);每筆活動最上方以 <b>Topic 卡</b>顯示 user 當初的原始 prompt,並把<b>下指令的 user 記錄下來、顯示在第一個</b></td>
+        <td><span class="badge ok">PASS</span> 逐 step 有中文動作句 · Topic 卡顯示原始 prompt · episode 掛 requester 且列首</td>
+        <td><code>18edf13e</code> <code>c4054585</code> <code>c6c33e2d</code> <code>79460182</code></td></tr>
+    <tr><td>07-07</td><td><b>Chart 樣式=block 參數(agent+cowork 可調)</b>:新增 <code>style{spc_zones,line_style,show_markers,marker_size,show_values,x/y_label,legend}</code> + <code>tooltip_fields</code>(上限5、給錯欄名 fail-loud 列出可用欄)+ <code>weco_annotate</code>;4 個 chart block 的 description 補樣式文件(寫原則不列 case);別名容忍(頂層 key 也吃、nested 優先)。11 種圖的視覺 before/after spec(<code>CHART_STYLE_SPEC_VISUAL.html</code>)</td>
+        <td><span class="badge ok">STYLE-10 suite</span> grader 對齊 runtime 別名契約 · 秒改快路直接吃這批參數</td>
+        <td><code>4410094b</code> <code>23b8a346</code> <code>88ab1d50</code></td></tr>
+    <tr><td>07-07</td><td><b>Table 大資料量效能</b>:檢視只渲染前 100 筆(附 <code>totalRows</code>)+ 全量 CSV 下載(sidecar 重跑子圖、DataBuffer 串流不進 Java heap);try-run/畫圖仍用全量;Builder DataPreview 同步降到 100 筆 + 下載</td>
+        <td><span class="badge ok">PASS</span> 大表不再卡 · 下載得到完整資料 · 圖用全量不受影響</td>
+        <td><code>639de1cb</code></td></tr>
+    <tr><td>07-07</td><td><b>Anthropic 直連 thinking/cache 通道 + 模型選型</b>:llm_client 補 env-gated extended thinking(Claude 5 用 adaptive+output effort、Claude 4 用 budget)+ LLM call 次數/平均延遲進 meta/console;單/多 agent × 6 模型設定的 SLASH-17 效能分析報告;OpenRouter+AWS Bedrock 設定指南</td>
+        <td><span class="badge ok">量測完成</span> Sonnet-5+adaptive-high 首輪 17/17($2.23,最佳)· Haiku fast 16/17($1.02)· GLM Fireworks 空回應風暴 16-23%(退為 standby)</td>
+        <td><code>c69fbecf</code> <code>e51cd1aa</code> <code>f9d6ef06</code> <code>87997731</code></td></tr>
+    <tr><td>07-08</td><td><b>真 Skill 化(參數化 inputs + 自我說明)</b>:chat 建完的 pipeline 存為 Skill 前走<b>參數化精靈</b> — 確定性掃描 source 節點的身分參數(tool_id/lot_id/step/…)成候選、勾選後轉宣告式 <code>inputs</code>($name,執行端 Phase 4-B0 已支援);Haiku 草擬 skill 說明書(use_case/when_to_use/tags,人審後存);<code>skills_v2.doc</code> 欄 + projectSkillV2 enrich(inputs_schema 由 pipeline 推導)讓 agent 搜得到 chat 存的 skill</td>
+        <td><span class="badge ok">已部署</span> 卡片「存為 Skill」→ 精靈 → 說明書 → skills_v2(草稿)· 修 deriveSlug 潛在 slug-400 bug</td>
+        <td><code>ea149d08</code> <code>3b89e333</code> <code>b5c24904</code> <code>35f2eb88</code></td></tr>
+    <tr><td>07-08</td><td><b>Cowork(外部 Claude)開放新功能 + 唯讀觀測</b>:MCP 加 7 工具至 28 — 參數化/草擬說明書/調圖樣式 + <b>治理型 propose-only</b>(propose_knowledge、propose_doc_revision,<code>source='cowork'</code> 不自動核准、走 Supervisor/PE 審)+ <b>唯讀看 agent activity</b>(<code>list_agent_activity</code>/<code>get_agent_activity</code>,共用 <code>/internal/agent-episodes</code> 讀端點)</td>
+        <td><span class="badge ok">已部署驗證</span> list/get 回真 episode(含 EQP-07 超過3次OOC case,199 steps)· 待 user Claude Desktop 實測互動</td>
+        <td><code>bc3f9f6a</code> <code>06afaa5b</code></td></tr>
+    <tr><td>07-08</td><td><b>建置預設模型切至 Sonnet-5 + adaptive thinking(high)</b>:sidecar 單一開關(<code>LLM_MODEL</code>+<code>ANTHROPIC_THINKING_EFFORT</code>);Haiku 設定備份為 <code>.env.bak-haiku-*</code> 可秒回退</td>
+        <td><span class="badge ok">已切+煙霧測試</span> 直連 create() 通、thinking 設定不 400 · 選型依據見 07-07 效能分析</td>
+        <td>—</td></tr>
   </tbody>
 </table>
+
+<div class="callout key"><b>Coordinator 角色重定義(07-07,user-driven)</b>:原 <b>Repair</b> 的行為太像 Planner(每次都重拉 pipeline)。改成 <b>Coordinator 分診制</b>:一開始就由它接手,判斷「這是小改還是重建、該找誰」— 呈現調整走秒改快路(不動 Planner)、卡關出機械工單找 Builder、真的要改計畫才叫 Planner 出 M2 patch。三個 agent 職責變清楚:<b>Coordinator 判斷、Planner 規劃、Builder 動手、Verifier 把關</b>。詳見 <code>project_coordinator_cost_refactor</code> 記憶。</div>
 
 <!-- 3 matrix live view -->
 <h2><span class="n">3</span>§9 矩陣即時狀態(3 Agent × 6 Class)</h2>
@@ -174,7 +203,7 @@ Superv.  寫    [ON] PROMOTE  (MERGE 治理)  (MERGE 治理)    [ON] CORRECT    
 
 <footer>
   來源文件:<code>AGENT_HARNESS_DESIGN.html</code>(設計)· <code>MULTI_AGENT_PHASE0_SPEC.md</code>(A1–A10)·
-  <code>MULTI_AGENT_OBSERVABILITY_SPEC.md</code>(C1–C11)。本頁隨每次交付更新。Updated 2026-07-04(Phase 5+6 + chat/builder 卡片統一交付;GitHub Pages: gillggx.github.io/ai-ops-agentic-platform)。
+  <code>MULTI_AGENT_OBSERVABILITY_SPEC.md</code>(C1–C11)· <code>project_coordinator_cost_refactor</code>(記憶,分診制)。本頁隨每次交付更新。Updated 2026-07-08(Coordinator 分診制三波 + 真 Skill 化 + chart 樣式 + cowork 開放 + 模型切 Sonnet-5;GitHub Pages: gillggx.github.io/ai-ops-agentic-platform)。
 </footer>
 
 </div>
