@@ -75,10 +75,37 @@
 
 ## 尚未修（backlog，兩個都在 rebuild flow，建議一起做）
 
-- [ ] **ISSUE#1** 增量修改被重跑 —「有超過 3 次 OOC 就要 alarm」在已建好的 pipeline 上，結果重跑整條
-  → 修向：G1 route `logic_extension` → M2 `insert_phase`（v1 暫排除）把 delta phase 接到現有 canvas
+- [ ] **ISSUE#1** 增量「加邏輯」被重跑 —「有超過 3 次 OOC 就要 alarm」在已建好的 pipeline 上，結果重跑整條
+  → 現況：modify-mode v1 只做「改參數」delta；「加一段新邏輯（insert）」仍是後續。修向：M2 `insert_phase` 把 delta phase 接到現有 canvas
 - [ ] **ISSUE#2** 重建時 Lite Canvas 空白 — 重新設計時 canvas 看不到任何 block
   → 修向：`start` 事件強制切回 Canvas 視圖 + reset 時序
+
+---
+
+## H. Modify-mode「看現況 → 出增量 → 動手」（2026-07-08 下午交付）
+
+> 建圖後的追問走「Coordinator 看現況 → Planner 出增量 → Builder 動手」，不再重建。
+> 已用你真實的 xbar SPC pipeline e2e 過 3 個 case（全 DELTA、結構正確）。
+
+- [ ] **H1 拿掉區帶** — chat 建一張含區帶的 SPC 圖後打「拿掉區帶」
+  → 預期：~秒改，區帶消失，**步驟數不變**、不跳計畫卡
+- [ ] **H2 加 tooltip 要 lot/recipe** — 「加 tool tip，要有 lot ID, recipe ID」
+  → 預期：原圖多 tooltip、**步驟數不變**（不再多加 block_select 重建）
+- [ ] **H3 換機台走 delta** — 「改成看 EQP-05 的資料」
+  → 預期：結構不變、只有來源機台換成 EQP-05，不重建
+- [ ] **H4 現況報告可觀測** — 上面任一 case 後開 `/agent-activity` 看那筆
+  → 預期：時間軸有「看現況（交給 Planner）」（含節點/欄位）+「微調計畫」（ops）兩則
+
+## I. 今日 chat UX 兩修（2026-07-08 下午）
+
+- [ ] **I1 Lite Canvas 建置可存為 Skill** — 在 chat 建個 pipeline（結果進 Lite Canvas）
+  → 預期：chat 出現 **compact 卡**，上面有「存為 Skill / Edit in Builder」按鈕（不再只有文字 chip）
+- [ ] **I2 D 類參數化** — 點該卡「存為 Skill」
+  → 預期：跳參數化精靈（source 身分參數候選 + Haiku 說明書），可測真 Skill 化
+- [ ] **I3 沒問題就別發廢卡** — 跑「統計某站點各機台的 OOC count」這種清楚請求
+  → 預期：**不再**跳「單選項 · 開始建立」的確認卡；直接進可編輯的 P1..PN plan 卡
+- [ ] **I4 有真問題還是會問** — 跑開放式請求（如「看 EQP-01 最近的狀況」）
+  → 預期：仍會出現有**多選項**的確認卡（沒有把該問的也吞掉）
 
 ---
 
@@ -101,3 +128,6 @@
 | Coordinator 分診制（三波） | `9ad6a3c5` `8aab1695` `281a62ca` `dd1eee2b` `3ce49a2d` `bad70785` `62f82301` |
 | 真 Skill 化 | `ea149d08` `3b89e333` `b5c24904` `35f2eb88` |
 | cowork 開放 + 看 activity | `bc3f9f6a` `06afaa5b` |
+| A1 fix（chat 帶 snapshot） | `5bac0b04` |
+| modify-mode（現況報告→Planner delta→Builder） | `0da5f4c5` |
+| chat UX 兩修（Lite Canvas 存 Skill + 廢卡） | `ec109a87` `00ac0231` |
