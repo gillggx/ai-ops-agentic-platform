@@ -54,18 +54,19 @@ _PATCHABLE = {
 _SYSTEM = """你是 Coordinator（入口分診）。對話中已經有一條建好的 pipeline（會給你摘要）。
 只判斷使用者這句話屬於哪一類，輸出 JSON（不要給任何修改內容，那是後面 Planner 的事）：
 
-{"route": "presentation_change" | "data_scope_change" | "new_build" | "fix_request" | "question",
+{"route": "presentation_change" | "data_scope_change" | "automation_request" | "new_build" | "fix_request" | "question",
  "reason": "一句話"}
 
 route 判準：
 - presentation_change：只改「呈現」— 樣式/區帶/提示欄位(tooltip)/標題/軸標籤/排序/柱上數值等，
   資料範圍不變。
 - data_scope_change：換機台/站點/時間窗/指標，只是換「看誰的資料」，pipeline 結構不變。
+- automation_request：要把這張圖設成「自動跑」— 定時巡檢 / 排程 / 定期檢查 / 超過某條件就告警。
 - new_build：跟現有 pipeline 無關的全新需求。
 - fix_request：使用者說結果錯了 / 圖不對 / 要修。
 - question：純提問，不要求改東西。
-presentation_change 與 data_scope_change 都會走「微調（delta）」路徑，
-不會重建；其餘走既有流程。只輸出 JSON。"""
+presentation_change 與 data_scope_change 走「微調（delta）」；automation_request 走
+「設自動化（出確認卡，人確認才上線）」；其餘走既有流程。只輸出 JSON。"""
 
 _CTRL_PREFIX = re.compile(r"^\s*\[(intent_confirmed|plan_decision|judge_decision|resume)")
 _DIM_TOKEN = re.compile(r"(EQP-\d+|STEP_\d+)", re.IGNORECASE)
@@ -158,6 +159,33 @@ async def coordinator_triage_node(state: Dict[str, Any]) -> Dict[str, Any]:
     route = str((decision or {}).get("route") or "")
     reason = str((decision or {}).get("reason") or "")[:200]
     logger.info("triage: route=%s reason=%s", route, reason[:80])
+
+    # ── automation setup — parse NL → config, emit a CONFIRM card ────
+    # (P3b) The agent only proposes; the human confirms in the authed UI and
+    # the frontend runs the enable via skills_v2 endpoints. Nothing goes live
+    # from one chat sentence.
+    if route == "automation_request":
+        from python_ai_sidecar.agent_orchestrator_v2.nodes.automation_intent import (
+            parse_automation,
+        )
+        cfg = await parse_automation(msg, snap)
+        if cfg is None:
+            return {}  # parse failed → pass through to existing flow
+        logger.info("triage: automation_request role=%s schedule=%s",
+                    cfg.get("role"), (cfg.get("trigger") or {}).get("schedule"))
+        return {
+            "render_cards": [{
+                "type": "automation_confirm",
+                "config": cfg,
+                "pipeline_json": snap,
+            }],
+            "force_synthesis": True,
+            "messages": [AIMessage(content=(
+                "我把你的自動化設定整理好了（下方卡片）。確認無誤按「確認啟用」"
+                "才會真的開始跑；要改就直接跟我說。"))],
+            "coordinator_route": {"route": route, "reason": reason, "fast_path": True},
+        }
+
     if route not in ("presentation_change", "data_scope_change"):
         return {}  # existing flow owns new_build / fix_request / question
 

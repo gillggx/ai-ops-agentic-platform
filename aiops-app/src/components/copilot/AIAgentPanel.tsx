@@ -14,6 +14,7 @@ import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
 import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "./AgentConsole";
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
+import { AutomationConfirmCard, type AutomationConfirmData } from "./AutomationConfirmCard";
 import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } from "./PbPatchProposalCard";
 import type { UiRender } from "@/components/McpChartRenderer";
 import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
@@ -156,7 +157,7 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm";
   content: string;
   /** 對話分頁重整（2026-07-05）— BUILD PLAN 卡單卡生命週期 state。 */
   buildPlan?: BuildPlanState;
@@ -188,6 +189,8 @@ interface ChatMessage {
   /** issue#1 (2026-07-08): render the pb card compact (header + actions only,
    *  no charts) because the DAG/results already live in the Lite Canvas. */
   pbCompact?: boolean;
+  /** 草稿暫存區 P3b (2026-07-09): parsed automation config awaiting confirm. */
+  automationConfirm?: AutomationConfirmData;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -1257,6 +1260,17 @@ export function AIAgentPanel({
                 role: "pb_proposal",
                 content: "",
                 pbProposal: card as unknown as PbPatchProposalData,
+              }]);
+            } else if (card?.type === "automation_confirm") {
+              // 草稿暫存區 P3b: agent parsed an automation-setup sentence into a
+              // config — render a confirm card; the human confirms + the card
+              // runs the enable via skills_v2 (nothing live until confirm).
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "automation_confirm", content: "",
+                automationConfirm: {
+                  config: card.config as AutomationConfirmData["config"],
+                  pipeline_json: (card.pipeline_json ?? {}) as Record<string, unknown>,
+                },
               }]);
             } else if (card?.type === "pb_pipeline" || card?.type === "pb_pipeline_published") {
               const pbCard = card as unknown as PbPipelineCardData;
@@ -2468,6 +2482,10 @@ export function AIAgentPanel({
               ) : msg.role === "pb_pipeline" && msg.pbPipeline ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <PbPipelineCard card={msg.pbPipeline} onExpand={onPbPipelineExpand} compact={msg.pbCompact} />
+                </div>
+              ) : msg.role === "automation_confirm" && msg.automationConfirm ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <AutomationConfirmCard data={msg.automationConfirm} />
                 </div>
               ) : msg.role === "chart_explorer" && msg.flatData && msg.flatMetadata ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
