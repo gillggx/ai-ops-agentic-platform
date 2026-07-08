@@ -737,6 +737,13 @@ export function AIAgentPanel({
   const pipelineSnapshotRef = useRef(pipelineSnapshot);
   useEffect(() => { pipelineSnapshotRef.current = pipelineSnapshot; }, [pipelineSnapshot]);
 
+  // 2026-07-08 (A1 fix): chat has no builder canvas, but the LAST ad-hoc
+  // pb_pipeline card IS the on-screen pipeline. Keep its pipeline_json in a
+  // ref so a follow-up like「拿掉區帶」ships it as pipeline_snapshot — that is
+  // what the G1 coordinator_triage fast path needs to recognise a chart
+  // tweak (else it falls to a full rebuild + plan-confirm card).
+  const lastChatPipelineRef = useRef<Record<string, unknown> | null>(null);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, loading]);
@@ -845,9 +852,14 @@ export function AIAgentPanel({
       // Phase E3 follow-up: in builder mode, ship the current canvas
       // pipeline_json so the orchestrator can surface declared inputs in
       // the user opening message AND so build_pipeline_live's Glass Box
-      // subsession sees the same canvas state. Skip in chat mode (no
-      // canvas, would just be noise).
-      const snapshot = agentMode === "builder" ? pipelineSnapshotRef.current : null;
+      // subsession sees the same canvas state.
+      // 2026-07-08 (A1 fix): in chat mode there is no canvas, but the last
+      // built pb_pipeline card IS the on-screen pipeline — ship it so the G1
+      // coordinator_triage presentation fast path can recognise a chart
+      // tweak instead of triggering a full rebuild.
+      const snapshot = agentMode === "builder"
+        ? pipelineSnapshotRef.current
+        : lastChatPipelineRef.current;
       const sendSnapshot =
         snapshot &&
         typeof snapshot === "object" &&
@@ -1124,6 +1136,12 @@ export function AIAgentPanel({
               }]);
             } else if (card?.type === "pb_pipeline" || card?.type === "pb_pipeline_published") {
               const pbCard = card as unknown as PbPipelineCardData;
+              // A1 fix: remember the freshest ad-hoc pipeline so a chat
+              // follow-up can ship it as the triage snapshot.
+              if (pbCard.type === "pb_pipeline" && (pbCard.pipeline_json?.nodes?.length ?? 0) > 0) {
+                lastChatPipelineRef.current =
+                  pbCard.pipeline_json as unknown as Record<string, unknown>;
+              }
               // Thread the user's original prompt (intent prefix stripped) so
               // 存為 Skill records it as the skill's NL instead of losing it.
               if (pbCard.type === "pb_pipeline" && !pbCard.goal) {
