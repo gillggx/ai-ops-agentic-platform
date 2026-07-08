@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import SkillParameterizeModal, { type SkillDoc } from "@/components/skills-v2/SkillParameterizeModal";
 
 interface Draft {
   id: number;
@@ -118,6 +119,9 @@ export default function DraftsPage() {
   const [data, setData] = useState<ShelfData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 啟用 (Phase 3a): reuse the parameterize wizard (= chat 存為 Skill), then
+  // hand off to the skill editor where the tested automation UI lives.
+  const [enableFor, setEnableFor] = useState<{ name: string; nl: string; pj: Record<string, unknown> } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -162,6 +166,46 @@ export default function DraftsPage() {
       router.push("/");
     } catch {
       alert("打開草稿失敗");
+    }
+  };
+
+  const startEnable = async (d: Draft) => {
+    try {
+      const r = await fetch(`/api/chat-drafts/${d.id}`, { cache: "no-store" });
+      const j = await r.json();
+      const full = (j.data ?? j) as { pipeline_json?: Record<string, unknown> };
+      if (!full.pipeline_json) { alert("讀取草稿失敗"); return; }
+      setEnableFor({ name: d.name || d.nl || "Chat Skill", nl: d.nl, pj: full.pipeline_json });
+    } catch {
+      alert("讀取草稿失敗");
+    }
+  };
+
+  const confirmEnable = async (out: { pipelineJson: Record<string, unknown>; doc: SkillDoc | null }) => {
+    if (!enableFor) return;
+    setEnableFor(null);
+    try {
+      const res = await fetch("/api/skills-v2/with-pipeline", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: enableFor.name,
+          nl: enableFor.nl,
+          sub: enableFor.nl ? enableFor.nl.slice(0, 60) : "從草稿暫存區建立",
+          pipeline_json: out.pipelineJson,
+          pipeline_kind: "skill",
+          doc: out.doc ?? undefined,
+        }),
+      });
+      const env = await res.json();
+      if (!res.ok) { alert(`建立 Skill 失敗：${env?.error?.message || res.statusText}`); return; }
+      const sid = (env?.data ?? env)?.skill?.id;
+      // Skill created as draft. Hand off to the editor to set role / automation
+      // + activate (the tested automation surface lives there).
+      if (sid && confirm("Skill 已建立（草稿）。要開啟編輯器設定角色 / 自動化並啟用嗎？")) {
+        router.push(`/skills/${sid}`);
+      }
+    } catch {
+      alert("建立 Skill 失敗");
     }
   };
 
@@ -247,9 +291,9 @@ export default function DraftsPage() {
               <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
                 <button onClick={() => open(d)} style={{ flex: 1, fontSize: 11.5, padding: "6px 8px", borderRadius: 7,
                   border: "none", background: INDIGO, color: "#fff", fontWeight: 600, cursor: "pointer" }}>打開</button>
-                <button title="啟用（Phase 3）" disabled
+                <button onClick={() => startEnable(d)} title="升級成正式 Skill，設角色 / 自動化"
                   style={{ flex: 1, fontSize: 11.5, padding: "6px 8px", borderRadius: 7, border: "1px solid #E2E8F0",
-                    background: "#F8FAFC", color: "#94A3B8", fontWeight: 600, cursor: "not-allowed" }}>啟用…</button>
+                    background: "#fff", color: "#1E293B", fontWeight: 600, cursor: "pointer" }}>啟用…</button>
                 <button onClick={() => remove(d)} title="刪除"
                   style={{ flex: "0 0 34px", fontSize: 11.5, padding: "6px", borderRadius: 7, border: "1px solid #E2E8F0",
                     background: "#fff", color: "#94A3B8", cursor: "pointer" }}>
@@ -261,6 +305,18 @@ export default function DraftsPage() {
           </div>
         ))}
       </div>
+
+      {enableFor && (
+        <SkillParameterizeModal
+          open
+          skillName={enableFor.name}
+          nl={enableFor.nl}
+          pipelineJson={enableFor.pj}
+          onClose={() => setEnableFor(null)}
+          onConfirm={(out) => { void confirmEnable(out); }}
+          confirmLabel="建立 Skill"
+        />
+      )}
     </div>
   );
 }
