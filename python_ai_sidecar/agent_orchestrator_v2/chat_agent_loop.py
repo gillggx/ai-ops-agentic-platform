@@ -309,6 +309,11 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                 return
             pipe = await java.get_pipeline(int(pid))
             pj = (pipe or {}).get("pipeline_json") or pipe
+            if isinstance(pj, str):   # /internal/pipelines returns pipeline_json as a JSON string
+                try:
+                    pj = json.loads(pj)
+                except (ValueError, TypeError):
+                    pj = None
             if not isinstance(pj, dict) or not (pj.get("nodes")):
                 yield ("result", {"status": "no_pipeline", "message": f"skill「{slug}」的 pipeline 不完整。"})
                 return
