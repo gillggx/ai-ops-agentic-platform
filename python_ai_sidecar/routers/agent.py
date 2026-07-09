@@ -135,13 +135,48 @@ async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncG
         yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}
 
 
+async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """CHAT_AGENT_LOOP_SPEC Step 1: conversation-first agent loop (flag-gated).
+    Replaces the classifier→graph for the chat turn with a single tool-use loop.
+    Step 1 = natural conversation + read-only tools; heavy tools land in Step 2."""
+    from ..agent_orchestrator_v2.chat_agent_loop import run_chat_agent
+    from ..agent_orchestrator_v2.session import load_session
+    from ..clients.java_client import JavaAPIClient
+
+    java = JavaAPIClient(CONFIG.java_api_url, CONFIG.java_internal_token)
+    _sid, lc_history, _tok = await load_session(req.session_id, caller.user_id or 0)
+    # load_session yields LangChain HumanMessage/AIMessage — flatten to the
+    # {role, content} dicts the Anthropic loop consumes.
+    history: list[dict] = []
+    for m in lc_history or []:
+        content = getattr(m, "content", "")
+        if not isinstance(content, str):
+            content = str(content)
+        role = "user" if m.__class__.__name__ == "HumanMessage" else "assistant"
+        history.append({"role": role, "content": content})
+    async for v1_event in run_chat_agent(
+        message=req.message, history=history, java=java, user_id=caller.user_id or 0,
+    ):
+        ev_type = v1_event.get("type") or "message"
+        yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}
+
+
 async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Chat entry — always native via the in-process LangGraph orchestrator.
+    """Chat entry — native LangGraph orchestrator, or (flag) the new agent loop.
 
     The :8001 fallback proxy was retired in 2026-05-02 cleanup; the native
     orchestrator (rewired to Java client in Phase 8-A-1d) covers the full
-    chat surface end-to-end.
+    chat surface end-to-end. CHAT_AGENT_LOOP_ENABLED swaps the turn for the
+    conversation-first agent loop (Step 1) — off in prod until we flip it.
     """
+    from ..agent_orchestrator_v2.chat_agent_loop import is_chat_agent_loop_enabled
+    # Only the plain chat turn takes the new loop; control-prefixed resumes
+    # ([intent_confirmed:…] / [plan_decision:…] etc.) stay on the graph path
+    # since Step 1 has no build/confirm tools yet.
+    if is_chat_agent_loop_enabled() and not (req.message or "").lstrip().startswith("["):
+        async for ev in _chat_stream_agent_loop(req, caller):
+            yield ev
+        return
     async for ev in _chat_stream_native(req, caller):
         yield ev
 
