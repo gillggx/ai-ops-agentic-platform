@@ -801,6 +801,45 @@ async def check_skill_ready_for_role(slug: str, role: str) -> dict:
 import rules  # noqa: E402
 rules.register(mcp, java=JAVA, shared=SHARED, jit=JIT, public=PUBLIC)
 
+
+# ── Capability manifest (MCP-registry Phase 1) ─────────────────────────────
+# Single source for "what BUILT-IN capabilities exist". The Java capability
+# catalog (IT-admin page) + the public/private exposure filter read this instead
+# of duplicating the tool list — keeps CLAUDE.md rule「description 是唯一文件來源」.
+# `is_write` = the tool writes to the DB, so it must go through human confirm
+# (spec decision 5: 寫入 DB 一律 confirm). Everything else is read/compute-only
+# (list/get/explain/preview/execute/validate/parameterize/draft — no persist).
+_WRITE_TOOLS: set[str] = {
+    "save_pipeline", "create_skill_v2", "create_skill_with_pipeline",
+    "update_skill_v2", "delete_skill_v2", "bind_skill_pipeline", "activate_skill",
+    "automate_skill_patrol", "automate_skill_event", "automate_skill_datacheck",
+    "remove_skill_automation", "propose_knowledge", "propose_doc_revision",
+    "rule_create", "rule_update", "rule_bind_checkpoint",
+    "rule_set_confirm_check_nl", "rule_add_step_nl",
+    "rule_request_review", "rule_request_activate", "rule_request_disable",
+    "rule_request_delete",
+}
+
+
+@mcp.custom_route("/capabilities", methods=["GET"])
+async def capabilities_manifest(request):  # noqa: ANN001 — starlette Request
+    """List every registered built-in tool with a write flag. Fronted by the
+    same nginx secret-path as the MCP endpoint; no extra auth here."""
+    from starlette.responses import JSONResponse
+    caps = [
+        {
+            "key": t.name,
+            "name": t.name,
+            "description": (t.description or "").strip(),
+            "kind": "builtin",
+            "is_write": t.name in _WRITE_TOOLS,
+        }
+        for t in mcp._tool_manager.list_tools()
+    ]
+    caps.sort(key=lambda c: c["key"])
+    return JSONResponse({"capabilities": caps, "count": len(caps)})
+
+
 # ASGI app for uvicorn (streamable-HTTP transport, remote MCP)
 app = mcp.streamable_http_app()
 
