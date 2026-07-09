@@ -329,6 +329,13 @@ const LEVEL_COLOR: Record<LogLevel, string> = {
   token:    "#a0aec0",
 };
 
+// Agent-loop role banner colors (Director orchestrates, Planner plans, Builder builds).
+const ROLE_COLOR: Record<string, string> = {
+  Director: "#4F46E5",
+  Planner:  "#0891B2",
+  Builder:  "#059669",
+};
+
 // ---------------------------------------------------------------------------
 // Quick prompts by context
 // ---------------------------------------------------------------------------
@@ -646,6 +653,9 @@ export function AIAgentPanel({
   const [input, setInput]           = useState("");
   const [loading, setLoading]       = useState(false);
   const [stages, setStages]         = useState<StageState[]>([]);
+  // Live role banner (Director / Planner / Builder) while the agent-loop
+  // drives a long build — makes the「等十幾秒」transparent (who is doing what).
+  const [activeRole, setActiveRole] = useState<{ role: string; text: string } | null>(null);
   const [logs, setLogs]             = useState<LogEntry[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   // v1.7 — slash command menu (triggered by typing "/" at start of input).
@@ -1051,6 +1061,16 @@ export function AIAgentPanel({
         } catch { /* console rendering must never break the chat stream */ }
 
         switch (type) {
+          case "role_marker": {
+            // Agent-loop live role banner: Director orchestrates, Planner
+            // plans, Builder builds. Shows who is active during a long build.
+            const role = String(ev.role ?? "");
+            const text = String(ev.text ?? "");
+            setActiveRole(role ? { role, text } : null);
+            addLog(makeLog("[·]", `${role}｜${text}`, "tool"));
+            break;
+          }
+
           case "stage_update": {
             const stage  = ev.stage as number;
             const status = ev.status as "running" | "complete" | "error";
@@ -1878,6 +1898,7 @@ export function AIAgentPanel({
           }
 
           case "synthesis": {
+            setActiveRole(null);   // build/turn finished — drop the role banner
             const text = (ev.text as string) ?? "";
             const displayText = text.replace(/<contract>[\s\S]*?<\/contract>/g, "").trim();
             // Phase v1.3 P0 — assign a stable index for feedback dedup.
@@ -2013,6 +2034,7 @@ export function AIAgentPanel({
       });
     } finally {
       setLoading(false);
+      setActiveRole(null);
     }
   }, [loading, onContract, addLog, focusedNodeId, focusedNodeLabel, t]);
 
@@ -2553,9 +2575,18 @@ export function AIAgentPanel({
           ))}
           {loading && (
             <div style={{ display: "flex", justifyContent: "flex-start" }}>
-              <div style={{ padding: "10px 14px", background: "#f7f8fc", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 2px", fontSize: 12, color: "#a0aec0" }}>
-                ● ● ●
-              </div>
+              {activeRole ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 13px", background: "#f7f8fc", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 2px" }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", background: ROLE_COLOR[activeRole.role] ?? "#4F46E5", padding: "2px 8px", borderRadius: 6, letterSpacing: 0.3 }}>
+                    {activeRole.role}
+                  </span>
+                  <span style={{ fontSize: 12, color: "#64748B" }}>{activeRole.text}</span>
+                </div>
+              ) : (
+                <div style={{ padding: "10px 14px", background: "#f7f8fc", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 2px", fontSize: 12, color: "#a0aec0" }}>
+                  ● ● ●
+                </div>
+              )}
             </div>
           )}
           {reflection.status && !loading && (
