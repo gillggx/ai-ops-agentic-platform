@@ -156,6 +156,9 @@ async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> As
         history.append({"role": role, "content": content})
     async for v1_event in run_chat_agent(
         message=req.message, history=history, java=java, user_id=caller.user_id or 0,
+        session_id=req.session_id or "chat",
+        pipeline_snapshot=req.pipeline_snapshot,
+        pipeline_columns=req.pipeline_columns,
     ):
         ev_type = v1_event.get("type") or "message"
         yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}
