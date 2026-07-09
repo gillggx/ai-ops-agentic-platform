@@ -845,6 +845,56 @@ async def check_skill_ready_for_role(slug: str, role: str) -> dict:
         return await _v2(c, "GET", f"/{slug}/role-readiness?role={role}")
 
 
+# ── Observability read tools (MCP-registry Phase 5) ────────────────────────
+# The five-面向 read gaps: let cowork SEE alarm 現況 / knowledge / supervisor
+# proposals. All READ-only (is_write=false ⇒ public by default, no confirm).
+# Writes stay on their existing gated paths (ack/dispose = /alarms GUI;
+# knowledge change = propose_knowledge → human review; supervisor approve = GUI).
+async def _api_v1(c: httpx.AsyncClient, method: str, path: str) -> Any:
+    headers = {"Authorization": f"Bearer {SHARED}", "Content-Type": "application/json"}
+    r = await c.request(method, f"{JAVA}/api/v1{path}", headers=headers, timeout=30)
+    r.raise_for_status()
+    return _unwrap(r.json() if r.content else {})
+
+
+@mcp.tool()
+async def list_alarms() -> dict:
+    """Current fab-wide 告警現況: active alarm clusters + KPIs. READ-only.
+    Use when the human asks 現在有什麼告警 / 哪台機台有問題 / 廠區狀況如何.
+    Returns {clusters:[...], kpis:{...}}. For one alarm's full diagnosis use
+    get_alarm_detail."""
+    async with httpx.AsyncClient() as c:
+        clusters = await _api_v1(c, "GET", "/alarms/clusters")
+        kpis = await _api_v1(c, "GET", "/alarms/kpis")
+    return {"clusters": clusters, "kpis": kpis}
+
+
+@mcp.tool()
+async def get_alarm_detail(alarm_id: int) -> dict:
+    """One alarm's full diagnosis report — AI summary + trigger + evidence +
+    auto-check rounds. Param alarm_id (from list_alarms). READ-only."""
+    async with httpx.AsyncClient() as c:
+        return await _api_v1(c, "GET", f"/alarms/{alarm_id}")
+
+
+@mcp.tool()
+async def list_agent_knowledge() -> Any:
+    """List the build agent's active directives (the knowledge that steers how
+    it plans/builds pipelines). READ-only. To ADD a knowledge item use
+    propose_knowledge — it goes to the human review queue, never applied直接."""
+    async with httpx.AsyncClient() as c:
+        return await _api_v1(c, "GET", "/agent-directives")
+
+
+@mcp.tool()
+async def list_supervisor_proposals() -> Any:
+    """List the Supervisor's OPEN curation proposals awaiting human review
+    (prune / promote / merge / correct knowledge or rules). READ-only —
+    approval/rejection happens in the /supervisor GUI by a human, never here."""
+    async with httpx.AsyncClient() as c:
+        return await _api_v1(c, "GET", "/supervisor/proposals")
+
+
 # Auto-check Rule tool group (skill-document CRUD + two-phase confirm) — legacy
 import rules  # noqa: E402
 rules.register(mcp, java=JAVA, shared=SHARED, jit=JIT, public=PUBLIC)
