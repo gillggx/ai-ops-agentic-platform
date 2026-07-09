@@ -210,8 +210,20 @@ async def run_chat_agent(
            "pipeline_snapshot": pipeline_snapshot, "pipeline_columns": pipeline_columns}
     messages: List[Dict[str, Any]] = list(history) + [{"role": "user", "content": message}]
 
+    # Make the model AWARE of the on-screen pipeline — without this it doesn't
+    # know a chart exists, so「設自動化」/「改一下」get a "先建一張" instead of a
+    # modify/automation tool call.
+    system = _SYSTEM
+    if isinstance(pipeline_snapshot, dict) and (pipeline_snapshot.get("nodes") or []):
+        blocks = [n.get("block_id") for n in pipeline_snapshot["nodes"]]
+        system = (_SYSTEM + "\n\n[目前狀態] 畫面上已經有一張建好的圖（節點："
+                  + " → ".join(str(b) for b in blocks)
+                  + "）。使用者說「改 / 拿掉 / 換 / 加」多半是要調它（用 modify_current_chart）；"
+                  "說「設自動化 / 巡檢 / 定期跑」是要對它設自動化（用 setup_automation）；"
+                  "不用再問「有沒有圖」。")
+
     for _round in range(MAX_TOOL_ROUNDS):
-        resp = await client.create(system=_SYSTEM, messages=messages,
+        resp = await client.create(system=system, messages=messages,
                                    tools=_TOOLS, max_tokens=1500)
         messages.append({"role": "assistant", "content": resp.content or [{"type": "text", "text": resp.text}]})
         tool_uses = [b for b in (resp.content or [])
