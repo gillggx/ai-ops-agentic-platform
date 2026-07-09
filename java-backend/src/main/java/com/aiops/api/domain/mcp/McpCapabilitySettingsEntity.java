@@ -39,6 +39,10 @@ public class McpCapabilitySettingsEntity {
     @Column(name = "is_public", nullable = false)
     private Boolean isPublic = Boolean.TRUE;
 
+    /** Granted to the internal Coordinator agent (Phase 6). Default false. */
+    @Column(name = "is_internal", nullable = false)
+    private Boolean isInternal = Boolean.FALSE;
+
     @Column(name = "updated_by", length = 120)
     private String updatedBy;
 

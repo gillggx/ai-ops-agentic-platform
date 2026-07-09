@@ -34,16 +34,18 @@ public class McpCapabilityController {
         return ApiResponse.ok(service.catalog());
     }
 
-    /** Flip one capability's public/private. Body (snake_case wire):
-     *  {@code {"kind": "...", "is_public": true|false}}. */
+    /** Flip one capability's exposure. Body (snake_case wire): {@code {"kind":
+     *  "...", "is_public": bool?, "is_internal": bool?}}. Either flag may be
+     *  omitted (left unchanged); is_internal is ignored for non-eligible keys. */
     @PutMapping("/{key}/exposure")
     public ApiResponse<McpCapabilityService.Capability> setExposure(
             @PathVariable("key") String key,
             @RequestBody Map<String, Object> body,
             @AuthenticationPrincipal AuthPrincipal caller) {
         String kind = String.valueOf(body.getOrDefault("kind", "builtin"));
-        boolean isPublic = Boolean.TRUE.equals(body.get("is_public"));
+        Boolean isPublic = body.containsKey("is_public") ? Boolean.TRUE.equals(body.get("is_public")) : null;
+        Boolean isInternal = body.containsKey("is_internal") ? Boolean.TRUE.equals(body.get("is_internal")) : null;
         String who = caller != null && caller.username() != null ? caller.username() : "admin";
-        return ApiResponse.ok(service.setExposure(key, kind, isPublic, who));
+        return ApiResponse.ok(service.setExposure(key, kind, isPublic, isInternal, who));
     }
 }

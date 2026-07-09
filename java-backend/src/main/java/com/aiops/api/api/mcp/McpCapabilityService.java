@@ -58,7 +58,26 @@ public class McpCapabilityService {
 
     /** One catalog row. */
     public record Capability(String key, String name, String description,
-                             String kind, boolean isWrite, boolean isPublic) {}
+                             String kind, boolean isWrite, boolean isPublic,
+                             boolean isInternal, boolean coordinatorEligible) {}
+
+    // Coordinator-eligible built-in tools: query / status / run-ready-made only.
+    // The pipeline-CONSTRUCTION primitives (list_blocks / validate / preview /
+    // execute / save_pipeline / …) are DELIBERATELY absent — they are Planner &
+    // Builder's job; granting them to the Coordinator would let it bypass them.
+    private static final java.util.Set<String> COORDINATOR_BUILTINS = java.util.Set.of(
+            "list_alarms", "get_alarm_detail", "list_agent_knowledge",
+            "list_supervisor_proposals", "list_skills_v2", "get_skill_v2",
+            "list_agent_activity", "get_agent_activity",
+            "check_skill_ready_for_role", "list_event_sources");
+
+    /** Whether a capability may be offered 對內 (to the Coordinator). Domain
+     *  skills (run ready-made) + external (query) are always eligible; built-in
+     *  tools only if they are query/status (not construction primitives). */
+    static boolean coordinatorEligible(String kind, String key) {
+        if ("domain_skill".equals(kind) || "external".equals(kind)) return true;
+        return COORDINATOR_BUILTINS.contains(key);
+    }
 
     /**
      * Full catalog across all three sources, each with effective exposure.
@@ -66,49 +85,69 @@ public class McpCapabilityService {
      * the whole catalog (admin still sees what IS reachable).
      */
     public List<Capability> catalog() {
-        Map<String, Boolean> exposure = new LinkedHashMap<>();
+        Map<String, McpCapabilitySettingsEntity> settings = new LinkedHashMap<>();
         for (McpCapabilitySettingsEntity s : settingsRepo.findAll()) {
-            exposure.put(s.getCapabilityKey(), Boolean.TRUE.equals(s.getIsPublic()));
+            settings.put(s.getCapabilityKey(), s);
         }
         List<Capability> out = new ArrayList<>();
 
         // builtin — from the MCP server manifest
         for (Map<String, Object> t : fetchBuiltinManifest()) {
             String key = String.valueOf(t.get("key"));
-            out.add(new Capability(key, String.valueOf(t.getOrDefault("name", key)),
+            out.add(row(key, String.valueOf(t.getOrDefault("name", key)),
                     String.valueOf(t.getOrDefault("description", "")), "builtin",
-                    Boolean.TRUE.equals(t.get("is_write")),
-                    exposure.getOrDefault(key, Boolean.TRUE)));
+                    Boolean.TRUE.equals(t.get("is_write")), settings.get(key)));
         }
         // domain skills — invoke is read/compute
         for (SkillV2Entity sk : skillRepo.findAll()) {
             String key = sk.getSlug();
-            out.add(new Capability(key, sk.getName(),
+            out.add(row(key, sk.getName(),
                     sk.getSub() != null && !sk.getSub().isBlank() ? sk.getSub() : sk.getNl(),
-                    "domain_skill", false, exposure.getOrDefault(key, Boolean.TRUE)));
+                    "domain_skill", false, settings.get(key)));
         }
         // external — System MCPs; calling is a fetch
         for (McpDefinitionEntity m : mcpRepo.findAll()) {
             String key = m.getName();
-            out.add(new Capability(key, m.getName(), m.getDescription(),
-                    "external", false, exposure.getOrDefault(key, Boolean.TRUE)));
+            out.add(row(key, m.getName(), m.getDescription(), "external", false, settings.get(key)));
         }
         return out;
     }
 
-    /** Set a capability's public/private. Upserts the overlay row. */
+    private static Capability row(String key, String name, String desc, String kind,
+                                  boolean isWrite, McpCapabilitySettingsEntity s) {
+        // no settings row ⇒ public by default (decision 4); is_internal always
+        // defaults false (Coordinator opt-in). is_internal only honoured when
+        // the capability is actually coordinator-eligible.
+        boolean elig = coordinatorEligible(kind, key);
+        boolean pub = s == null || Boolean.TRUE.equals(s.getIsPublic());
+        boolean internal = elig && s != null && Boolean.TRUE.equals(s.getIsInternal());
+        return new Capability(key, name, desc, kind, isWrite, pub, internal, elig);
+    }
+
+    /** Set a capability's exposure. Upserts the overlay row. Either flag may be
+     *  null (leave unchanged). is_internal is ignored for non-eligible keys. */
     @Transactional
-    public Capability setExposure(String key, String kind, boolean isPublic, String updatedBy) {
-        McpCapabilitySettingsEntity row = settingsRepo.findByCapabilityKey(key)
+    public Capability setExposure(String key, String kind, Boolean isPublic,
+                                  Boolean isInternal, String updatedBy) {
+        McpCapabilitySettingsEntity r = settingsRepo.findByCapabilityKey(key)
                 .orElseGet(McpCapabilitySettingsEntity::new);
-        row.setCapabilityKey(key);
-        row.setKind(kind);
-        row.setIsPublic(isPublic);
-        row.setUpdatedBy(updatedBy);
-        settingsRepo.save(row);
-        // Return the merged view for this key so the UI can reflect it directly.
+        r.setCapabilityKey(key);
+        r.setKind(kind);
+        if (isPublic != null) r.setIsPublic(isPublic);
+        if (isInternal != null) {
+            r.setIsInternal(coordinatorEligible(kind, key) && isInternal);
+        }
+        r.setUpdatedBy(updatedBy);
+        settingsRepo.save(r);
         return catalog().stream().filter(c -> c.key().equals(key)).findFirst()
-                .orElse(new Capability(key, key, "", kind, false, isPublic));
+                .orElse(new Capability(key, key, "", kind, false,
+                        isPublic == null || isPublic, false, coordinatorEligible(kind, key)));
+    }
+
+    /** Capabilities granted to the internal Coordinator agent (is_internal +
+     *  eligible). The sidecar loads these on top of its curated core tools. */
+    public List<Capability> agentTools() {
+        return catalog().stream().filter(Capability::isInternal).toList();
     }
 
     @SuppressWarnings("unchecked")
