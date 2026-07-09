@@ -944,6 +944,10 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
             "v30_phase_edit_history": edit_history,
             "v30_removals": approved_removals,
             "status": "phase_in_progress",
+            # User committed to building — a later build_postmortem replan must
+            # NOT re-pause at this gate (nothing surfaces a 2nd confirm card, so
+            # the graph would hang). Auto-confirm any subsequent goal_plan.
+            "skip_confirm": True,
             "sse_events": [_event("goal_plan_confirmed", {
                 "phases": phases, "n_edits": len(edit_history),
             })],
@@ -953,6 +957,8 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
     return {
         "status": "phase_in_progress",
         "v30_removals": approved_removals,
+        # See above — commit means later postmortem replans auto-continue.
+        "skip_confirm": True,
         "sse_events": [_event("goal_plan_confirmed", {
             "phases": phases, "n_edits": 0,
         })],
