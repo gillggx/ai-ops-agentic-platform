@@ -88,6 +88,7 @@ const ADMIN_ITEMS = [
   { href: "/system/event-registry",   labelKey: "eventRegistry",    icon: "📋" },
   { href: "/system/monitor",          labelKey: "systemMonitor",    icon: "🖥️" },
   { href: "/admin/simulator-health",  labelKey: "simulatorHealth",  icon: "💓" },
+  { href: "/admin/mcp",               labelKey: "mcpRegistry",      icon: "⬢" },
   { href: "/admin/users",             labelKey: "users",            icon: "👥" },
 ];
 
