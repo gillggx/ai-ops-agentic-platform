@@ -144,7 +144,7 @@ async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> As
     from ..clients.java_client import JavaAPIClient
 
     java = JavaAPIClient(CONFIG.java_api_url, CONFIG.java_internal_token)
-    _sid, lc_history, _tok = await load_session(req.session_id, caller.user_id or 0)
+    _sid, lc_history, _tok = await load_session(None, req.session_id, caller.user_id or 0)
     # load_session yields LangChain HumanMessage/AIMessage — flatten to the
     # {role, content} dicts the Anthropic loop consumes.
     history: list[dict] = []
