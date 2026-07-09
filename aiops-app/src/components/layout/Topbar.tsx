@@ -5,6 +5,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
 import { NotificationBell } from "./NotificationBell";
 import { SUPPORTED_LOCALES, LOCALE_LABELS } from "@/i18n/locales";
+import { THEMES, DEFAULT_THEME, applyTheme } from "@/lib/themes";
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   IT_ADMIN: { bg: "#fef2f2", color: "#991b1b" },
@@ -28,7 +29,7 @@ export function Topbar() {
       zIndex: 100,
       gap: 10,
     }}>
-      <span style={{ fontWeight: 700, fontSize: "var(--fs-xl)", color: "#2b6cb0", letterSpacing: "-0.3px" }}>
+      <span style={{ fontWeight: 700, fontSize: "var(--fs-xl)", color: "var(--p, #2b6cb0)", letterSpacing: "-0.3px" }}>
         AIOps
       </span>
       <div style={{ flex: 1 }} />
@@ -43,10 +44,18 @@ function UserMenu() {
   const locale = useLocale();
   const t = useTranslations("common");
   const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState<string>(DEFAULT_THEME);
+
+  // Keep the picker's ✓ in sync with whatever the pre-paint script applied.
+  useEffect(() => {
+    setTheme(document.documentElement.dataset.theme || DEFAULT_THEME);
+  }, []);
 
   // i18n P3 — users.locale 是跨裝置 source of truth，cookie 是本機快取。
   // 每個 tab session 只同步一次（sessionStorage 防 reload 迴圈）：profile
   // 有 locale 且與 cookie 不同 → 採用 profile 並 reload。
+  // Design v2: ui_theme 同理（DB 是 source of truth，localStorage 是繪製快取），
+  // 差別是換主題只翻 CSS 變數、不 reload。
   useEffect(() => {
     if (!session) return;
     if (sessionStorage.getItem("i18n:profile-synced")) return;
@@ -54,6 +63,11 @@ function UserMenu() {
     fetch("/api/me/profile", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((p) => {
+        const themePref = p?.ui_theme as string | undefined;
+        if (themePref && THEMES.some((th) => th.slug === themePref)) {
+          applyTheme(themePref);
+          setTheme(themePref);
+        }
         const prof = p?.locale as string | undefined;
         if (prof && (SUPPORTED_LOCALES as readonly string[]).includes(prof) && prof !== locale) {
           document.cookie = `NEXT_LOCALE=${prof};path=/;max-age=31536000`;
@@ -182,6 +196,43 @@ function UserMenu() {
 
             <div style={{ borderTop: "1px solid #f1f5f9" }} />
 
+            {/* Design v2 — 外觀主題：即時切 CSS 變數（不 reload），DB 持久化 */}
+            <div style={{ padding: "8px 14px 4px", fontSize: 10, color: "#94a3b8", fontWeight: 600 }}>{t("appearance")}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, padding: "0 14px 10px" }}>
+              {THEMES.map((th) => (
+                <button
+                  key={th.slug}
+                  onClick={() => {
+                    applyTheme(th.slug);
+                    setTheme(th.slug);
+                    // 跨裝置持久化（fire-and-forget；失敗不擋切換）
+                    void fetch("/api/me/theme", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ theme: th.slug }),
+                    }).catch(() => {});
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "4px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer",
+                    border: theme === th.slug ? `1px solid ${th.swatch}` : "1px solid #e2e8f0",
+                    background: theme === th.slug ? "#f8fafc" : "#fff",
+                    color: "#374151", fontWeight: theme === th.slug ? 600 : 400,
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{
+                    width: 12, height: 12, borderRadius: "50%", flexShrink: 0,
+                    background: th.swatch,
+                    outline: theme === th.slug ? `2px solid ${th.swatch}40` : "none",
+                  }} />
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{th.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div style={{ borderTop: "1px solid #f1f5f9" }} />
+
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
               style={{
@@ -226,7 +277,7 @@ function DropdownLink({ href, icon, label, onClick }: {
 
 const avatarStyle: React.CSSProperties = {
   width: 24, height: 24, borderRadius: "50%",
-  background: "#2b6cb0", color: "#fff",
+  background: "var(--p, #2b6cb0)", color: "#fff",
   display: "flex", alignItems: "center", justifyContent: "center",
   fontSize: 11, fontWeight: 700,
 };

@@ -111,8 +111,8 @@ function NavLink({ href, icon, label, active, collapsed }: {
       padding: collapsed ? "var(--sp-md) 0" : "var(--sp-sm) var(--sp-md)",
       justifyContent: collapsed ? "center" : "flex-start",
       borderRadius: "var(--radius-md)",
-      color: active ? "#2b6cb0" : "#4a5568",
-      background: active ? "#ebf4ff" : "transparent",
+      color: active ? "var(--pd, #2b6cb0)" : "#4a5568",
+      background: active ? "var(--pl, #ebf4ff)" : "transparent",
       textDecoration: "none", fontSize: collapsed ? 18 : "var(--fs-sm)",
       fontWeight: active ? 600 : 400, marginBottom: 2,
       transition: "background 0.1s",
@@ -299,7 +299,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
       display: "flex", flexDirection: "column",
-      height: "100vh", background: "#f7f8fc", overflow: "hidden",
+      height: "100vh", background: "var(--ws, #f7f8fc)", overflow: "hidden",
     }}>
       <Topbar />
       <HandoffListener />

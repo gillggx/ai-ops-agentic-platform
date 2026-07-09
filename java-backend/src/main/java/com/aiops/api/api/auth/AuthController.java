@@ -93,6 +93,7 @@ public class AuthController {
 			body.put("roles", ap.roles().stream().map(Enum::name).toList());
 			body.put("oidc_provider", user != null ? user.getOidcProvider() : null);
 			body.put("locale", user != null ? user.getLocale() : null);
+			body.put("ui_theme", user != null ? user.getUiTheme() : null);
 			return ApiResponse.ok(body);
 		}
 		// OIDC path — principal is a Jwt with subject claim
@@ -124,6 +125,15 @@ public class AuthController {
 		return ApiResponse.ok(Map.of("locale", user.getLocale()));
 	}
 
+	/** Design v2: persist the user's UI theme (10 selectable themes). */
+	@PutMapping("/me/theme")
+	public ApiResponse<Map<String, Object>> updateTheme(@RequestBody UpdateThemeRequest req,
+	                                                     @org.springframework.security.core.annotation.AuthenticationPrincipal AuthPrincipal principal) {
+		if (principal == null) throw ApiException.forbidden("not authenticated");
+		var user = userAccountService.updateUiTheme(principal.userId(), req.theme());
+		return ApiResponse.ok(Map.of("ui_theme", user.getUiTheme()));
+	}
+
 	@PutMapping("/me/password")
 	public ApiResponse<Map<String, Object>> changePassword(@org.springframework.validation.annotation.Validated
 	                                                        @RequestBody ChangePasswordRequest req,
@@ -136,6 +146,7 @@ public class AuthController {
 	public record LoginRequest(@NotBlank String username, @NotBlank String password) {}
 	public record UpdateProfileRequest(String displayName) {}
 	public record UpdateLocaleRequest(String locale) {}
+	public record UpdateThemeRequest(String theme) {}
 	public record ChangePasswordRequest(
 			@NotBlank String oldPassword,
 			@NotBlank String newPassword) {}

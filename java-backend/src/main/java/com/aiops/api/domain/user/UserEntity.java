@@ -54,6 +54,10 @@ public class UserEntity extends Auditable {
 	@Column(name = "locale", length = 8)
 	private String locale;
 
+	/** Design v2: UI theme slug (pine / oxblood / petrol / …); null = default (pine). */
+	@Column(name = "ui_theme", length = 24)
+	private String uiTheme;
+
 	/** OIDC subject claim — stable per-provider identity. NULL = local-only. */
 	@Column(name = "oidc_sub", length = 255)
 	private String oidcSub;

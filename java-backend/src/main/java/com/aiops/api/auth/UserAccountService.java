@@ -125,4 +125,20 @@ public class UserAccountService {
 		user.setLocale(locale);
 		return userRepository.save(user);
 	}
+
+	/** Design v2: the 10 selectable UI themes (design_handoff_operation_platform_v2). */
+	private static final java.util.Set<String> SUPPORTED_THEMES = java.util.Set.of(
+			"pine", "oxblood", "aubergine", "petrol", "olive",
+			"slate", "raspberry", "lime", "cocoa", "violet");
+
+	@Transactional
+	public UserEntity updateUiTheme(Long userId, String theme) {
+		if (theme == null || !SUPPORTED_THEMES.contains(theme)) {
+			throw ApiException.badRequest("unsupported theme: " + theme);
+		}
+		UserEntity user = userRepository.findById(userId)
+				.orElseThrow(() -> ApiException.notFound("user"));
+		user.setUiTheme(theme);
+		return userRepository.save(user);
+	}
 }

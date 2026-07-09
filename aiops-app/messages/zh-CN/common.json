@@ -8,5 +8,6 @@
   "changePassword": "修改密码",
   "signInMethod": "登录方式：{provider}",
   "language": "语言",
+  "appearance": "外观",
   "myPreferences": "我的偏好"
 }

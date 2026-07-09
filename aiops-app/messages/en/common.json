@@ -8,5 +8,6 @@
   "changePassword": "Change password",
   "signInMethod": "Signed in via {provider}",
   "language": "Language",
+  "appearance": "Appearance",
   "myPreferences": "My preferences"
 }

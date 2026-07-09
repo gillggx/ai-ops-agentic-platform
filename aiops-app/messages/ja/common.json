@@ -8,5 +8,6 @@
   "changePassword": "パスワード変更",
   "signInMethod": "ログイン方法：{provider}",
   "language": "言語",
+  "appearance": "外観",
   "myPreferences": "マイ設定"
 }
