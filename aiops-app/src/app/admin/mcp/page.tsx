@@ -172,6 +172,16 @@ export default function McpRegistryPage() {
                         }}>
                         {c.is_internal ? "agent ✓" : "給 agent"}
                       </button>
+                    ) : c.kind === "domain_skill" ? (
+                      <span title="Skill 是 agent 的預設彈藥庫，一律可用（走 invoke_skill），不需授權"
+                        style={{ fontSize: 11, color: "#2C5AA8", minWidth: 84, textAlign: "center", padding: "5px 0" }}>
+                        預設可用
+                      </span>
+                    ) : c.kind === "external" ? (
+                      <span title="External MCP 只透過它 V54 產生的 Skill 給 agent 用；沒產生 Skill 就不給。到 System MCP 頁勾「連動產生」"
+                        style={{ fontSize: 11, color: "#9aa0b4", minWidth: 84, textAlign: "center", padding: "5px 0" }}>
+                        需先產生 Skill
+                      </span>
                     ) : (
                       <span title="這是建置工具，只給 Builder；不開放給 Coordinator，以免它繞過 Planner & Builder"
                         style={{ fontSize: 11, color: "#c0c4d0", minWidth: 84, textAlign: "center", padding: "5px 0" }}>

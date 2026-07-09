@@ -71,12 +71,13 @@ public class McpCapabilityService {
             "list_agent_activity", "get_agent_activity",
             "check_skill_ready_for_role", "list_event_sources");
 
-    /** Whether a capability may be offered 對內 (to the Coordinator). Domain
-     *  skills (run ready-made) + external (query) are always eligible; built-in
-     *  tools only if they are query/status (not construction primitives). */
+    /** Whether a capability needs an explicit 對內 grant to reach the Coordinator.
+     *  Only the platform-meta READ built-ins do. Domain skills are the agent's
+     *  DEFAULT repertoire (always usable via invoke_skill, no grant). External
+     *  System MCPs reach the agent ONLY as their V54-derived Skills — a raw MCP
+     *  is never given, so it is not grantable here either. */
     static boolean coordinatorEligible(String kind, String key) {
-        if ("domain_skill".equals(kind) || "external".equals(kind)) return true;
-        return COORDINATOR_BUILTINS.contains(key);
+        return "builtin".equals(kind) && COORDINATOR_BUILTINS.contains(key);
     }
 
     /**
