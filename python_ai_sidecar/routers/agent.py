@@ -498,6 +498,18 @@ async def _chat_intent_respond_stream(
             req.chat_session_id, pending.build_session_id, confirmed,
             len(phases) if isinstance(phases, list) else 0,
         )
+        # Open the Live Canvas overlay now that the user confirmed the plan and
+        # the build is about to paint nodes. The plan-first agent-loop path
+        # doesn't run the native build tool (which is what normally emits this),
+        # so without it the canvas never opens. session_id must match the build
+        # thread so subsequent pb_glass_* ops land on the same overlay.
+        if confirmed:
+            yield {"event": "pb_glass_start", "data": json.dumps({
+                "type": "pb_glass_start",
+                "session_id": pending.build_session_id,
+                "goal": pending.plan_summary or "",
+            }, ensure_ascii=False)}
+
         final_pipeline_for_exec: Optional[dict] = None
         try:
             async for stream_event in resume_graph_v30(
