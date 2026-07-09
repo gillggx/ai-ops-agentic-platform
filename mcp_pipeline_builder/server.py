@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 import httpx
@@ -102,10 +103,57 @@ You cannot open the URL for them; present it as the action they must take (it al
 auto-pops if their app is open).
 """
 
+# ── Exposure filter (MCP-registry Phase 2b) ────────────────────────────────
+# cowork only sees / can call PUBLIC capabilities. The PRIVATE set comes from
+# Java's catalog (IT admin flips public/private at /admin/mcp); cached briefly
+# so list_tools stays cheap. FAIL-OPEN: if the catalog is unreachable we expose
+# everything — a transient Java blip must never hard-block cowork.
+_priv_cache: dict = {"keys": frozenset(), "at": 0.0}
+_PRIV_TTL = 30.0
+
+
+async def _private_keys() -> "frozenset[str]":
+    now = time.monotonic()
+    if now - _priv_cache["at"] < _PRIV_TTL:
+        return _priv_cache["keys"]
+    keys = _priv_cache["keys"]
+    try:
+        async with httpx.AsyncClient() as c:
+            r = await c.get(f"{JAVA}/api/v1/mcp-capabilities",
+                            headers={"Authorization": f"Bearer {SHARED}"}, timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            caps = data.get("data") if isinstance(data, dict) else data
+            keys = frozenset(str(x["key"]) for x in (caps or [])
+                             if isinstance(x, dict) and x.get("is_public") is False)
+            _priv_cache["keys"] = keys
+            _priv_cache["at"] = now
+    except Exception:  # noqa: BLE001 — fail-open (expose all on catalog outage)
+        pass
+    return keys
+
+
+class GatedFastMCP(FastMCP):
+    """Runtime exposure gate: hides PRIVATE capabilities from external cowork's
+    tool list and refuses to call them. Tools are still registered; the
+    /admin/mcp public/private toggles are the gate (MCP-registry Phase 2b)."""
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        private = await _private_keys()
+        return [t for t in tools if t.name not in private]
+
+    async def call_tool(self, name, arguments):  # noqa: ANN001
+        if name in await _private_keys():
+            raise ValueError(
+                f"tool '{name}' is not exposed (set to private by IT admin)")
+        return await super().call_tool(name, arguments)
+
+
 # Server binds 127.0.0.1 only and sits behind nginx (TLS + secret path) — that is
 # the trust boundary, so disable FastMCP's auto host-check (it would otherwise
 # reject nginx's proxied Host header with HTTP 421 "Invalid Host header").
-mcp = FastMCP(
+mcp = GatedFastMCP(
     "aiops-pipeline-builder",
     instructions=INSTRUCTIONS,
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
