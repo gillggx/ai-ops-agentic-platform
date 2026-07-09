@@ -71,6 +71,57 @@ async def _granted_agent_tools(java: Any) -> List[Dict[str, Any]]:
     return _granted_cache["tools"]
 
 
+async def _call_system_mcp(java: Any, mcp_name: str, args: Dict[str, Any]) -> Any:
+    """Call a granted external System MCP by name (Phase 6). Mirrors
+    block_mcp_call's dispatch but returns raw records for the chat tool: resolve
+    the MCP's api_config from Java, issue the HTTP call with `args`."""
+    import httpx
+    mcp = await java.get_mcp_by_name(mcp_name)
+    if not mcp:
+        return {"error": f"MCP '{mcp_name}' 未註冊"}
+    raw = mcp.get("api_config") or mcp.get("apiConfig") or "{}"
+    cfg = json.loads(raw) if isinstance(raw, str) else raw
+    url = cfg.get("endpoint_url")
+    method = (cfg.get("method") or "GET").upper()
+    headers = cfg.get("headers") or {}
+    try:
+        from python_ai_sidecar.pipeline_builder.blocks._http_helpers import resolve_headers
+        headers = resolve_headers(headers, mcp_name=mcp_name)
+    except Exception:  # noqa: BLE001 — headers as-is if helper/env missing
+        pass
+    if not url:
+        return {"error": f"MCP '{mcp_name}' 沒有 endpoint_url"}
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await (c.get(url, params=args, headers=headers) if method == "GET"
+                   else c.post(url, json=args, headers=headers))
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+
+def _mcp_param_doc(schema: Any) -> str:
+    """Render a System MCP's input_schema into a short param hint for the tool
+    description. Tolerates both a list of param defs and a JSON-schema dict."""
+    if isinstance(schema, str):
+        try:
+            schema = json.loads(schema)
+        except (ValueError, TypeError):
+            return ""
+    items = []
+    if isinstance(schema, list):
+        for p in schema:
+            if isinstance(p, dict) and p.get("name"):
+                req = "必填" if p.get("required") else "選填"
+                items.append(f"{p['name']}({p.get('type', 'str')},{req}) {p.get('description', '')}".strip())
+    elif isinstance(schema, dict):
+        props = schema.get("properties") or {}
+        req = set(schema.get("required") or [])
+        for k, v in props.items():
+            r = "必填" if k in req else "選填"
+            d = (v or {}).get("description", "") if isinstance(v, dict) else ""
+            items.append(f"{k}({(v or {}).get('type', 'str') if isinstance(v, dict) else 'str'},{r}) {d}".strip())
+    return "；".join(items[:12])
+
+
 def is_chat_agent_loop_enabled() -> bool:
     return os.environ.get("CHAT_AGENT_LOOP_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -311,6 +362,12 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                               "message": "已開一張卡帶使用者去自動化設定頁（跟 Skill 庫一致），不用在對話裡填設定。"})
             return
 
+        # ── granted external System MCP (Phase 6) ──────────────────────────
+        if name in (ctx.get("granted_mcps") or {}):
+            data = await _call_system_mcp(java, name, inp.get("args") or inp or {})
+            yield ("result", {"status": "ok", "data": data})
+            return
+
         # ── granted built-in READ tools (Phase 6 fast-follow) ──────────────
         if name in _BUILTIN_READ and name in (ctx.get("granted_reads") or set()):
             spec = _BUILTIN_READ[name]
@@ -321,13 +378,10 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
             yield ("result", {"status": "ok", "data": data})
             return
 
-        # ── invoke_skill (Phase 6) — run a granted domain skill's pipeline ──
+        # ── invoke_skill — run any published domain skill's pipeline. Domain
+        #    skills are the agent's default repertoire (no per-skill grant). ──
         if name == "invoke_skill":
             slug = str(inp.get("slug") or "")
-            if slug not in (ctx.get("granted_skills") or set()):
-                yield ("result", {"status": "not_allowed",
-                                  "message": f"skill「{slug}」沒有授權給我；我只能跑管理員開放對內的 skill。"})
-                return
             from python_ai_sidecar.executor.real_executor import execute_native
             skills = await java.search_published_skills(slug, top_k=8)
             match = next((s for s in (skills or []) if s.get("slug") == slug), None)
@@ -392,15 +446,24 @@ async def run_chat_agent(
                   "說「設自動化 / 巡檢 / 定期跑」是要對它設自動化（用 setup_automation）；"
                   "不用再問「有沒有圖」。")
 
-    # Phase 6: extend the toolset with capabilities IT admin granted 對內. First
-    # cut wires domain skills (跑現成 skill). The build primitives are never
-    # eligible, so this never lets the Coordinator bypass Planner & Builder.
     tools = list(_TOOLS)
+
+    # invoke_skill is ALWAYS available — domain skills are the agent's default
+    # repertoire (no per-skill grant). It runs any published skill; use
+    # search_skills first to find the slug.
+    tools.append({
+        "name": "invoke_skill",
+        "description": "直接執行一個平台上已發布的 domain skill（現成分析 pipeline）並回傳結果——"
+                       "用在使用者想「用現成的 X 來看/跑」而不是重新建圖時。先用 search_skills 找到 slug。參數 slug。",
+        "input_schema": {"type": "object", "properties": {
+            "slug": {"type": "string", "description": "要跑的 skill slug"}
+        }, "required": ["slug"]},
+    })
+
+    # Phase 6: extend with capabilities IT admin granted 對內 (external System
+    # MCPs + built-in reads). Build primitives are never eligible, so this can't
+    # let the Coordinator bypass Planner & Builder.
     granted = await _granted_agent_tools(java)
-    granted_skills = {g["key"]: g.get("name") or g["key"]
-                      for g in granted if g.get("kind") == "domain_skill" and g.get("key")}
-    ctx["granted_skills"] = set(granted_skills)
-    # granted built-in READ tools (dispatched via /internal)
     granted_reads = [g["key"] for g in granted
                      if g.get("kind") == "builtin" and g.get("key") in _BUILTIN_READ]
     ctx["granted_reads"] = set(granted_reads)
@@ -413,17 +476,29 @@ async def run_chat_agent(
             "input_schema": {"type": "object", "properties": props,
                              "required": list(spec["args"].keys())},
         })
-    if granted_skills:
-        catalog = "、".join(f"{k}（{v}）" for k, v in list(granted_skills.items())[:20])
-        tools.append({
-            "name": "invoke_skill",
-            "description": "直接執行一個現成的 domain skill（分析 pipeline）並回傳結果——用在"
-                           "使用者想「用現成的 X 來看/跑」而不是重新建圖時。只能跑這些已授權的："
-                           + catalog + "。參數 slug。",
-            "input_schema": {"type": "object", "properties": {
-                "slug": {"type": "string", "description": "要跑的 skill slug（必須在授權清單內）"}
-            }, "required": ["slug"]},
-        })
+    # granted external System MCPs — one tool each; params come from the MCP's
+    # own input_schema (CLAUDE.md: description is the single doc source).
+    granted_mcps: Dict[str, Any] = {}
+    ext_keys = [g["key"] for g in granted if g.get("kind") == "external" and g.get("key")]
+    if ext_keys:
+        try:
+            defs = {m.get("name"): m for m in (await java.list_mcps() or [])}
+        except Exception:  # noqa: BLE001
+            defs = {}
+        for key in ext_keys:
+            d = defs.get(key) or {}
+            granted_mcps[key] = d
+            schema = d.get("input_schema") or d.get("inputSchema")
+            param_doc = _mcp_param_doc(schema)
+            tools.append({
+                "name": key,
+                "description": (str(d.get("description") or key)[:400]
+                               + ("　參數：" + param_doc if param_doc else "")),
+                "input_schema": {"type": "object", "properties": {
+                    "args": {"type": "object", "description": "MCP 參數（依上面 input schema 填）"}
+                }},
+            })
+    ctx["granted_mcps"] = granted_mcps
 
     for _round in range(MAX_TOOL_ROUNDS):
         resp = await client.create(system=system, messages=messages,
