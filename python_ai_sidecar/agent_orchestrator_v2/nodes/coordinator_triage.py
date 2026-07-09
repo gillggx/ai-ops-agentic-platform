@@ -165,24 +165,21 @@ async def coordinator_triage_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # the frontend runs the enable via skills_v2 endpoints. Nothing goes live
     # from one chat sentence.
     if route == "automation_request":
-        from python_ai_sidecar.agent_orchestrator_v2.nodes.automation_intent import (
-            parse_automation,
-        )
-        cfg = await parse_automation(msg, snap)
-        if cfg is None:
-            return {}  # parse failed → pass through to existing flow
-        logger.info("triage: automation_request role=%s schedule=%s",
-                    cfg.get("role"), (cfg.get("trigger") or {}).get("schedule"))
+        # (2026-07-09) DON'T fabricate a role/schedule/gate here — a vague
+        # 「幫我開啟」became a doomed「巡檢/每1小時/告警未指定」form the agent
+        # itself said would be blocked. The窗口 must not hand the user a form it
+        # knows will be rejected. Automation is set on the SAME page as the Skill
+        # Library (/skills/[slug]/automate) — hand off there, don't reinvent.
+        logger.info("triage: automation_request → handoff to automate page")
         return {
             "render_cards": [{
-                "type": "automation_confirm",
-                "config": cfg,
+                "type": "automation_handoff",
                 "pipeline_json": snap,
             }],
             "force_synthesis": True,
             "messages": [AIMessage(content=(
-                "我把你的自動化設定整理好了（下方卡片）。確認無誤按「確認啟用」"
-                "才會真的開始跑；要改就直接跟我說。"))],
+                "設定自動化（定時巡檢 / 定期檢查 / 告警）要在 Skill 的設定頁做，跟你在 "
+                "Skill 庫的操作一樣。要我把這張圖存成 Skill 並帶你去設定頁嗎？"))],
             "coordinator_route": {"route": route, "reason": reason, "fast_path": True},
         }
 

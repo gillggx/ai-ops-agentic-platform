@@ -14,7 +14,7 @@ import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
 import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "./AgentConsole";
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
-import { AutomationConfirmCard, type AutomationConfirmData } from "./AutomationConfirmCard";
+import { AutomationConfirmCard, type AutomationHandoffData } from "./AutomationConfirmCard";
 import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } from "./PbPatchProposalCard";
 import type { UiRender } from "@/components/McpChartRenderer";
 import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
@@ -190,7 +190,7 @@ interface ChatMessage {
    *  no charts) because the DAG/results already live in the Lite Canvas. */
   pbCompact?: boolean;
   /** 草稿暫存區 P3b (2026-07-09): parsed automation config awaiting confirm. */
-  automationConfirm?: AutomationConfirmData;
+  automationConfirm?: AutomationHandoffData;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -1261,14 +1261,12 @@ export function AIAgentPanel({
                 content: "",
                 pbProposal: card as unknown as PbPatchProposalData,
               }]);
-            } else if (card?.type === "automation_confirm") {
-              // 草稿暫存區 P3b: agent parsed an automation-setup sentence into a
-              // config — render a confirm card; the human confirms + the card
-              // runs the enable via skills_v2 (nothing live until confirm).
+            } else if (card?.type === "automation_handoff") {
+              // 草稿暫存區 P3b (redesigned): hand off to the Skill-Library
+              // automate page — no fabricated config, consistent UX.
               setChatHistory((prev) => [...prev, {
                 id: nextId(), role: "automation_confirm", content: "",
                 automationConfirm: {
-                  config: card.config as AutomationConfirmData["config"],
                   pipeline_json: (card.pipeline_json ?? {}) as Record<string, unknown>,
                 },
               }]);
