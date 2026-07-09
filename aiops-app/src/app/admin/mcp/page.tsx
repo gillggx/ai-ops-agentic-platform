@@ -16,6 +16,8 @@ interface Capability {
   kind: "builtin" | "domain_skill" | "external";
   is_write: boolean;
   is_public: boolean;
+  is_internal: boolean;
+  coordinator_eligible: boolean;
 }
 
 const KIND_LABEL: Record<Capability["kind"], string> = {
@@ -56,21 +58,21 @@ export default function McpRegistryPage() {
     void load();
   }, [load]);
 
-  const toggle = useCallback(async (c: Capability) => {
-    setBusy(c.key);
-    const next = !c.is_public;
-    // optimistic
-    setCaps((prev) => prev.map((x) => (x.key === c.key ? { ...x, is_public: next } : x)));
+  const toggle = useCallback(async (c: Capability, axis: "public" | "internal") => {
+    setBusy(c.key + axis);
+    const field = axis === "public" ? "is_public" : "is_internal";
+    const cur = axis === "public" ? c.is_public : c.is_internal;
+    const next = !cur;
+    setCaps((prev) => prev.map((x) => (x.key === c.key ? { ...x, [field]: next } : x)));
     try {
       const r = await fetch(`/api/mcp-capabilities/${encodeURIComponent(c.key)}/exposure`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: c.kind, is_public: next }),
+        body: JSON.stringify({ kind: c.kind, [field]: next }),
       });
       if (!r.ok) throw new Error();
     } catch {
-      // revert
-      setCaps((prev) => prev.map((x) => (x.key === c.key ? { ...x, is_public: c.is_public } : x)));
+      setCaps((prev) => prev.map((x) => (x.key === c.key ? { ...x, [field]: cur } : x)));
       setError(`切換 ${c.key} 失敗`);
     } finally {
       setBusy(null);
@@ -89,7 +91,8 @@ export default function McpRegistryPage() {
     const total = caps.length;
     const publicN = caps.filter((c) => c.is_public).length;
     const writeN = caps.filter((c) => c.is_write).length;
-    return { total, publicN, privateN: total - publicN, writeN };
+    const internalN = caps.filter((c) => c.is_internal).length;
+    return { total, publicN, privateN: total - publicN, writeN, internalN };
   }, [caps]);
 
   return (
@@ -98,7 +101,8 @@ export default function McpRegistryPage() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 750, margin: 0, letterSpacing: "-0.3px" }}>MCP 能力管理</h1>
           <p style={{ fontSize: 13.5, color: "#5a6473", margin: "6px 0 0" }}>
-            控制每個能力對外（cowork）public / 只給內部 agent private。<b>沒設過 = 預設 public</b>（維持現有開放）。
+            每個能力兩個開關：<b>對外</b>(cowork public/private) 與 <b>對內</b>(給我們的 Coordinator agent)。
+            建置工具標「僅 Builder」不開對內，以免 Coordinator 繞過 Planner &amp; Builder。
           </p>
         </div>
         <button onClick={() => void load()} disabled={loading}
@@ -109,8 +113,8 @@ export default function McpRegistryPage() {
 
       <div style={{ display: "flex", gap: 10, margin: "18px 0 16px", flexWrap: "wrap" }}>
         <Stat k={stats.total} l="能力總數" />
-        <Stat k={stats.publicN} l="public（對外）" c="#157F52" />
-        <Stat k={stats.privateN} l="private（僅內部）" c="#C0341B" />
+        <Stat k={stats.publicN} l="對外 public" c="#157F52" />
+        <Stat k={stats.internalN} l="對內給 agent" c="#2C5AA8" />
         <Stat k={stats.writeN} l="寫入 DB（需確認）" c="#9A6700" />
       </div>
 
@@ -142,17 +146,39 @@ export default function McpRegistryPage() {
                       {(c.description || "").split("\n")[0]}
                     </div>
                   </div>
-                  <button onClick={() => void toggle(c)} disabled={busy === c.key}
-                    title={c.is_public ? "點擊改為 private（只給內部 agent）" : "點擊改為 public（對外開放給 cowork）"}
-                    style={{
-                      flex: "none", fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, cursor: "pointer",
-                      border: "1px solid " + (c.is_public ? "#B7E1C6" : "#E7C3BB"),
-                      background: c.is_public ? "#E7F4EC" : "#FBE9E4",
-                      color: c.is_public ? "#157F52" : "#C0341B", minWidth: 92,
-                      opacity: busy === c.key ? 0.5 : 1,
-                    }}>
-                    {c.is_public ? "public" : "private"}
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+                    <span style={{ fontSize: 10, color: "#9aa0b4" }}>對外</span>
+                    <button onClick={() => void toggle(c, "public")} disabled={busy === c.key + "public"}
+                      title={c.is_public ? "點擊改為 private（不對外）" : "點擊改為 public（對外開放給 cowork）"}
+                      style={{
+                        fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, cursor: "pointer",
+                        border: "1px solid " + (c.is_public ? "#B7E1C6" : "#E7C3BB"),
+                        background: c.is_public ? "#E7F4EC" : "#FBE9E4",
+                        color: c.is_public ? "#157F52" : "#C0341B", minWidth: 84,
+                        opacity: busy === c.key + "public" ? 0.5 : 1,
+                      }}>
+                      {c.is_public ? "public" : "private"}
+                    </button>
+                    <span style={{ fontSize: 10, color: "#9aa0b4", marginLeft: 4 }}>對內</span>
+                    {c.coordinator_eligible ? (
+                      <button onClick={() => void toggle(c, "internal")} disabled={busy === c.key + "internal"}
+                        title={c.is_internal ? "點擊收回：內部 Coordinator 不再能用" : "點擊給內部 Coordinator 使用（跑現成 / 查詢，不會搶 Builder 的建圖工作）"}
+                        style={{
+                          fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, cursor: "pointer",
+                          border: "1px solid " + (c.is_internal ? "#B7C6E1" : "#dfe3e9"),
+                          background: c.is_internal ? "#E6EEFB" : "#F4F5F8",
+                          color: c.is_internal ? "#2C5AA8" : "#9aa0b4", minWidth: 84,
+                          opacity: busy === c.key + "internal" ? 0.5 : 1,
+                        }}>
+                        {c.is_internal ? "agent ✓" : "給 agent"}
+                      </button>
+                    ) : (
+                      <span title="這是建置工具，只給 Builder；不開放給 Coordinator，以免它繞過 Planner & Builder"
+                        style={{ fontSize: 11, color: "#c0c4d0", minWidth: 84, textAlign: "center", padding: "5px 0" }}>
+                        僅 Builder
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

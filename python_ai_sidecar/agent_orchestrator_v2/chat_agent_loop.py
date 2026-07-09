@@ -29,6 +29,28 @@ logger = logging.getLogger("python_ai_sidecar.agent_orchestrator_v2.chat_agent_l
 
 MAX_TOOL_ROUNDS = 6
 
+# Phase 6: capabilities IT admin has granted the Coordinator (是_internal +
+# coordinator-eligible), fetched from Java + cached briefly. The Coordinator
+# loads these ON TOP of its curated core tools. Only Coordinator-appropriate
+# capabilities are offerable 對內 (Java enforces eligibility), so this can never
+# hand it a pipeline-construction primitive that would bypass Planner & Builder.
+_granted_cache: dict = {"tools": [], "at": 0.0}
+_GRANTED_TTL = 30.0
+
+
+async def _granted_agent_tools(java: Any) -> List[Dict[str, Any]]:
+    import time
+    now = time.monotonic()
+    if _granted_cache["at"] > 0 and now - _granted_cache["at"] < _GRANTED_TTL:
+        return _granted_cache["tools"]
+    try:
+        data = await java._get_data("/internal/mcp-capabilities/agent-tools")
+        _granted_cache["tools"] = data if isinstance(data, list) else []
+        _granted_cache["at"] = now
+    except Exception as ex:  # noqa: BLE001 — fail-soft (keep core tools)
+        logger.warning("granted agent-tools fetch failed: %s", ex)
+    return _granted_cache["tools"]
+
 
 def is_chat_agent_loop_enabled() -> bool:
     return os.environ.get("CHAT_AGENT_LOOP_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
@@ -270,6 +292,40 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                               "message": "已開一張卡帶使用者去自動化設定頁（跟 Skill 庫一致），不用在對話裡填設定。"})
             return
 
+        # ── invoke_skill (Phase 6) — run a granted domain skill's pipeline ──
+        if name == "invoke_skill":
+            slug = str(inp.get("slug") or "")
+            if slug not in (ctx.get("granted_skills") or set()):
+                yield ("result", {"status": "not_allowed",
+                                  "message": f"skill「{slug}」沒有授權給我；我只能跑管理員開放對內的 skill。"})
+                return
+            from python_ai_sidecar.executor.real_executor import execute_native
+            skills = await java.search_published_skills(slug, top_k=8)
+            match = next((s for s in (skills or []) if s.get("slug") == slug), None)
+            pid = (match or {}).get("pipeline_id")
+            if not pid:
+                yield ("result", {"status": "no_pipeline",
+                                  "message": f"找不到 skill「{slug}」綁定的 pipeline。"})
+                return
+            pipe = await java.get_pipeline(int(pid))
+            pj = (pipe or {}).get("pipeline_json") or pipe
+            if not isinstance(pj, dict) or not (pj.get("nodes")):
+                yield ("result", {"status": "no_pipeline", "message": f"skill「{slug}」的 pipeline 不完整。"})
+                return
+            try:
+                res = await execute_native(pj)
+                node_results = res.get("node_results") or {}
+                result_summary = res.get("result_summary")
+            except Exception:  # noqa: BLE001
+                node_results, result_summary = {}, None
+            yield ("event", {"type": "tool_done", "tool": "invoke_skill",
+                             "render_card": {"type": "pb_pipeline", "pipeline_json": pj,
+                                             "node_results": node_results,
+                                             "result_summary": result_summary, "run_id": None}})
+            yield ("result", {"status": "success",
+                              "message": f"已跑現成 skill「{(match or {}).get('name') or slug}」，結果顯示在對話裡。"})
+            return
+
         yield ("result", {"error": f"unknown tool {name}"})
     except Exception as ex:  # noqa: BLE001 — fail-soft
         logger.warning("chat tool %s failed: %s", name, ex)
@@ -302,9 +358,29 @@ async def run_chat_agent(
                   "說「設自動化 / 巡檢 / 定期跑」是要對它設自動化（用 setup_automation）；"
                   "不用再問「有沒有圖」。")
 
+    # Phase 6: extend the toolset with capabilities IT admin granted 對內. First
+    # cut wires domain skills (跑現成 skill). The build primitives are never
+    # eligible, so this never lets the Coordinator bypass Planner & Builder.
+    tools = list(_TOOLS)
+    granted = await _granted_agent_tools(java)
+    granted_skills = {g["key"]: g.get("name") or g["key"]
+                      for g in granted if g.get("kind") == "domain_skill" and g.get("key")}
+    ctx["granted_skills"] = set(granted_skills)
+    if granted_skills:
+        catalog = "、".join(f"{k}（{v}）" for k, v in list(granted_skills.items())[:20])
+        tools.append({
+            "name": "invoke_skill",
+            "description": "直接執行一個現成的 domain skill（分析 pipeline）並回傳結果——用在"
+                           "使用者想「用現成的 X 來看/跑」而不是重新建圖時。只能跑這些已授權的："
+                           + catalog + "。參數 slug。",
+            "input_schema": {"type": "object", "properties": {
+                "slug": {"type": "string", "description": "要跑的 skill slug（必須在授權清單內）"}
+            }, "required": ["slug"]},
+        })
+
     for _round in range(MAX_TOOL_ROUNDS):
         resp = await client.create(system=system, messages=messages,
-                                   tools=_TOOLS, max_tokens=1500)
+                                   tools=tools, max_tokens=1500)
         messages.append({"role": "assistant", "content": resp.content or [{"type": "text", "text": resp.text}]})
         tool_uses = [b for b in (resp.content or [])
                      if isinstance(b, dict) and b.get("type") == "tool_use"]
