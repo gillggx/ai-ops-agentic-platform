@@ -1,6 +1,10 @@
 package com.aiops.api.api.internal;
 
+import com.aiops.api.api.alarm.AlarmClusterService;
+import com.aiops.api.api.alarm.AlarmDtos;
+import com.aiops.api.api.alarm.AlarmEnrichmentService;
 import com.aiops.api.auth.InternalAuthority;
+import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
@@ -12,8 +16,11 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 
-/** Patrol / pipeline runs publishing alarms back from the sidecar. */
+/** Patrol / pipeline runs publishing alarms back from the sidecar (POST), plus
+ *  read endpoints the internal Coordinator agent uses when IT admin grants it
+ *  the alarm capabilities 對內 (Phase 6). */
 @RestController
 @RequestMapping("/internal/alarms")
 @PreAuthorize(InternalAuthority.REQUIRE_SIDECAR)
@@ -21,11 +28,33 @@ public class InternalAlarmController {
 
 	private final AlarmRepository repository;
 	private final SchedulerHttpClient scheduler;
+	private final AlarmClusterService clusterService;
+	private final AlarmEnrichmentService enrichment;
 
 	public InternalAlarmController(AlarmRepository repository,
-	                                SchedulerHttpClient scheduler) {
+	                                SchedulerHttpClient scheduler,
+	                                AlarmClusterService clusterService,
+	                                AlarmEnrichmentService enrichment) {
 		this.repository = repository;
 		this.scheduler = scheduler;
+		this.clusterService = clusterService;
+		this.enrichment = enrichment;
+	}
+
+	/** Fab-wide 告警現況 — clusters + KPIs (Coordinator's list_alarms). */
+	@GetMapping("/situation")
+	public ApiResponse<Map<String, Object>> situation(
+			@RequestParam(name = "since_hours", defaultValue = "24") int sinceHours) {
+		return ApiResponse.ok(Map.of(
+				"clusters", clusterService.computeClusters(sinceHours, null),
+				"kpis", clusterService.computeKpis(sinceHours)));
+	}
+
+	/** One alarm's full diagnosis (Coordinator's get_alarm_detail). */
+	@GetMapping("/{id}")
+	public ApiResponse<AlarmDtos.Detail> detail(@PathVariable Long id) {
+		AlarmEntity e = repository.findById(id).orElseThrow(() -> ApiException.notFound("alarm"));
+		return ApiResponse.ok(enrichment.enrichDetail(e));
 	}
 
 	@PostMapping

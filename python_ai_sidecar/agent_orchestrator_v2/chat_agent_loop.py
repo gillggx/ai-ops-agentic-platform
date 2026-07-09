@@ -37,6 +37,25 @@ MAX_TOOL_ROUNDS = 6
 _granted_cache: dict = {"tools": [], "at": 0.0}
 _GRANTED_TTL = 30.0
 
+# Coordinator-eligible built-in READ tools the sidecar knows how to dispatch
+# (each proxies to a /internal endpoint the sidecar can reach with its token).
+# Only added to the Coordinator's toolset when IT admin grants them 對內.
+_BUILTIN_READ: Dict[str, Dict[str, Any]] = {
+    "list_alarms": {
+        "desc": "查全廠告警現況：active alarm clusters + KPIs。使用者問「現在有什麼告警 / 廠區狀況」時用。",
+        "path": "/internal/alarms/situation", "args": {}},
+    "get_alarm_detail": {
+        "desc": "查單一告警的完整診斷（AI 綜整 + trigger + evidence）。參數 alarm_id（從 list_alarms 拿）。",
+        "path": "/internal/alarms/{alarm_id}",
+        "args": {"alarm_id": {"type": "integer", "description": "告警 id"}}},
+    "list_agent_knowledge": {
+        "desc": "列 build agent 目前生效的 knowledge / directives（引導它怎麼規劃建圖的規則）。",
+        "path": "/internal/agent-knowledge/directives/active", "args": {}},
+    "list_supervisor_proposals": {
+        "desc": "列 Supervisor 待人審核的策展提案（prune / promote / merge / correct）。核准在 /supervisor 頁做。",
+        "path": "/internal/supervisor/proposals-open", "args": {}},
+}
+
 
 async def _granted_agent_tools(java: Any) -> List[Dict[str, Any]]:
     import time
@@ -292,6 +311,16 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                               "message": "已開一張卡帶使用者去自動化設定頁（跟 Skill 庫一致），不用在對話裡填設定。"})
             return
 
+        # ── granted built-in READ tools (Phase 6 fast-follow) ──────────────
+        if name in _BUILTIN_READ and name in (ctx.get("granted_reads") or set()):
+            spec = _BUILTIN_READ[name]
+            path = spec["path"]
+            for a in spec["args"]:
+                path = path.replace("{" + a + "}", str(inp.get(a) or ""))
+            data = await java._get_data(path)
+            yield ("result", {"status": "ok", "data": data})
+            return
+
         # ── invoke_skill (Phase 6) — run a granted domain skill's pipeline ──
         if name == "invoke_skill":
             slug = str(inp.get("slug") or "")
@@ -371,6 +400,19 @@ async def run_chat_agent(
     granted_skills = {g["key"]: g.get("name") or g["key"]
                       for g in granted if g.get("kind") == "domain_skill" and g.get("key")}
     ctx["granted_skills"] = set(granted_skills)
+    # granted built-in READ tools (dispatched via /internal)
+    granted_reads = [g["key"] for g in granted
+                     if g.get("kind") == "builtin" and g.get("key") in _BUILTIN_READ]
+    ctx["granted_reads"] = set(granted_reads)
+    for key in granted_reads:
+        spec = _BUILTIN_READ[key]
+        props = {a: {"type": v["type"], "description": v["description"]}
+                 for a, v in spec["args"].items()}
+        tools.append({
+            "name": key, "description": spec["desc"],
+            "input_schema": {"type": "object", "properties": props,
+                             "required": list(spec["args"].keys())},
+        })
     if granted_skills:
         catalog = "、".join(f"{k}（{v}）" for k, v in list(granted_skills.items())[:20])
         tools.append({
