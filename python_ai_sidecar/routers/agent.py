@@ -139,12 +139,14 @@ async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> As
     """CHAT_AGENT_LOOP_SPEC Step 1: conversation-first agent loop (flag-gated).
     Replaces the classifier→graph for the chat turn with a single tool-use loop.
     Step 1 = natural conversation + read-only tools; heavy tools land in Step 2."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
     from ..agent_orchestrator_v2.chat_agent_loop import run_chat_agent
-    from ..agent_orchestrator_v2.session import load_session
+    from ..agent_orchestrator_v2.session import load_session, save_session
     from ..clients.java_client import JavaAPIClient
 
     java = JavaAPIClient(CONFIG.java_api_url, CONFIG.java_internal_token)
-    _sid, lc_history, _tok = await load_session(None, req.session_id, caller.user_id or 0)
+    sid, lc_history, tok = await load_session(None, req.session_id, caller.user_id or 0)
     # load_session yields LangChain HumanMessage/AIMessage — flatten to the
     # {role, content} dicts the Anthropic loop consumes.
     history: list[dict] = []
@@ -154,14 +156,32 @@ async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> As
             content = str(content)
         role = "user" if m.__class__.__name__ == "HumanMessage" else "assistant"
         history.append({"role": role, "content": content})
+    # Use the RESOLVED session id (sid) everywhere so plan_pipeline's paused
+    # build (thread_id build-<sid>) and the follow-up build_pipeline resume
+    # share the same key — and so multi-turn history persists (the model must
+    # SEE last turn's proposed plan to know「開始建」means resume).
+    final_text = ""
     async for v1_event in run_chat_agent(
         message=req.message, history=history, java=java, user_id=caller.user_id or 0,
-        session_id=req.session_id or "chat",
+        session_id=sid,
         pipeline_snapshot=req.pipeline_snapshot,
         pipeline_columns=req.pipeline_columns,
     ):
+        if v1_event.get("type") == "synthesis":
+            final_text = str(v1_event.get("text") or final_text)
         ev_type = v1_event.get("type") or "message"
         yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}
+
+    # Persist this turn so the conversation is multi-turn (the classifier→graph
+    # path saved via the orchestrator; the loop path must do it explicitly).
+    try:
+        updated = list(lc_history or []) + [
+            HumanMessage(content=req.message or ""),
+            AIMessage(content=final_text or ""),
+        ]
+        await save_session(None, sid, caller.user_id or 0, updated, tok)
+    except Exception as exc:  # noqa: BLE001 — persistence must never break the stream
+        log.warning("agent-loop save_session failed: %s", exc)
 
 
 async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
