@@ -50,7 +50,7 @@ _BUILTIN_READ: Dict[str, Dict[str, Any]] = {
         "args": {"alarm_id": {"type": "integer", "description": "告警 id"}}},
     "list_agent_knowledge": {
         "desc": "列 build agent 目前生效的 knowledge / directives（引導它怎麼規劃建圖的規則）。",
-        "path": "/internal/agent-knowledge/directives/active", "args": {}},
+        "path": "/internal/agent-knowledge/directives/active?user_id={user_id}", "args": {}},
     "list_supervisor_proposals": {
         "desc": "列 Supervisor 待人審核的策展提案（prune / promote / merge / correct）。核准在 /supervisor 頁做。",
         "path": "/internal/supervisor/proposals-open", "args": {}},
@@ -317,6 +317,8 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
             path = spec["path"]
             for a in spec["args"]:
                 path = path.replace("{" + a + "}", str(inp.get(a) or ""))
+            # {user_id} comes from the caller context, never from the model.
+            path = path.replace("{user_id}", str(ctx.get("user_id") or 0))
             data = await java._get_data(path)
             yield ("result", {"status": "ok", "data": data})
             return
