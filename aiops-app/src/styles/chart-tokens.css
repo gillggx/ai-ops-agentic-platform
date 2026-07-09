@@ -160,6 +160,11 @@
   padding: 8px 10px;
   z-index: 12;
   font-family: var(--chart-font-sans);
+  /* 2026-07-09: the panel is taller than a small chart card, so without a
+     scroll the SIZING sliders got clipped (unreachable). Cap height + scroll
+     internally so every control is always reachable. */
+  max-height: min(78vh, 460px);
+  overflow-y: auto;
 }
 
 .pb-style-h {

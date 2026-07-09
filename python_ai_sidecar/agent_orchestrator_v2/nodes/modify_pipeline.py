@@ -63,9 +63,11 @@ _STYLE_HELP = {
 # Things users often ASK for that the chart surface does NOT support — so the
 # Planner clarifies instead of pretending. (principle, not a case list)
 _NOT_ADJUSTABLE = (
-    "圖表線色 / 背景色無法自由更改（沒有 color / background 參數）。"
-    "使用者說「改顏色」時，多半是指圖上那塊彩色分區 = SPC 管制區帶（spc_zones），"
-    "那個只能開 / 關，不能換色。遇到這種請求要 clarify 反問，不要硬套 delta。"
+    "顏色（線色 / 背景 / 格線 / 色盤）不是 pipeline 參數，我這邊改不了；但使用者"
+    "可以自己在圖右上角的 STYLE 面板（✦ 按鈕）即時調——那裡有 Palette、各線顏色、"
+    "Background、Grid。遇到「改顏色」的請求：mode=clarify，告訴使用者去那個面板調，"
+    "不要說「無法」也不要硬套 delta。（若他其實是要開 / 關彩色分區，那是 spc_zones，"
+    "可用 delta 開關。）"
 )
 
 # Source-node identity params a delta may set (data-scope change = delta,
@@ -345,8 +347,9 @@ async def _run_modify_inner(
     # rebuild; just a question back to the user.
     if mode == "clarify":
         msg = question or (
-            "這個調整目前無法直接做到。圖表顏色不能自由更改；你看到的彩色分區是 "
-            "SPC 管制區帶，我可以幫你「關掉區帶」變白底或保留。要怎麼處理？")
+            "顏色可以你自己在圖右上角的 STYLE 面板（✦ 按鈕）即時調 —— 那裡有 "
+            "Palette、各線顏色、Background、Grid。我這邊的參數層還沒有顏色開關。"
+            "（若你是要開 / 關圖上的 SPC 彩色分區，那我可以直接幫你，說一聲即可。）")
         logger.info("modify: clarify — %s", msg[:80])
         return {
             "force_synthesis": True,
@@ -368,10 +371,9 @@ async def _run_modify_inner(
             return {
                 "force_synthesis": True,
                 "messages": [AIMessage(content=(
-                    "這個樣式目前無法直接調整（例如顏色 / 背景色沒有對應設定）。"
-                    "圖上的彩色分區是 SPC 管制區帶，我可以幫你開 / 關它；"
-                    "其他可調的有：線型、標記、點上數值、軸標籤、圖例、提示欄位。"
-                    "你想改哪一個？"))],
+                    "顏色請在圖右上角的 STYLE 面板（✦）自己調 —— Palette / 各線顏色 / "
+                    "Background / Grid 都在那，即時套用。我的參數層可調的是：線型、標記、"
+                    "點上數值、軸標籤、圖例、提示欄位、以及 SPC 彩色分區開關。你想改哪個？"))],
                 "coordinator_route": {"route": route, "reason": "unsupported_style",
                                       "fast_path": True},
             }
