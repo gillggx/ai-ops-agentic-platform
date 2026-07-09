@@ -183,6 +183,15 @@ async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> As
     except Exception as exc:  # noqa: BLE001 — persistence must never break the stream
         log.warning("agent-loop save_session failed: %s", exc)
 
+    # Emit `done` with the RESOLVED sid so the client updates its
+    # sessionIdRef to the Java-known id. Without this the frontend keeps
+    # sending its old/null id, load_session 404s + mints a fresh UUID every
+    # turn, and plan_pipeline's paused build (thread build-<sid>) is never
+    # resumed by the follow-up build_pipeline. Matches the native path's
+    # `done` contract (AIAgentPanel `case "done"` reads session_id).
+    yield {"event": "done", "data": json.dumps({"type": "done", "session_id": sid},
+                                               ensure_ascii=False)}
+
 
 async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
     """Chat entry — native LangGraph orchestrator, or (flag) the new agent loop.
