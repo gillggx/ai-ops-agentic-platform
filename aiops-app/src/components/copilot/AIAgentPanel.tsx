@@ -700,7 +700,10 @@ export function AIAgentPanel({
       target = prev.find((m) => m.id === msgId);
       return prev;
     });
-    const chatSid = target?.buildPlan?.sessionId ?? sessionIdRef.current ?? "";
+    // `||` not `??`: a card whose sessionId came through as "" (agent-loop
+    // streaming race) must fall through to sessionIdRef.current (set by the
+    // turn's `done` event) — `??` would keep the empty string and POST "".
+    const chatSid = target?.buildPlan?.sessionId || sessionIdRef.current || "";
     const hm = new Date();
     const confirmedAt = `${String(hm.getHours()).padStart(2, "0")}:${String(hm.getMinutes()).padStart(2, "0")}`;
     if (confirmed) {
@@ -1650,6 +1653,9 @@ export function AIAgentPanel({
             const chatSid =
               sessionIdRef.current
               || String((ev.session_id as string) || "");
+            // Pin the resolved chat sid now so decidePlan has it even if the
+            // turn's `done` event is delayed/dropped (agent-loop streaming).
+            if (chatSid) sessionIdRef.current = chatSid;
             if (phases.length > 0) {
               const gp: GoalPhase[] = phases.map((p) => ({
                 id: p.id,
