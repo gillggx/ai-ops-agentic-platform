@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 // Resizable panel via native CSS resize
-import { ChatOpsSidebar } from "@/components/chatops/ChatOpsSidebar";
+import { ChatOpsAgentRail } from "@/components/chatops/ChatOpsAgentRail";
 import { Topbar } from "@/components/layout/Topbar";
 import HandoffListener from "@/components/shell/HandoffListener";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
@@ -326,6 +326,28 @@ function Shell({ children }: { children: React.ReactNode }) {
                   setChatOpsSess((prev) => (prev.id === sid ? prev : { ...prev, id: sid }));
                   setSessionsTick((x) => x + 1);
                 }}
+                onPbPipelineExpand={(card) => {
+                  // 手動「↗ 展開 canvas」— ChatOps 不自動開 overlay，想看才開。
+                  // Loose cast: the union's published variant has no pipeline_json.
+                  const c = card as unknown as {
+                    pipeline_json?: Record<string, unknown>;
+                    result_summary?: import("@/lib/pipeline-builder/types").PipelineResultSummary;
+                    node_results?: Record<string, import("@/lib/pipeline-builder/types").NodeResult>;
+                  };
+                  if (glassEventsRef.current.length === 0 && c.pipeline_json) {
+                    pushGlassEvent({ kind: "start", sessionId: "adhoc-expand", base_pipeline: c.pipeline_json });
+                    pushGlassEvent({ kind: "done", status: "finished", pipeline_json: c.pipeline_json });
+                  }
+                  if (c.result_summary) {
+                    setPipelineResult({ summary: c.result_summary, nodeResults: c.node_results ?? {} });
+                    setRunPhase("done");
+                  }
+                  setGlassOverlay({
+                    sessionId: lastGlassStartRef.current?.sessionId ?? "adhoc-expand",
+                    goal: (c.pipeline_json as { name?: string } | undefined)?.name,
+                    active: false,
+                  });
+                }}
                 onContract={handleContract}
                 onDataExplorer={handleDataExplorer}
                 triggerMessage={triggerMessage}
@@ -422,24 +444,10 @@ function Shell({ children }: { children: React.ReactNode }) {
           <ContextualSidebar />
           {isChatOps ? (
             <>
-              <ChatOpsSidebar
-                activeId={chatOpsSess.id}
-                refreshTick={sessionsTick}
+              <ChatOpsAgentRail
+                runPhase={runPhase}
+                goal={lastGlassStartRef.current?.goal ?? null}
                 onNew={() => setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }))}
-                onSelect={async (sid) => {
-                  // Hydrate the persisted text history, then remount the panel
-                  // on that session (cards are not persisted — text turns only).
-                  let msgs: Array<{ role: string; content: string }> = [];
-                  try {
-                    const r = await fetch(`/api/agent/session/${encodeURIComponent(sid)}`, { cache: "no-store" });
-                    const env = await r.json();
-                    const row = env?.data ?? env;
-                    const raw = row?.messages;
-                    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-                    if (Array.isArray(parsed)) msgs = parsed;
-                  } catch { /* resume with empty history — new turns still work */ }
-                  setChatOpsSess((prev) => ({ id: sid, messages: msgs, nonce: prev.nonce + 1 }));
-                }}
               />
               <div style={{
                 flex: 1, display: "flex", justifyContent: "center",
