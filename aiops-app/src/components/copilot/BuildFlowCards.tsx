@@ -82,9 +82,11 @@ export function renderUserContent(text: string): React.ReactNode {
   });
 }
 
+// Design v2 (2026-07-10): user bubble is the theme primary — dark pill with
+// white text, per the ChatOps/Copilot handoff mockups.
 export const userBubbleStyle: React.CSSProperties = {
   alignSelf: "flex-end", maxWidth: "85%",
-  background: CHAT_T.bubble, color: CHAT_T.ink,
+  background: "var(--p, #1E5A44)", color: "#ffffff",
   fontSize: 11.5, lineHeight: 1.7, padding: "8px 12px",
   borderRadius: "10px 10px 3px 10px",
 };
