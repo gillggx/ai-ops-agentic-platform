@@ -253,6 +253,49 @@ function Shell({ children }: { children: React.ReactNode }) {
     nonce: number;
   }>({ id: null, messages: [], nonce: 0 });
   const [sessionsTick, setSessionsTick] = useState(0);
+  // ChatOps continuity (2026-07-10): leaving /chatops unmounts the panel
+  // (its key flips to "dock"), which drops the in-memory conversation. The
+  // session itself is persisted server-side after every turn, so on re-entry
+  // we rehydrate the text turns from GET /api/agent/session/{id}. The panel
+  // is held behind a placeholder until hydration resolves — no race with a
+  // user typing into a soon-to-be-remounted panel.
+  const [chatOpsHydrating, setChatOpsHydrating] = useState(false);
+  useEffect(() => {
+    if (!isChatOps) return;
+    let sid = chatOpsSess.id;
+    if (!sid) {
+      try { sid = localStorage.getItem("chatops:session-id"); } catch { /* ignore */ }
+      if (!sid) return; // brand-new conversation — nothing to restore
+    }
+    const fixedSid = sid;
+    let cancelled = false;
+    setChatOpsHydrating(true);
+    fetch(`/api/agent/session/${encodeURIComponent(fixedSid)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((env) => {
+        if (cancelled) return;
+        const row = (env?.data ?? env) as { messages?: unknown } | null;
+        let msgs: Array<{ role: string; content: string }> = [];
+        try {
+          const parsed = typeof row?.messages === "string" ? JSON.parse(row.messages) : row?.messages;
+          if (Array.isArray(parsed)) {
+            msgs = parsed.filter((m): m is { role: string; content: string } =>
+              !!m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"));
+          }
+        } catch { /* unparseable history — start visually empty, session id kept */ }
+        setChatOpsSess((prev) => ({ id: fixedSid, messages: msgs, nonce: prev.nonce + 1 }));
+      })
+      .catch(() => {
+        // session gone (expired / deleted) — drop the stale pointer
+        if (cancelled) return;
+        try { localStorage.removeItem("chatops:session-id"); } catch { /* ignore */ }
+        setChatOpsSess((prev) => (prev.id ? { id: null, messages: [], nonce: prev.nonce + 1 } : prev));
+      })
+      .finally(() => { if (!cancelled) setChatOpsHydrating(false); });
+    return () => { cancelled = true; };
+    // Run on ChatOps entry only — mid-conversation id changes must not remount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isChatOps]);
   // ChatOps (2026-07-10): builds render INLINE in the conversation; the Lite
   // Canvas overlay never auto-opens there (it hid the chat = user couldn't
   // see progress). Events still stream into glassEvents so「↗ 展開 canvas」
@@ -331,6 +374,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 initialMessages={isChatOps ? chatOpsSess.messages : undefined}
                 onSessionResolved={(sid) => {
                   if (!isChatOps) return;
+                  try { localStorage.setItem("chatops:session-id", sid); } catch { /* ignore */ }
                   setChatOpsSess((prev) => (prev.id === sid ? prev : { ...prev, id: sid }));
                   setSessionsTick((x) => x + 1);
                 }}
@@ -460,7 +504,10 @@ function Shell({ children }: { children: React.ReactNode }) {
                 runPhase={runPhase}
                 goal={lastGlassStartRef.current?.goal ?? null}
                 events={glassEvents}
-                onNew={() => setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }))}
+                onNew={() => {
+                  try { localStorage.removeItem("chatops:session-id"); } catch { /* ignore */ }
+                  setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }));
+                }}
               />
               <div style={{
                 flex: 1, display: "flex", justifyContent: "center",
@@ -472,7 +519,14 @@ function Shell({ children }: { children: React.ReactNode }) {
                   background: "var(--pn, #ffffff)",
                   borderLeft: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0",
                 }}>
-                  {agentPanelEl}
+                  {chatOpsHydrating ? (
+                    <div style={{
+                      flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "#94a3b8", fontSize: 13,
+                    }}>
+                      正在載入上次的對話…
+                    </div>
+                  ) : agentPanelEl}
                 </div>
               </div>
               {/* keep the route's page mounted (it renders null) */}

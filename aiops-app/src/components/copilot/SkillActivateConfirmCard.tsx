@@ -93,6 +93,7 @@ export function SkillActivateConfirmCard({ data }: { data: SkillActivateConfirmD
         <div style={{ padding: "12px 15px", fontSize: 12.5, color: "#166534", background: "#f0fdf4" }}>
           已啟用「{name.trim()}」— 開始生效。
           <a href={`/skills/${encodeURIComponent(doneSlug)}`}
+             target="_blank" rel="noreferrer"
              style={{ marginLeft: 8, color: "var(--p, #2b6cb0)", fontWeight: 600 }}>
             查看 Skill
           </a>

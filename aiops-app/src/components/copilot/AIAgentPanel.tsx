@@ -2641,7 +2641,17 @@ export function AIAgentPanel({
                       border: msg.role === "agent" ? "1px solid #e2e8f0" : "none",
                     }}>
                       <div style={MD_STYLES} className="md-agent">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            // ChatOps continuity (2026-07-10): agent 回覆常帶
+                            // /skills/N、/agent-knowledge 等站內連結；同分頁跳走
+                            // 會把進行中的對話換掉 — 一律開新分頁。
+                            a: ({ href, children }) => (
+                              <a href={href} target="_blank" rel="noreferrer">{children}</a>
+                            ),
+                          }}
+                        >{msg.content}</ReactMarkdown>
                       </div>
                     </div>
                   )}

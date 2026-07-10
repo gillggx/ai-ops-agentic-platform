@@ -197,10 +197,20 @@ export default function AutomatePage() {
   return (
     <div style={{ background: TK.page, minHeight: "100vh", padding: "24px 24px 80px", fontFamily: FONT.sans, color: TK.ink }}>
       <div style={{ maxWidth: 900, margin: "0 auto" }}>
+        {/* Back — 從 ChatOps / 其他頁進來時回原頁，直開時 fallback 到列表 */}
         <div style={{ marginBottom: 12 }}>
-          <Link href="/skills" style={{ color: TK.body, fontSize: 13, textDecoration: "none" }}>
+          <a
+            href="/skills"
+            onClick={(e) => {
+              if (window.history.length > 1 && document.referrer.startsWith(window.location.origin)) {
+                e.preventDefault();
+                router.back();
+              }
+            }}
+            style={{ color: TK.body, fontSize: 13, textDecoration: "none", cursor: "pointer" }}
+          >
             ← Skills Library
-          </Link>
+          </a>
         </div>
 
         {/* Header */}
