@@ -164,8 +164,9 @@ _TOOLS: List[Dict[str, Any]] = [
                        "（讓它生效、可被搜尋）時用——即使他沒說出 slug，畫面上有圖就直接用這個、不用反問。"
                        "會在對話裡出一張確認卡（名稱與描述可編輯），**使用者按確認才會啟用**——你不能直接啟用。"
                        "剛在對話裡建好的圖：不用給 slug（會用畫面上這張，先存成 Skill 再啟用）；"
-                       "已存在的 skill 才給 slug。請一併給 suggested_name / suggested_description"
-                       "（繁中、業務語意，例：「EQP-01 OOC 次數檢查」，不要寫技術結構）。"
+                       "已存在的 skill 才給 slug。suggested_name / suggested_description **由你自己**"
+                       "從對話與圖的內容擬（繁中、業務語意，例：「EQP-01 OOC 次數檢查」，不寫技術結構）——"
+                       "**不要為了名稱或描述反問使用者**，卡片本來就讓使用者修改。"
                        "跟 setup_automation 的分工：啟用＝生效可搜尋（這個工具）；排程巡檢＝setup_automation。",
         "input_schema": {"type": "object", "properties": {
             "slug": {"type": "string", "description": "既有 skill 的 slug（畫面上剛建的圖免填）"},
