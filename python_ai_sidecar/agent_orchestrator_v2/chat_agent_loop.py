@@ -620,8 +620,9 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
             if not isinstance(pj, dict) or not (pj.get("nodes")):
                 yield ("result", {"status": "no_pipeline", "message": f"skill「{slug}」的 pipeline 不完整。"})
                 return
+            skill_params = inp.get("params") if isinstance(inp.get("params"), dict) else None
             try:
-                res = await execute_native(pj)
+                res = await execute_native(pj, inputs=skill_params)
                 node_results = res.get("node_results") or {}
                 result_summary = res.get("result_summary")
             except Exception:  # noqa: BLE001
@@ -676,9 +677,12 @@ async def run_chat_agent(
     tools.append({
         "name": "invoke_skill",
         "description": "直接執行一個平台上已發布的 domain skill（現成分析 pipeline）並回傳結果——"
-                       "用在使用者想「用現成的 X 來看/跑」而不是重新建圖時。先用 search_skills 找到 slug。參數 slug。",
+                       "用在使用者想「用現成的 X 來看/跑」而不是重新建圖時。先用 search_skills 找到 slug。"
+                       "params 可帶 skill 開放的參數（例：{\"tool_id\":\"EQP-07\",\"time_range\":\"7d\"}——"
+                       "有哪些參數用 get_skill_v2 查該 skill 的 inputs；使用者指定機台/期間時務必帶上）。",
         "input_schema": {"type": "object", "properties": {
-            "slug": {"type": "string", "description": "要跑的 skill slug"}
+            "slug": {"type": "string", "description": "要跑的 skill slug"},
+            "params": {"type": "object", "description": "skill 開放參數（鍵值對，選填）"}
         }, "required": ["slug"]},
     })
 
