@@ -73,6 +73,32 @@ _BUILTIN_READ: Dict[str, Dict[str, Any]] = {
     "list_supervisor_proposals": {
         "desc": "列 Supervisor 待人審核的策展提案（prune / promote / merge / correct）。核准在 /supervisor 頁做。",
         "path": "/internal/supervisor/proposals-open", "args": {}},
+    # Domain-Skill / activity reads (2026-07-10 — 修「有哪些 domain skills 一問
+    # 就倒」: keys 已授權但 dispatch 缺席). Paths delegate to Java internal.
+    "list_skills_v2": {
+        "desc": "列出全部 Domain Skill（含草稿）：slug、名稱、狀態(active/draft)、角色(tool/patrol/datacheck)、"
+                "有無 alarm 判斷式。使用者問「有哪些 domain skills / skill 清單」時用。",
+        "path": "/internal/skills-v2", "args": {}},
+    "get_skill_v2": {
+        "desc": "單一 Domain Skill 的完整資訊（描述、pipeline、自動化設定）。參數 slug。",
+        "path": "/internal/skills-v2/{slug}",
+        "args": {"slug": {"type": "string", "description": "skill 的 slug"}}},
+    "check_skill_ready_for_role": {
+        "desc": "查某 Domain Skill 能否升某角色（patrol 需要 alarm 判斷式）。參數 slug + role(tool|patrol|datacheck)。"
+                "設自動化前先查，能提前告訴使用者會不會被擋。",
+        "path": "/internal/skills-v2/{slug}/role-readiness?role={role}",
+        "args": {"slug": {"type": "string", "description": "skill slug"},
+                 "role": {"type": "string", "description": "tool | patrol | datacheck"}}},
+    "list_event_sources": {
+        "desc": "列出可作為事件觸發來源的 Skill（active patrol 且有 alarm 判斷式）。設 event-driven 自動化時用。",
+        "path": "/internal/skills-v2/alarm-sources", "args": {}},
+    "list_agent_activity": {
+        "desc": "平台 agent 最近的建置活動（episodes）：誰觸發、結果、成本。使用者問「agent 最近做了什麼」時用。",
+        "path": "/internal/agent-episodes?limit=20", "args": {}},
+    "get_agent_activity": {
+        "desc": "單一 episode 的完整過程（steps、divergence、成本）。參數 episode_key（從 list_agent_activity 拿）。",
+        "path": "/internal/agent-episodes/{episode_key}",
+        "args": {"episode_key": {"type": "string", "description": "episode key"}}},
 }
 
 # Alarm handling WRITES (2026-07-10). The agent NEVER executes these — each
