@@ -151,17 +151,22 @@ _TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "setup_automation",
-        "description": "使用者要把目前這張圖設成自動執行（定時巡檢 / 定期檢查 / 告警）時用。"
-                       "我不會在對話裡直接設定，而是把它存成 Skill 並帶使用者去設定頁。",
+        "description": "使用者要讓目前這張圖「自動跑」——定時巡檢 / 定期檢查 / 觸發告警——時用"
+                       "（關鍵詞：巡檢、排程、定期、每天/每小時、告警通知）。"
+                       "我不會在對話裡直接設定，而是把它存成 Skill 並帶使用者去設定頁。"
+                       "注意：使用者只說「啟用 / 上架 / 存成正式 skill」而沒提排程時，"
+                       "那是 activate_skill 的事，不要用這個。",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "activate_skill",
-        "description": "使用者要「啟用 / 上架 / 發布」一個 Skill（讓它生效、可被搜尋與自動化）時用。"
+        "description": "使用者要把「畫面上這張圖」或某個既有 skill「啟用 / 上架 / 發布 / 存成正式 skill」"
+                       "（讓它生效、可被搜尋）時用——即使他沒說出 slug，畫面上有圖就直接用這個、不用反問。"
                        "會在對話裡出一張確認卡（名稱與描述可編輯），**使用者按確認才會啟用**——你不能直接啟用。"
-                       "剛在對話裡建好的圖：不用給 slug（會用畫面上這張，先存成 Skill 再啟用）。"
+                       "剛在對話裡建好的圖：不用給 slug（會用畫面上這張，先存成 Skill 再啟用）；"
                        "已存在的 skill 才給 slug。請一併給 suggested_name / suggested_description"
-                       "（繁中、業務語意，例：「EQP-01 OOC 次數檢查」，不要寫技術結構）。",
+                       "（繁中、業務語意，例：「EQP-01 OOC 次數檢查」，不要寫技術結構）。"
+                       "跟 setup_automation 的分工：啟用＝生效可搜尋（這個工具）；排程巡檢＝setup_automation。",
         "input_schema": {"type": "object", "properties": {
             "slug": {"type": "string", "description": "既有 skill 的 slug（畫面上剛建的圖免填）"},
             "suggested_name": {"type": "string", "description": "你建議的 Skill 名稱（不超過 20 字）"},
@@ -467,6 +472,7 @@ async def run_chat_agent(
                   + " → ".join(str(b) for b in blocks)
                   + "）。使用者說「改 / 拿掉 / 換 / 加」多半是要調它（用 modify_current_chart）；"
                   "說「設自動化 / 巡檢 / 定期跑」是要對它設自動化（用 setup_automation）；"
+                  "說「啟用 / 上架 / 存成正式 skill」是要啟用它（用 activate_skill，不用反問是哪個）；"
                   "不用再問「有沒有圖」。")
 
     tools = list(_TOOLS)
