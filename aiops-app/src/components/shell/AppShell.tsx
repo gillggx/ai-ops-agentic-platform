@@ -8,6 +8,7 @@ import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 // Resizable panel via native CSS resize
 import { ChatOpsAgentRail } from "@/components/chatops/ChatOpsAgentRail";
+import { MobileShell } from "@/components/mobile/MobileShell";
 import { Topbar } from "@/components/layout/Topbar";
 import HandoffListener from "@/components/shell/HandoffListener";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
@@ -247,6 +248,16 @@ function Shell({ children }: { children: React.ReactNode }) {
   // all Live-Canvas / glass wiring below keeps working unchanged.
   const pathname = usePathname() ?? "";
   const isChatOps = pathname === "/chatops";
+  // 手機版 (2026-07-11)：viewport ≤ 767px 自動切 MobileShell（底部 4 tab）。
+  // SSR 先當桌機，client mount 後以 matchMedia 校正 — 手機首屏會有一次換版。
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
   const [chatOpsSess, setChatOpsSess] = useState<{
     id: string | null;
     messages: Array<{ role: string; content: string }>;
@@ -261,7 +272,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   // user typing into a soon-to-be-remounted panel.
   const [chatOpsHydrating, setChatOpsHydrating] = useState(false);
   useEffect(() => {
-    if (!isChatOps) return;
+    if (!isChatOps && !isMobile) return;
     let sid = chatOpsSess.id;
     if (!sid) {
       try { sid = localStorage.getItem("chatops:session-id"); } catch { /* ignore */ }
@@ -295,7 +306,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
     // Run on ChatOps entry only — mid-conversation id changes must not remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isChatOps]);
+  }, [isChatOps, isMobile]);
   // ChatOps (2026-07-10): builds render INLINE in the conversation; the Lite
   // Canvas overlay never auto-opens there (it hid the chat = user couldn't
   // see progress). Events still stream into glassEvents so「↗ 展開 canvas」
@@ -369,11 +380,11 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   const agentPanelEl = (
               <AIAgentPanel
-                key={isChatOps ? `chatops-${chatOpsSess.nonce}` : "dock"}
-                sessionId={isChatOps ? (chatOpsSess.id ?? undefined) : undefined}
-                initialMessages={isChatOps ? chatOpsSess.messages : undefined}
+                key={(isChatOps || isMobile) ? `chatops-${chatOpsSess.nonce}` : "dock"}
+                sessionId={(isChatOps || isMobile) ? (chatOpsSess.id ?? undefined) : undefined}
+                initialMessages={(isChatOps || isMobile) ? chatOpsSess.messages : undefined}
                 onSessionResolved={(sid) => {
-                  if (!isChatOps) return;
+                  if (!isChatOps && !isMobile) return;
                   try { localStorage.setItem("chatops:session-id", sid); } catch { /* ignore */ }
                   setChatOpsSess((prev) => (prev.id === sid ? prev : { ...prev, id: sid }));
                   setSessionsTick((x) => x + 1);
@@ -426,7 +437,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                   resetOverlayState();
                   setRunPhase("building");
                   lastGlassStartRef.current = { sessionId: ev.session_id, goal: ev.goal };
-                  if (!isChatOps) {
+                  if (!isChatOps && !isMobile) {
                     setGlassOverlay({
                       sessionId: ev.session_id,
                       goal: ev.goal,
@@ -481,6 +492,18 @@ function Shell({ children }: { children: React.ReactNode }) {
                 }}
               />
   );
+
+  // 手機版：MobileShell 全螢幕接管（route children 保持 mounted 但隱藏，
+  // 桌機 overlay / topbar / sidebar 全部不渲染）。
+  if (isMobile) {
+    return (
+      <>
+        <HandoffListener />
+        <MobileShell agentPanel={agentPanelEl} />
+        <div style={{ display: "none" }}>{children}</div>
+      </>
+    );
+  }
 
   return (
     <div style={{
