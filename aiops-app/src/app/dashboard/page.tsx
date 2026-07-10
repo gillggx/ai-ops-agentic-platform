@@ -80,9 +80,9 @@ const S = {
   }),
   tabContent: { flex: 1, overflowY: "auto", padding: "16px 20px" } as React.CSSProperties,
   refreshBar: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", fontSize: 11, color: "#718096", background: "var(--pn, #f7f8fc)", borderBottom: "1px solid #e2e8f0" } as React.CSSProperties,
-  badge: (color: string): React.CSSProperties => ({
+  badge: (color: string, bg?: string): React.CSSProperties => ({
     display: "inline-block", padding: "2px 8px", borderRadius: 10,
-    fontSize: 10, fontWeight: 600, background: `${color}20`, color,
+    fontSize: 10, fontWeight: 600, background: bg ?? `${color}20`, color,
   }),
 };
 
@@ -363,7 +363,7 @@ function RecipeTab({ events }: { events: ProcessEvent[] }) {
   return (
     <div>
       <div style={{ padding: "8px 0", fontSize: 13, fontWeight: 600, color: "#2d3748" }}>
-        {t("recipeVersion")}: <span style={S.badge("#2b6cb0")}>v{String(version)}</span>
+        {t("recipeVersion")}: <span style={S.badge("var(--pd, #2b6cb0)", "var(--pl, #ebf4ff)")}>v{String(version)}</span>
       </div>
       <DataTable data={rows} columns={["parameter", "value"]} />
     </div>

@@ -57,7 +57,7 @@ function Chip({ label, value, hint, accent }: {
   return (
     <div style={{
       flex: 1,
-      background: isPrimary ? "#ebf8ff" : "#fff",
+      background: isPrimary ? "var(--pl, #ebf8ff)" : "#fff",
       border: `1px solid ${isPrimary ? "#bee3f8" : "#e2e8f0"}`,
       borderRadius: 8,
       padding: "10px 14px",

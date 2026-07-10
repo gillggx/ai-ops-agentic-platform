@@ -31,7 +31,7 @@
   --ok: oklch(62% calc(0.13 * var(--sat)) 155);
   --ok-bg: oklch(96% calc(0.04 * var(--sat)) 155);
 
-  --accent: oklch(55% 0.13 265);
+  --accent: var(--p, oklch(55% 0.13 265));
   --accent-bg: oklch(97% 0.025 265);
 
   --shadow-sm: 0 1px 2px oklch(20% 0.02 60 / 0.05);

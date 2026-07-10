@@ -13,7 +13,7 @@
   --tour-ink: #18181a;
   --tour-ink-2: #4a4a4d;
   --tour-ink-3: #76767a;
-  --tour-primary: #2563eb;
+  --tour-primary: var(--p, #2563eb);
   --tour-primary-strong: #1d4ed8;
   --tour-alert: #dc2626;
   --tour-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;

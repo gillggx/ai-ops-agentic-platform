@@ -365,7 +365,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
 
       <div style={{
         background: "#fff",
-        border: "1px solid #e2e8f0", borderLeft: "4px solid #4299e1",
+        border: "1px solid #e2e8f0", borderLeft: "4px solid var(--p, #4299e1)",
         borderRadius: 8, padding: "16px 20px", marginBottom: 16,
       }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#595959", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>

@@ -109,7 +109,7 @@ export function PatrolList({ items, selected, onSelect }: Props) {
 function ResultBadge({ item }: { item: PatrolItem }) {
   const t = useTranslations("patrol");
   if (item.alarm_id) {
-    return <span style={badge("#3182ce", "#ebf8ff")}>{t("alarmRef", { id: item.alarm_id })}</span>;
+    return <span style={badge("var(--p, #3182ce)", "var(--pl, #ebf8ff)")}>{t("alarmRef", { id: item.alarm_id })}</span>;
   }
   if (item.alarm_skipped_reason) {
     return <span style={badge("#9c4221", "#fffaf0")}>{formatAlarmSkipped(item.alarm_skipped_reason, t)}</span>;
@@ -149,7 +149,7 @@ function eventChip(eventType: string | null): React.CSSProperties {
     padding: "2px 7px",
     borderRadius: 4,
     color: isOOC ? "#744210" : "var(--p, #2b6cb0)",
-    background: isOOC ? "#fefcbf" : "#ebf8ff",
+    background: isOOC ? "#fefcbf" : "var(--pl, #ebf8ff)",
   };
 }
 
