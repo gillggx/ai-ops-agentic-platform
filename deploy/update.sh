@@ -61,7 +61,12 @@ if $REBUILD_APP; then
   cd "$APP_DIR/aiops-app"
   npm ci --silent
   # build:prod fails fast when INTERNAL_API_TOKEN / NEXTAUTH_SECRET / FASTAPI_BASE_URL
-  # are missing or placeholder. EC2 prod env must export them before this runs.
+  # are missing or placeholder. check-prod-env.mjs reads process.env only
+  # (`next build` loads .env.local itself, the gate script does not) — so
+  # source the app env here for the build step.
+  if [[ -f .env.local ]]; then
+    set -a; . ./.env.local; set +a
+  fi
   npm run build:prod
   cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
   cp -r public .next/standalone/public 2>/dev/null || true
