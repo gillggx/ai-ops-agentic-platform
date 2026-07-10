@@ -141,11 +141,23 @@ LLM 看心情選哪個，且 prompt 改一個字行為就漂移。
 
 | Surface | Endpoint | Orchestrator | 路由方式 |
 |---|---|---|---|
-| Chat panel (operations) | `/internal/agent/chat` | `agent_orchestrator_v2` (LangGraph) | `intent_classifier` + `intent_completeness` graph nodes |
+| Chat panel / ChatOps (operations) | `/internal/agent/chat` | **Coordinator** = `chat_agent_loop`（Anthropic tool-use loop，`CHAT_AGENT_LOOP_ENABLED=1` prod ON；舊 LangGraph classifier 為 fallback） | prompt 只有人設 + 少數硬規則（核心路由：建圖→plan_pipeline／改圖→modify／查資料→查詢工具）；其餘知識在標準 Skill |
 | Builder Glass Box (build instruction) | `/internal/agent/build` | `agent_builder.stream_agent_build` (Anthropic loop) | tool-use loop, tools 在 prompt 列出 |
 | Builder Block Advisor (Q&A) | `/internal/agent/build` (same endpoint) | `agent_builder.advisor.stream_block_advisor` | `classify_advisor_intent` graph dispatch |
 
 `/internal/agent/build` 入口先跑 `classify_advisor_intent`：BUILD → 既有 Glass Box；非 BUILD → advisor graph。
+Agent 套件邊界（Wave 2）：`python_ai_sidecar/agents/{coordinator,planner,builder,supervisor}` 是唯一公開 import 面，鐵律見 `agents/README.md`。
+
+### 標準 Skill（2026-07-10 起，術語鎖定）
+
+- **Skill = 標準 Skill**：一份具名說明書（`agent_skills` 表，`/admin/agent-skills` GUI 可編），教 Coordinator「怎麼做某類事」。
+  `when_to_use` 注入系統提示目錄；全文由 `load_skill` 工具按需載入。**Domain Skill** = pipeline+automation（skills_v2），要特別講才是。
+- 「怎麼做事」的知識一律放標準 Skill 或工具 description，**不放 prompt**；prompt 只留人設 + 核心路由硬規則。
+- 強制閘門（寫入必過確認卡、patrol 需 verdict、resolve=ADMIN/PE）在 **code** 強制——Skill 只教，code 保底。
+- Coordinator 的能力面：granted builtin（含 alarm 讀寫）+ granted external System MCP（**2026-07-10 決策：有標準 Skill 說明書的
+  System MCP 可直呼**，registry external kind 可授權對內，參數文件取自 mcp_definitions）+ invoke_skill（Domain Skill 預設可用，支援 params）。
+- Coordinator 的所有寫入走瀏覽器端確認卡（使用者 JWT 執行）：`alarm_action_confirm`／`skill_activate_confirm`／`skill_admin_confirm`／`automation_handoff`。
+- 工具結果在 loop 層有 30K 字元硬上限（防 3.5MB 結果炸 context）。
 
 ---
 

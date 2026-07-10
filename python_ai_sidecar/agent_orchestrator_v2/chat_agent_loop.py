@@ -27,7 +27,7 @@ from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
 
 logger = logging.getLogger("python_ai_sidecar.agent_orchestrator_v2.chat_agent_loop")
 
-MAX_TOOL_ROUNDS = 6
+MAX_TOOL_ROUNDS = 8
 
 # Phase 6: capabilities IT admin has granted the Coordinator (是_internal +
 # coordinator-eligible), fetched from Java + cached briefly. The Coordinator
@@ -185,6 +185,37 @@ async def _call_system_mcp(java: Any, mcp_name: str, args: Dict[str, Any]) -> An
                    else c.post(url, json=args, headers=headers))
         r.raise_for_status()
         return r.json() if r.content else {}
+
+
+def _mcp_json_schema(schema: Any) -> "Dict[str, Any] | None":
+    """Build a REAL JSON input_schema for a granted System MCP tool from its
+    mcp_definitions input_schema (2026-07-10: params were prose-only in the
+    description -> the model guessed names like equipment_id/step_name and
+    burned rounds on 400s. A structured schema pins the names)."""
+    if isinstance(schema, str):
+        try:
+            schema = json.loads(schema)
+        except (ValueError, TypeError):
+            return None
+    props: Dict[str, Any] = {}
+    required: List[str] = []
+    if isinstance(schema, list):
+        for pdef in schema:
+            if isinstance(pdef, dict) and pdef.get("name"):
+                props[pdef["name"]] = {"type": pdef.get("type") or "string",
+                                       "description": pdef.get("description") or ""}
+                if pdef.get("required"):
+                    required.append(pdef["name"])
+    elif isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
+        props = dict(schema["properties"])
+        required = list(schema.get("required") or [])
+    if not props:
+        return None
+    _TYPES = {"string", "integer", "number", "boolean", "array", "object"}
+    for v in props.values():
+        if isinstance(v, dict) and v.get("type") not in _TYPES:
+            v["type"] = "string"
+    return {"type": "object", "properties": props, "required": required}
 
 
 def _mcp_param_doc(schema: Any) -> str:
@@ -541,7 +572,8 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
         # ── granted external System MCP (re-enabled 2026-07-10; documented by
         #    the matching 標準 Skill, e.g. process-info-mcp) ──────────────────
         if name in (ctx.get("granted_mcps") or {}):
-            data = await _call_system_mcp(java, name, inp.get("args") or inp or {})
+            mcp_args = inp.get("args") if isinstance(inp.get("args"), dict) else inp
+            data = await _call_system_mcp(java, name, mcp_args or {})
             yield ("result", {"status": "ok", "data": data})
             return
 
@@ -720,12 +752,15 @@ async def run_chat_agent(
         for key in ext_keys:
             d = defs.get(key) or {}
             granted_mcps[key] = d
-            param_doc = _mcp_param_doc(d.get("input_schema") or d.get("inputSchema"))
+            raw_schema = d.get("input_schema") or d.get("inputSchema")
+            structured = _mcp_json_schema(raw_schema)
+            param_doc = _mcp_param_doc(raw_schema)
             tools.append({
                 "name": key,
                 "description": (str(d.get("description") or key)[:400]
                                 + ("　參數：" + param_doc if param_doc else "")),
-                "input_schema": {"type": "object", "properties": {
+                # 結構化 schema 鎖參數名（沒有 schema 的 MCP 才退回自由物件）
+                "input_schema": structured or {"type": "object", "properties": {
                     "args": {"type": "object", "description": "MCP 參數（依上面 input schema 填）"}
                 }},
             })
