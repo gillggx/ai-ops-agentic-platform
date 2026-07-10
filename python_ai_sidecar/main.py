@@ -12,9 +12,39 @@ enable each one independently without a code change.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import uuid
 from contextlib import asynccontextmanager
+
+
+def _load_systemd_credentials() -> None:
+    """Bridge systemd encrypted credentials into the env (2026-07-10).
+
+    On EC2 the Anthropic key is no longer plaintext in .env — it is a systemd
+    encrypted credential (unit: ``ImportCredential=anthropic_api_key``, rotated
+    via ``deploy/set-anthropic-key.sh``). systemd decrypts it into the
+    service-private ``$CREDENTIALS_DIRECTORY``; we lift it into the env BEFORE
+    any settings/llm import reads it. A non-empty env var wins (dev machines
+    without systemd keep using .env), and a missing credential is silently
+    fine — the LLM client then fails loudly with its normal missing-key path.
+    """
+    cred_dir = os.environ.get("CREDENTIALS_DIRECTORY")
+    if not cred_dir:
+        return
+    for cred_name, env_name in (("anthropic_api_key", "ANTHROPIC_API_KEY"),):
+        if os.environ.get(env_name):
+            continue
+        try:
+            with open(os.path.join(cred_dir, cred_name), encoding="utf-8") as fh:
+                value = fh.read().strip()
+            if value:
+                os.environ[env_name] = value
+        except OSError:
+            pass
+
+
+_load_systemd_credentials()
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
