@@ -124,7 +124,7 @@ export function NotificationBell() {
                 <button
                   onClick={markAllRead}
                   disabled={loading}
-                  style={{ background: "none", border: "none", color: "#3b82f6", fontSize: 11, cursor: "pointer" }}
+                  style={{ background: "none", border: "none", color: "var(--p, #3b82f6)", fontSize: 11, cursor: "pointer" }}
                 >
                   全部標記已讀
                 </button>
@@ -146,7 +146,7 @@ export function NotificationBell() {
                       onClick={() => isUnread && markRead(it.id)}
                       style={{
                         padding: "10px 14px",
-                        borderBottom: "1px solid #f8fafc",
+                        borderBottom: "1px solid var(--ws, #f8fafc)",
                         cursor: isUnread ? "pointer" : "default",
                         background: isUnread ? "#f0f9ff" : "#fff",
                       }}
@@ -155,7 +155,7 @@ export function NotificationBell() {
                         display: "flex", alignItems: "center", gap: 6,
                         fontSize: 12, fontWeight: 600, color: "#1e293b",
                       }}>
-                        {isUnread && <span style={{ width: 6, height: 6, borderRadius: 3, background: "#3b82f6" }} />}
+                        {isUnread && <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--p, #3b82f6)" }} />}
                         {p.title ?? "通知"}
                       </div>
                       {p.body && (
@@ -166,7 +166,7 @@ export function NotificationBell() {
                       <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
                         {new Date(it.created_at).toLocaleString("zh-TW", { hour12: false })}
                         {p.rule_id != null && (
-                          <a href={`/rules`} style={{ marginLeft: 8, color: "#3b82f6", textDecoration: "none" }}>
+                          <a href={`/rules`} style={{ marginLeft: 8, color: "var(--p, #3b82f6)", textDecoration: "none" }}>
                             管理規則
                           </a>
                         )}

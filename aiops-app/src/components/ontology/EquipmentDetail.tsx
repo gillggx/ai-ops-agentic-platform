@@ -185,11 +185,11 @@ export function EquipmentDetail({ equipmentId, onBack, onAskAgent }: Props) {
             onClick={() => onAskAgent(`${equipmentId} 最近有哪些異常？請分析根因。`)}
             style={{
               padding: "6px 14px",
-              background: "#ebf4ff",
-              border: "1px solid #bee3f8",
+              background: "var(--pl, #ebf4ff)",
+              border: "1px solid var(--pl, #bee3f8)",
               borderRadius: 6,
               fontSize: 12,
-              color: "#2b6cb0",
+              color: "var(--p, #2b6cb0)",
               cursor: "pointer",
               fontWeight: 500,
             }}
@@ -295,10 +295,10 @@ export function EquipmentDetail({ equipmentId, onBack, onAskAgent }: Props) {
                     style={{
                       padding: "3px 8px",
                       background: "transparent",
-                      border: "1px solid #bee3f8",
+                      border: "1px solid var(--pl, #bee3f8)",
                       borderRadius: 4,
                       fontSize: 10,
-                      color: "#2b6cb0",
+                      color: "var(--p, #2b6cb0)",
                       cursor: "pointer",
                       flexShrink: 0,
                     }}

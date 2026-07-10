@@ -53,7 +53,7 @@ export function AdminTable<T extends { id: string }>({
               {(onEdit || onDelete) && (
                 <td style={{ padding: "10px 16px", textAlign: "right" }}>
                   {onEdit && (
-                    <button onClick={() => onEdit(row)} style={btnStyle("#2b6cb0")}>編輯</button>
+                    <button onClick={() => onEdit(row)} style={btnStyle("var(--p, #2b6cb0)")}>編輯</button>
                   )}
                   {onDelete && (
                     <button onClick={() => onDelete(row.id)} style={{ ...btnStyle("#c53030"), marginLeft: 8 }}>刪除</button>

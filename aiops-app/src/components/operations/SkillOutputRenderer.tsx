@@ -110,7 +110,7 @@ function ChartOutputRenderer({
   }
 
   return (
-    <div className="pb-chart-card" style={{ background: "#f7f8fc", borderRadius: 8, overflow: "hidden", padding: 8 }}>
+    <div className="pb-chart-card" style={{ background: "var(--pn, #f7f8fc)", borderRadius: 8, overflow: "hidden", padding: 8 }}>
       <SvgChartRenderer spec={spec} height={280} />
     </div>
   );
@@ -158,7 +158,7 @@ function MultiChartRenderer({
           ...(highlightKey ? { highlight: { field: highlightKey, eq: true } } : {}),
         };
         return (
-          <div key={groupName} style={{ background: "#f7f8fc", borderRadius: 8, overflow: "hidden" }}>
+          <div key={groupName} style={{ background: "var(--pn, #f7f8fc)", borderRadius: 8, overflow: "hidden" }}>
             <div style={{ padding: "6px 12px", fontSize: 12, fontWeight: 600, color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>
               {groupName}
             </div>

@@ -132,7 +132,7 @@ export default function ChartCatalogGridPage() {
               transition: "border-color 120ms, box-shadow 120ms, transform 120ms",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "#2563eb";
+              e.currentTarget.style.borderColor = "var(--p, #2563eb)";
               e.currentTarget.style.boxShadow = "0 4px 12px rgba(37,99,235,0.08)";
               e.currentTarget.style.transform = "translateY(-1px)";
             }}

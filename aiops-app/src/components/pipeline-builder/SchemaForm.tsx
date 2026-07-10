@@ -154,8 +154,8 @@ function FormField({
           data-testid={`param-bound-${name}`}
           style={{
             padding: "4px 10px",
-            background: "#EEF2FF",
-            border: "1px solid #C7D2FE",
+            background: "var(--pl, #EEF2FF)",
+            border: "1px solid var(--pl, #C7D2FE)",
             borderRadius: 4,
             fontSize: 12,
             color: "#3730A3",
@@ -166,7 +166,7 @@ function FormField({
           }}
         >
           <span>${refName}</span>
-          <span style={{ fontSize: 10, color: "#6366F1" }}>← 綁定 pipeline input</span>
+          <span style={{ fontSize: 10, color: "var(--p, #6366F1)" }}>← 綁定 pipeline input</span>
         </div>
       ) : (
         renderWidget({

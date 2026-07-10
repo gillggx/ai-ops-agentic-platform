@@ -283,7 +283,7 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
         data-testid="preview-panel-collapsed"
         style={{
           height: 28,
-          background: "#F8FAFC",
+          background: "var(--pn, #F8FAFC)",
           borderTop: "1px solid #E2E8F0",
           display: "flex",
           alignItems: "center",
@@ -409,7 +409,7 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
             style={{
               padding: "3px 12px",
               fontSize: 11,
-              background: "#4F46E5",
+              background: "var(--p, #4F46E5)",
               color: "#fff",
               border: "none",
               borderRadius: 3,
@@ -433,8 +433,8 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
                 padding: "3px 12px",
                 fontSize: 11,
                 background: "#fff",
-                color: "#4F46E5",
-                border: "1px solid #C7D2FE",
+                color: "var(--p, #4F46E5)",
+                border: "1px solid var(--pl, #C7D2FE)",
                 borderRadius: 3,
                 cursor: selectedNode && !exporting ? "pointer" : "not-allowed",
                 letterSpacing: "0.02em",
@@ -475,7 +475,7 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
                 style={{
                   padding: "3px 10px",
                   border: "none",
-                  borderBottom: active ? "2px solid #4F46E5" : "2px solid transparent",
+                  borderBottom: active ? "2px solid var(--p, #4F46E5)" : "2px solid transparent",
                   background: "transparent",
                   color: active ? "#3730A3" : "#64748B",
                   cursor: "pointer",
@@ -532,9 +532,9 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
               style={{
                 padding: "1px 8px",
                 fontSize: 10,
-                background: g.hidden ? "#F1F5F9" : "#E0E7FF",
+                background: g.hidden ? "#F1F5F9" : "var(--pl, #E0E7FF)",
                 color: g.hidden ? "#94A3B8" : "#3730A3",
-                border: `1px solid ${g.hidden ? "#E2E8F0" : "#C7D2FE"}`,
+                border: `1px solid ${g.hidden ? "#E2E8F0" : "var(--pl, #C7D2FE)"}`,
                 borderRadius: 10,
                 cursor: "pointer",
                 textDecoration: g.hidden ? "line-through" : "none",
@@ -611,7 +611,7 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
             style={{
               fontSize: 11,
               padding: 12,
-              background: "#F8FAFC",
+              background: "var(--pn, #F8FAFC)",
               borderRadius: 4,
               margin: 14,
               overflow: "auto",

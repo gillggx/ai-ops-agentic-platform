@@ -112,7 +112,7 @@ export default function PipelineViewPage({ params }: { params: Promise<{ id: str
   const status = (result?.status as string) ?? (running ? "running…" : "");
 
   const card: React.CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "16px 18px", marginBottom: 16 };
-  const tag: React.CSSProperties = { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe" };
+  const tag: React.CSSProperties = { fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "var(--pl, #eff6ff)", color: "var(--p, #1d4ed8)", border: "1px solid var(--p, #bfdbfe)" };
 
   return (
     <div style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 20px 80px", fontFamily: "-apple-system,Segoe UI,Roboto,sans-serif", color: "#1f2933" }}>
@@ -123,10 +123,10 @@ export default function PipelineViewPage({ params }: { params: Promise<{ id: str
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {meta?.status ? <span style={tag}>{String(meta.status)}</span> : null}
-          <button onClick={() => run(id)} disabled={running} style={{ fontSize: 13, padding: "6px 14px", borderRadius: 8, border: "1px solid #1d4ed8", background: running ? "#eef2ff" : "#1d4ed8", color: running ? "#1d4ed8" : "#fff", cursor: running ? "default" : "pointer" }}>
+          <button onClick={() => run(id)} disabled={running} style={{ fontSize: 13, padding: "6px 14px", borderRadius: 8, border: "1px solid var(--p, #1d4ed8)", background: running ? "var(--pl, #eef2ff)" : "var(--p, #1d4ed8)", color: running ? "var(--p, #1d4ed8)" : "#fff", cursor: running ? "default" : "pointer" }}>
             {running ? "執行中…" : "重新執行"}
           </button>
-          <Link href={`/admin/pipeline-builder/${id}`} style={{ fontSize: 13, color: "#1d4ed8", textDecoration: "none" }}>編輯 →</Link>
+          <Link href={`/admin/pipeline-builder/${id}`} style={{ fontSize: 13, color: "var(--p, #1d4ed8)", textDecoration: "none" }}>編輯 →</Link>
         </div>
       </div>
 
@@ -161,7 +161,7 @@ export default function PipelineViewPage({ params }: { params: Promise<{ id: str
                   const isOut = /chart|view|alert|panel/.test(String(n.block_id));
                   return (
                     <g key={nid}>
-                      <rect x={p.x} y={p.y} width={NW} height={NH} rx={10} fill={isOut ? "#eff6ff" : "#fff"} stroke={isOut ? "#93c5fd" : "#e5e7eb"} strokeWidth={1.3} />
+                      <rect x={p.x} y={p.y} width={NW} height={NH} rx={10} fill={isOut ? "var(--pl, #eff6ff)" : "#fff"} stroke={isOut ? "#93c5fd" : "#e5e7eb"} strokeWidth={1.3} />
                       <circle cx={p.x + 15} cy={p.y + 19} r={4} fill={dot} />
                       <text x={p.x + 28} y={p.y + 23} fontSize={12.5} fontWeight={600} fill="#101828">{String(n.block_id).replace("block_", "")}</text>
                       <text x={p.x + 15} y={p.y + 43} fontSize={11} fill="#6b7280">{nid}{typeof nr?.rows === "number" ? ` · ${nr.rows as number} rows` : ""}</text>

@@ -26,7 +26,7 @@ const KIND_LABEL: Record<Capability["kind"], string> = {
   external: "External",
 };
 const KIND_COLOR: Record<Capability["kind"], string> = {
-  builtin: "#4F46E5",
+  builtin: "var(--p, #4F46E5)",
   domain_skill: "#0891B2",
   external: "#B7791F",
 };

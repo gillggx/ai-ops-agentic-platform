@@ -27,7 +27,8 @@ type EventMode = "raw" | "patrol";
 export default function AutomatePage() {
   const params = useParams<{ slug: string }>();
   const router = useRouter();
-  const slug = params?.slug ?? "";
+  // Decode ONCE — useParams keeps percent-encoding; see skills/[slug]/page.tsx.
+  const slug = decodeURIComponent(params?.slug ?? "");
 
   const [skill, setSkill] = useState<Skill | null>(null);
   const [sources, setSources] = useState<AlarmSource[]>([]);

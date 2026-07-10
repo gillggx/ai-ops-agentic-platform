@@ -210,8 +210,8 @@ export function ContractRenderer({ contract, onAgentMessage, onHandoff }: Props)
               fontSize: 11,
               borderRadius: 14,
               border: selectedAltIdx === -1 ? "1px solid #4299e1" : "1px solid #cbd5e0",
-              background: selectedAltIdx === -1 ? "#ebf4ff" : "#fff",
-              color: selectedAltIdx === -1 ? "#2b6cb0" : "#4a5568",
+              background: selectedAltIdx === -1 ? "var(--pl, #ebf4ff)" : "#fff",
+              color: selectedAltIdx === -1 ? "var(--p, #2b6cb0)" : "#4a5568",
               cursor: "pointer",
               fontWeight: selectedAltIdx === -1 ? 600 : 400,
             }}
@@ -227,8 +227,8 @@ export function ContractRenderer({ contract, onAgentMessage, onHandoff }: Props)
                 fontSize: 11,
                 borderRadius: 14,
                 border: selectedAltIdx === i ? "1px solid #4299e1" : "1px solid #cbd5e0",
-                background: selectedAltIdx === i ? "#ebf4ff" : "#fff",
-                color: selectedAltIdx === i ? "#2b6cb0" : "#4a5568",
+                background: selectedAltIdx === i ? "var(--pl, #ebf4ff)" : "#fff",
+                color: selectedAltIdx === i ? "var(--p, #2b6cb0)" : "#4a5568",
                 cursor: "pointer",
                 fontWeight: selectedAltIdx === i ? 600 : 400,
               }}

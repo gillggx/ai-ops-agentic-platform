@@ -28,7 +28,7 @@ export function ContractCard({ contract, onTrigger }: Props) {
             <div key={i} style={{ display: "flex", gap: 6, marginBottom: 2, alignItems: "flex-start" }}>
               <span style={{ color: "#a0aec0", flexShrink: 0, minWidth: 14 }}>{i + 1}.</span>
               <span style={{ color: "#4a5568" }}>
-                <span style={{ fontFamily: "monospace", color: "#2b6cb0", fontSize: 10, background: "#ebf4ff", padding: "1px 4px", borderRadius: 3, marginRight: 4 }}>
+                <span style={{ fontFamily: "monospace", color: "var(--pd, #2b6cb0)", fontSize: 10, background: "var(--pl, #ebf4ff)", padding: "1px 4px", borderRadius: 3, marginRight: 4 }}>
                   {item.tool}
                 </span>
                 {item.finding}
@@ -52,8 +52,8 @@ export function ContractCard({ contract, onTrigger }: Props) {
                   padding: "4px 10px",
                   borderRadius: 14,
                   border: isHandoff ? "1px solid #fbd38d" : "1px solid #bee3f8",
-                  background: isHandoff ? "#fffaf0" : "#ebf4ff",
-                  color: isHandoff ? "#c05621" : "#2b6cb0",
+                  background: isHandoff ? "#fffaf0" : "var(--pl, #ebf4ff)",
+                  color: isHandoff ? "#c05621" : "var(--pd, #2b6cb0)",
                   fontSize: 11,
                   fontWeight: 500,
                   cursor: "pointer",

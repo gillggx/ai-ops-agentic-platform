@@ -155,7 +155,7 @@ export default function PipelineRunDialog({ open, inputs, skillCtx, onCancel, on
           display: "flex", flexDirection: "column",
         }}
       >
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid #E2E8F0", background: "#F8FAFC", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #E2E8F0", background: "var(--pn, #F8FAFC)", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 16 }}>▶</span>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>Run Pipeline</div>
@@ -199,7 +199,7 @@ export default function PipelineRunDialog({ open, inputs, skillCtx, onCancel, on
               {!pastLoading && pastCases.length === 0 && (
                 <div style={{ fontSize: 12, color: "#64748B", lineHeight: 1.5 }}>
                   目前沒有歷史 event 可選。<br/>
-                  <button onClick={() => setTab("manual")} style={{ all: "unset", cursor: "pointer", color: "#4F46E5", textDecoration: "underline", marginTop: 8, fontSize: 12 }}>
+                  <button onClick={() => setTab("manual")} style={{ all: "unset", cursor: "pointer", color: "var(--p, #4F46E5)", textDecoration: "underline", marginTop: 8, fontSize: 12 }}>
                     切到 ✍️ Manual input 自填
                   </button>
                 </div>
@@ -231,7 +231,7 @@ export default function PipelineRunDialog({ open, inputs, skillCtx, onCancel, on
                 );
               })}
             </div>
-            <div style={{ padding: "12px 14px", overflowY: "auto", background: "#F8FAFC", maxHeight: "55vh" }}>
+            <div style={{ padding: "12px 14px", overflowY: "auto", background: "var(--pn, #F8FAFC)", maxHeight: "55vh" }}>
               <div className="mono" style={{ fontSize: 10, letterSpacing: "0.08em", color: "#64748B", marginBottom: 5, fontFamily: "ui-monospace, monospace" }}>PAYLOAD PREVIEW</div>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: "#0F172A", marginBottom: 8 }}>
                 {selectedPast?.title ?? "—"}
@@ -250,11 +250,11 @@ export default function PipelineRunDialog({ open, inputs, skillCtx, onCancel, on
             {canShowPastTab && pastCases.length > 0 && (
               <div style={{
                 padding: "8px 12px", borderRadius: 5,
-                background: "#EFF6FF",
-                border: "1px solid #BFDBFE",
+                background: "var(--pl, #EFF6FF)",
+                border: "1px solid var(--p, #BFDBFE)",
                 fontSize: 12, color: "#1E40AF", lineHeight: 1.4,
               }}>
-                💡 旁邊 <button onClick={() => setTab("past")} style={{ all: "unset", cursor: "pointer", fontWeight: 600, color: "#1D4ED8", textDecoration: "underline" }}>📂 From past event</button> 已經列了 {pastCases.length} 筆歷史事件，點一筆就能一鍵帶入。
+                💡 旁邊 <button onClick={() => setTab("past")} style={{ all: "unset", cursor: "pointer", fontWeight: 600, color: "var(--p, #1D4ED8)", textDecoration: "underline" }}>📂 From past event</button> 已經列了 {pastCases.length} 筆歷史事件，點一筆就能一鍵帶入。
               </div>
             )}
             {inputs.map((inp) => (
@@ -294,7 +294,7 @@ export default function PipelineRunDialog({ open, inputs, skillCtx, onCancel, on
           <button
             data-testid="run-dialog-submit"
             onClick={() => (canShowPastTab && tab === "past") ? submitPast() : submitManual()}
-            style={{ padding: "6px 16px", fontSize: 12, background: "#4F46E5", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600 }}>
+            style={{ padding: "6px 16px", fontSize: 12, background: "var(--p, #4F46E5)", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer", fontWeight: 600 }}>
             Run
           </button>
         </div>

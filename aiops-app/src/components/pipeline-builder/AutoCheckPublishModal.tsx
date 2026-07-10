@@ -276,7 +276,7 @@ export default function AutoCheckPublishModal({
             {(eventTypeOptions.length > 0 || patrolOptions.length > 0) && (
               <div style={{
                 marginBottom: 10, padding: 10,
-                background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6,
+                background: "var(--pn, #f8fafc)", border: "1px solid #e2e8f0", borderRadius: 6,
               }}>
                 {eventTypeOptions.length > 0 && (
                   <div style={{ marginBottom: patrolOptions.length > 0 ? 8 : 0 }}>
@@ -494,7 +494,7 @@ function BindingEditor({
           style={{
             marginTop: 6,
             padding: "8px 10px",
-            background: "#F8FAFC",
+            background: "var(--pn, #F8FAFC)",
             border: "1px dashed #CBD5E0",
             borderRadius: 4,
             display: "flex",
@@ -590,7 +590,7 @@ function ChipInput({
             onClick={() => onChange(values.filter((x) => x !== v))}
             style={{
               marginLeft: 4, background: "transparent", border: "none",
-              color: "#4338CA", cursor: "pointer", fontSize: 10,
+              color: "var(--pd, #4338CA)", cursor: "pointer", fontSize: 10,
             }}
           >
             ×
@@ -674,7 +674,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 const pillStyle: React.CSSProperties = {
-  fontSize: 10, padding: "2px 6px", background: "#EEF2FF", color: "#4338CA",
+  fontSize: 10, padding: "2px 6px", background: "var(--pl, #EEF2FF)", color: "var(--pd, #4338CA)",
   borderRadius: 10, fontFamily: "ui-monospace, monospace", fontWeight: 500,
   display: "inline-flex", alignItems: "center",
 };

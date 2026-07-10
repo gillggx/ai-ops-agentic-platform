@@ -51,7 +51,7 @@ export function AutomationConfirmCard({ data }: { data: AutomationHandoffData })
 
   return (
     <div style={{ maxWidth: 420, border: "1px solid #E2E8F0", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-      <div style={{ padding: "12px 15px", borderBottom: "1px solid #EEF2F6", background: "#F8FAFC" }}>
+      <div style={{ padding: "12px 15px", borderBottom: "1px solid #EEF2F6", background: "var(--pn, #F8FAFC)" }}>
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>設定自動化</div>
         <div style={{ fontSize: 11.5, color: "#64748B", marginTop: 2 }}>
           巡檢 / 定期檢查 / 告警都在 Skill 的設定頁做，跟 Skill 庫一樣。
@@ -64,7 +64,7 @@ export function AutomationConfirmCard({ data }: { data: AutomationHandoffData })
       <div style={{ padding: "11px 15px", borderTop: "1px solid #EEF2F6", display: "flex", justifyContent: "flex-end" }}>
         <button onClick={go} disabled={state === "working"}
           style={{ fontSize: 12.5, padding: "7px 16px", borderRadius: 8, border: "none",
-            background: "#4F46E5", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
+            background: "var(--p, #4F46E5)", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
           {state === "working" ? "處理中…" : "存成 Skill 並開設定頁"}
         </button>
       </div>

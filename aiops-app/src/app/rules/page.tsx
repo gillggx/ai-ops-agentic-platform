@@ -189,7 +189,7 @@ export default function RulesPage() {
       {!loading && rules.length === 0 && !error && (
         <div style={{
           padding: "60px 20px", textAlign: "center",
-          background: "#f8fafc", borderRadius: 8,
+          background: "var(--pn, #f8fafc)", borderRadius: 8,
           color: "#64748b", fontSize: 14,
         }}>
           目前沒有規則 — 去 chat panel 跟 agent 說想要排程什麼分析吧
@@ -203,7 +203,7 @@ export default function RulesPage() {
         }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
-              <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+              <tr style={{ background: "var(--pn, #f8fafc)", borderBottom: "1px solid #e2e8f0" }}>
                 <th style={thStyle}>名稱</th>
                 <th style={thStyle}>類型</th>
                 <th style={thStyle}>排程</th>
@@ -269,7 +269,7 @@ export default function RulesPage() {
                 expandedId === r.id && (() => {
                   const ps = r.pipeline_id != null ? pipelineMap.get(r.pipeline_id) : undefined;
                   return (
-                    <tr key={`detail-${r.id}`} style={{ background: "#f8fafc" }}>
+                    <tr key={`detail-${r.id}`} style={{ background: "var(--pn, #f8fafc)" }}>
                       <td colSpan={6} style={{ padding: "14px 18px" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                           <div>
@@ -349,7 +349,7 @@ export default function RulesPage() {
                       </div>
                       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                         <button onClick={() => setEditingId(null)} style={btnStyle}>取消</button>
-                        <button onClick={() => saveEdit(r)} style={{ ...btnStyle, background: "#3b82f6", color: "#fff", borderColor: "#3b82f6" }}>儲存</button>
+                        <button onClick={() => saveEdit(r)} style={{ ...btnStyle, background: "var(--p, #3b82f6)", color: "#fff", borderColor: "var(--p, #3b82f6)" }}>儲存</button>
                       </div>
                     </td>
                   </tr>

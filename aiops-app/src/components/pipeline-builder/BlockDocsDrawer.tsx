@@ -56,7 +56,7 @@ export default function BlockDocsDrawer({ block, onClose }: Props) {
         style={{
           padding: "14px 18px",
           borderBottom: "1px solid #E2E8F0",
-          background: "#F8FAFC",
+          background: "var(--pn, #F8FAFC)",
           display: "flex",
           alignItems: "center",
           gap: 10,
@@ -90,7 +90,7 @@ export default function BlockDocsDrawer({ block, onClose }: Props) {
               whiteSpace: "pre-wrap",
               fontFamily: "inherit",
               margin: 0,
-              background: "#F8FAFC",
+              background: "var(--pn, #F8FAFC)",
               padding: 12,
               borderRadius: 4,
               border: "1px solid #E2E8F0",
@@ -159,9 +159,9 @@ export default function BlockDocsDrawer({ block, onClose }: Props) {
                   style={{
                     padding: "4px 10px",
                     fontSize: 11,
-                    background: "#EEF2FF",
+                    background: "var(--pl, #EEF2FF)",
                     color: "#3730A3",
-                    border: "1px solid #C7D2FE",
+                    border: "1px solid var(--pl, #C7D2FE)",
                     borderRadius: 3,
                     cursor: "pointer",
                     fontWeight: 600,
@@ -186,7 +186,7 @@ export default function BlockDocsDrawer({ block, onClose }: Props) {
           <pre
             style={{
               fontSize: 10,
-              background: "#F8FAFC",
+              background: "var(--pn, #F8FAFC)",
               padding: 10,
               borderRadius: 4,
               border: "1px solid #E2E8F0",

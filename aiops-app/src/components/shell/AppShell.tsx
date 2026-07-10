@@ -111,8 +111,8 @@ function NavLink({ href, icon, label, active, collapsed }: {
       padding: collapsed ? "var(--sp-md) 0" : "var(--sp-sm) var(--sp-md)",
       justifyContent: collapsed ? "center" : "flex-start",
       borderRadius: "var(--radius-md)",
-      color: active ? "var(--pd, #2b6cb0)" : "#4a5568",
-      background: active ? "var(--pl, #ebf4ff)" : "transparent",
+      color: active ? "#ffffff" : "#8b90a7",
+      background: active ? "var(--navs, #274035)" : "transparent",
       textDecoration: "none", fontSize: collapsed ? 18 : "var(--fs-sm)",
       fontWeight: active ? 600 : 400, marginBottom: 2,
       transition: "background 0.1s",
@@ -125,11 +125,11 @@ function NavLink({ href, icon, label, active, collapsed }: {
 
 function SidebarSection({ title, collapsed }: { title: string; collapsed: boolean }) {
   if (collapsed) {
-    return <div style={{ height: 1, background: "#e2e8f0", margin: "8px 6px" }} />;
+    return <div style={{ height: 1, background: "rgba(255,255,255,0.12)", margin: "8px 6px" }} />;
   }
   return (
     <div style={{
-      fontSize: "var(--fs-xs)", fontWeight: 600, color: "#a0aec0",
+      fontSize: "var(--fs-xs)", fontWeight: 600, color: "#676d80",
       padding: "var(--sp-sm) var(--sp-md) var(--sp-xs)", textTransform: "uppercase", letterSpacing: "0.5px",
     }}>
       {title}
@@ -165,8 +165,8 @@ function ContextualSidebar() {
       width: collapsed ? 48 : 200,
       minWidth: collapsed ? 48 : 200,
       flexShrink: 0,
-      background: "#ffffff",
-      borderRight: "1px solid #e2e8f0",
+      background: "var(--nav, #14211C)",
+      borderRight: "1px solid rgba(255,255,255,0.08)",
       display: "flex", flexDirection: "column",
       overflowY: "auto", overflowX: "hidden",
       transition: "width 0.2s, min-width 0.2s",
@@ -174,15 +174,15 @@ function ContextualSidebar() {
       {/* Header with collapse toggle */}
       <div style={{
         padding: collapsed ? "12px 0" : "10px 12px",
-        borderBottom: "1px solid #e2e8f0",
+        borderBottom: "1px solid rgba(255,255,255,0.1)",
         display: "flex", alignItems: "center",
         justifyContent: collapsed ? "center" : "space-between",
         flexShrink: 0,
       }}>
-        {!collapsed && <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>AIOps</span>}
+        {!collapsed && <span style={{ fontSize: 14, fontWeight: 700, color: "#f0f2f5" }}>AIOps</span>}
         <button onClick={() => setCollapsed(c => !c)} title={collapsed ? t("expandMenu") : t("collapseMenu")} style={{
           background: "none", border: "none", cursor: "pointer",
-          color: "#718096", fontSize: 12, padding: "4px",
+          color: "#9aa1b5", fontSize: 12, padding: "4px",
         }}>
           {collapsed ? "▶" : "◀"}
         </button>
@@ -334,7 +334,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               width: 28, flexShrink: 0,
               display: "flex", flexDirection: "column", alignItems: "center",
               justifyContent: "center", gap: 6,
-              background: copilotOpen ? "#f7f8fc" : "#ebf8ff",
+              background: copilotOpen ? "var(--ws, #f7f8fc)" : "var(--pl, #ebf8ff)",
               borderLeft: "1px solid #e2e8f0",
               cursor: "pointer", userSelect: "none",
               transition: "background 0.15s",
@@ -344,7 +344,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <span style={{ fontSize: 14 }}>{copilotOpen ? "▶" : "◀"}</span>
             <span style={{
               writingMode: "vertical-rl", fontSize: 11, fontWeight: 600,
-              color: copilotOpen ? "#a0aec0" : "#2b6cb0", letterSpacing: "1px",
+              color: copilotOpen ? "#a0aec0" : "var(--p, #2b6cb0)", letterSpacing: "1px",
             }}>
               AI Agent
             </span>
@@ -379,7 +379,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <aside style={{
             width: 380, minWidth: 280, maxWidth: "50vw", flexShrink: 0,
             display: "flex", flexDirection: "column",
-            background: "#ffffff", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
+            background: "var(--pn, #ffffff)", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
             resize: "horizontal", direction: "rtl",
           }}>
             <div style={{ direction: "ltr", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>

@@ -268,7 +268,7 @@ function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} style={{ background: i % 2 ? "#f7f8fc" : "#fff" }}>
+            <tr key={i} style={{ background: i % 2 ? "var(--ws, #f7f8fc)" : "#fff" }}>
               {cols.map(c => (
                 <td key={c} style={{ padding: "5px 10px", color: "#2d3748", borderBottom: "1px solid #f0f0f0" }}>
                   {String(row[c] ?? "")}
@@ -340,14 +340,14 @@ export function McpChartRenderer({
     }}>
       {/* Tab bar (only show if multiple tabs) */}
       {tabs.length > 1 && (
-        <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0", background: "#f7f8fc" }}>
+        <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0", background: "var(--pn, #f7f8fc)" }}>
           {tabs.map((t, i) => (
             <button key={i} onClick={() => setActiveTab(i)} style={{
               padding: "8px 16px", fontSize: 12, fontWeight: 600,
               border: "none", cursor: "pointer",
               background: activeTab === i ? "#fff" : "transparent",
-              color: activeTab === i ? "#3182ce" : "#718096",
-              borderBottom: activeTab === i ? "2px solid #3182ce" : "2px solid transparent",
+              color: activeTab === i ? "var(--p, #3182ce)" : "#718096",
+              borderBottom: activeTab === i ? "2px solid var(--p, #3182ce)" : "2px solid transparent",
             }}>{t.label}</button>
           ))}
         </div>

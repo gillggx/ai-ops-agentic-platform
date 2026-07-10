@@ -170,7 +170,7 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
       {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "10px 16px", borderBottom: "1px solid #e2e8f0", background: "#f7f8fc",
+        padding: "10px 16px", borderBottom: "1px solid #e2e8f0", background: "var(--pn, #f7f8fc)",
       }}>
         <span style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "#1a202c" }}>
           Data Explorer
@@ -198,8 +198,8 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
             style={{
               padding: "8px 16px", fontSize: 12,
               fontWeight: !overlayMode && activeDataset === ds ? 700 : 400,
-              color: !overlayMode && activeDataset === ds ? "#2b6cb0" : "#718096", cursor: "pointer",
-              borderBottom: !overlayMode && activeDataset === ds ? "2px solid #2b6cb0" : "2px solid transparent",
+              color: !overlayMode && activeDataset === ds ? "var(--p, #2b6cb0)" : "#718096", cursor: "pointer",
+              borderBottom: !overlayMode && activeDataset === ds ? "2px solid var(--p, #2b6cb0)" : "2px solid transparent",
               background: "transparent", border: "none",
             }}
           >
@@ -313,9 +313,9 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
               onClick={() => setChartType(ct)}
               style={{
                 padding: "3px 10px", fontSize: 11, borderRadius: 4,
-                border: chartType === ct ? "1px solid #2b6cb0" : "1px solid #e2e8f0",
+                border: chartType === ct ? "1px solid var(--p, #2b6cb0)" : "1px solid #e2e8f0",
                 background: chartType === ct ? "#ebf8ff" : "#fff",
-                color: chartType === ct ? "#2b6cb0" : "#718096",
+                color: chartType === ct ? "var(--p, #2b6cb0)" : "#718096",
                 fontWeight: chartType === ct ? 600 : 400,
                 cursor: "pointer",
               }}

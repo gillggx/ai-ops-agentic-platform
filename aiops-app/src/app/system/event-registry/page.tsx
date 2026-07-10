@@ -33,7 +33,7 @@ interface EventLog {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const primaryBtn: React.CSSProperties = {
-  background: "#3182ce", color: "#fff", border: "none", borderRadius: 6,
+  background: "var(--p, #3182ce)", color: "#fff", border: "none", borderRadius: 6,
   padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600,
 };
 const secondaryBtn: React.CSSProperties = {
@@ -209,7 +209,7 @@ export default function EventRegistryPage() {
       <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", overflow: "hidden", marginBottom: 24 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ background: "#f7f8fc" }}>
+            <tr style={{ background: "var(--pn, #f7f8fc)" }}>
               {["Name", "Source", "Description", "Attributes", "收到次數", "最後收到", "操作"].map(h => (
                 <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, color: "#4a5568", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{h}</th>
               ))}
@@ -238,7 +238,7 @@ export default function EventRegistryPage() {
                     </span>
                   </td>
                   <td style={{ padding: "11px 16px" }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: log && log.total > 0 ? "#2b6cb0" : "#a0aec0" }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: log && log.total > 0 ? "var(--p, #2b6cb0)" : "#a0aec0" }}>
                       {log ? log.total : 0}
                     </span>
                   </td>
@@ -247,7 +247,7 @@ export default function EventRegistryPage() {
                   </td>
                   <td style={{ padding: "11px 16px", display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
                     <button
-                      style={{ background: "#fff", color: "#3182ce", border: "1px solid #bee3f8", borderRadius: 5, padding: "4px 10px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
+                      style={{ background: "#fff", color: "var(--p, #3182ce)", border: "1px solid var(--pl, #bee3f8)", borderRadius: 5, padding: "4px 10px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
                       onClick={() => openEdit(t)}
                     >
                       編輯
@@ -278,7 +278,7 @@ export default function EventRegistryPage() {
           ) : (
             <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ background: "#f7f8fc" }}>
+                <tr style={{ background: "var(--pn, #f7f8fc)" }}>
                   {["Name", "Type", "Required", "Description"].map(h => (
                     <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: "#718096", fontWeight: 600 }}>{h}</th>
                   ))}
@@ -343,7 +343,7 @@ export default function EventRegistryPage() {
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
-                  <tr style={{ background: "#f7f8fc" }}>
+                  <tr style={{ background: "var(--pn, #f7f8fc)" }}>
                     {["Name", "Type", "Required", "Description", ""].map(h => (
                       <th key={h} style={{ padding: "5px 8px", textAlign: "left", color: "#718096", fontWeight: 600, fontSize: 10, textTransform: "uppercase" }}>{h}</th>
                     ))}

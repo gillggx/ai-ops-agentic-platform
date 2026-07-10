@@ -183,9 +183,9 @@ function UserMenu() {
                   }}
                   style={{
                     padding: "3px 10px", borderRadius: 12, fontSize: 11, cursor: "pointer",
-                    border: locale === loc ? "1px solid #2563eb" : "1px solid #e2e8f0",
-                    background: locale === loc ? "#eff6ff" : "#fff",
-                    color: locale === loc ? "#2563eb" : "#475569",
+                    border: locale === loc ? "1px solid var(--p, #2563eb)" : "1px solid #e2e8f0",
+                    background: locale === loc ? "var(--pl, #eff6ff)" : "#fff",
+                    color: locale === loc ? "var(--p, #2563eb)" : "#475569",
                     fontWeight: locale === loc ? 600 : 400,
                   }}
                 >
@@ -216,7 +216,7 @@ function UserMenu() {
                     display: "flex", alignItems: "center", gap: 6,
                     padding: "4px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer",
                     border: theme === th.slug ? `1px solid ${th.swatch}` : "1px solid #e2e8f0",
-                    background: theme === th.slug ? "#f8fafc" : "#fff",
+                    background: theme === th.slug ? "var(--pn, #f8fafc)" : "#fff",
                     color: "#374151", fontWeight: theme === th.slug ? 600 : 400,
                     textAlign: "left",
                   }}
@@ -266,7 +266,7 @@ function DropdownLink({ href, icon, label, onClick }: {
         textDecoration: "none", color: "#374151",
         fontSize: 13, fontWeight: 500,
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--pn, #f8fafc)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
     >
       <span style={{ fontSize: 14 }}>{icon}</span>

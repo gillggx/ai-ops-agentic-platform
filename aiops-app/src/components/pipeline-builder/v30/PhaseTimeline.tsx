@@ -78,7 +78,7 @@ export default function PhaseTimeline({ phases, runtime, onConsoleLink }: Props)
                       fontSize: 10.5, color: "#8a877e" }}>
           {t("consoleHint")} →{" "}
           <span onClick={onConsoleLink}
-                style={{ color: "#2563eb", fontWeight: 600, cursor: "pointer" }}>
+                style={{ color: "var(--p, #2563eb)", fontWeight: 600, cursor: "pointer" }}>
             {t("consoleTab")}
           </span>
         </div>
@@ -90,7 +90,7 @@ export default function PhaseTimeline({ phases, runtime, onConsoleLink }: Props)
 // Labels live in messages/<locale>/phaseTimeline.json under "status.<key>".
 const STATUS_STYLE: Record<PhaseStatus, { bg: string; fg: string; icon: string }> = {
   pending:     { bg: "#f1f5f9", fg: "#64748b", icon: "." },
-  in_progress: { bg: "#dbeafe", fg: "#1e40af", icon: ">" },
+  in_progress: { bg: "var(--pl, #dbeafe)", fg: "var(--pd, #1e40af)", icon: ">" },
   completed:   { bg: "#d1fae5", fg: "#065f46", icon: "[OK]" },
   failed:      { bg: "#fee2e2", fg: "#991b1b", icon: "[X]" },
   paused:      { bg: "#fef3c7", fg: "#92400e", icon: "[..]" },

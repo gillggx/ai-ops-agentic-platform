@@ -329,7 +329,7 @@ function Inner({
           <div
             style={{
               position: "absolute", inset: 0, overflowY: "auto",
-              background: "#F8FAFC", padding: 18,
+              background: "var(--pn, #F8FAFC)", padding: 18,
               display: activeTab === "results" ? "block" : "none",
             }}
           >
@@ -381,7 +381,7 @@ function Header({
     <div
       style={{
         padding: "8px 12px", borderBottom: "1px solid #E5E7EB",
-        background: "#F8FAFC",
+        background: "var(--pn, #F8FAFC)",
         display: "flex", alignItems: "center", gap: 12,
       }}
     >
@@ -458,9 +458,9 @@ function TabBtn({
       disabled={disabled}
       style={{
         padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600,
-        color: disabled ? "#CBD5E1" : active ? "#1D4ED8" : "#64748B",
-        background: active ? "#EFF6FF" : "transparent",
-        border: `1px solid ${active ? "#BFDBFE" : "transparent"}`,
+        color: disabled ? "#CBD5E1" : active ? "var(--p, #1D4ED8)" : "#64748B",
+        background: active ? "var(--pl, #EFF6FF)" : "transparent",
+        border: `1px solid ${active ? "var(--pl, #BFDBFE)" : "transparent"}`,
         cursor: disabled ? "default" : "pointer",
         display: "inline-flex", alignItems: "center", gap: 6,
       }}
@@ -614,11 +614,11 @@ function pillFor(phase: RunPhase, durationMs: number | null | undefined) {
     case "idle":
       return { text: "尚未開始", bg: "#F9FAFB", color: "#6B7280", border: "#E5E7EB" };
     case "building":
-      return { text: "⏱ 建構中…", bg: "#EFF6FF", color: "#1D4ED8", border: "#BFDBFE" };
+      return { text: "⏱ 建構中…", bg: "var(--pl, #EFF6FF)", color: "var(--p, #1D4ED8)", border: "var(--pl, #BFDBFE)" };
     case "build_failed":
       return { text: "✕ 建構未完成", bg: "#FEF2F2", color: "#B91C1C", border: "#FECACA" };
     case "running":
-      return { text: "⏱ 執行中…", bg: "#EFF6FF", color: "#1D4ED8", border: "#BFDBFE" };
+      return { text: "⏱ 執行中…", bg: "var(--pl, #EFF6FF)", color: "var(--p, #1D4ED8)", border: "var(--pl, #BFDBFE)" };
     case "done": {
       const sec = durationMs != null ? `（${(durationMs / 1000).toFixed(1)}s）` : "";
       return { text: `✓ 完成${sec}`, bg: "#ECFDF5", color: "#047857", border: "#A7F3D0" };

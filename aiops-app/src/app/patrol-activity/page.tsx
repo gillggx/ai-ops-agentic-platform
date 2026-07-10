@@ -99,7 +99,7 @@ export default function PatrolActivityPage() {
   }, [items, selected]);
 
   return (
-    <div style={{ padding: "20px 24px", minHeight: "100vh", background: "#f7f8fc" }}>
+    <div style={{ padding: "20px 24px", minHeight: "100vh", background: "var(--ws, #f7f8fc)" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: "#1a202c" }}>{t("title")}</h1>

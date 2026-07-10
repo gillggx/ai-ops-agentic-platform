@@ -105,7 +105,7 @@ export function OverviewDashboard({ onSelectEquipment, onAskAgent }: Props) {
       {/* KPI Row */}
       <div style={{ display: "flex", gap: 12 }}>
         <KpiCard label="設備稼動率"    value={`${utilization}`}  unit="%"  color={utilization >= 70 ? "#38a169" : "#d69e2e"} />
-        <KpiCard label="運行中設備"    value={running}            unit="台"  color="#2b6cb0" />
+        <KpiCard label="運行中設備"    value={running}            unit="台"  color="var(--p, #2b6cb0)" />
         <KpiCard label="告警 / 停機"   value={alarms}             unit="台"  color={alarms > 0 ? "#e53e3e" : "#38a169"} />
         <KpiCard label="維護中"        value={maintenance}        unit="台"  color={maintenance > 0 ? "#ed8936" : "#718096"} />
       </div>
@@ -119,7 +119,7 @@ export function OverviewDashboard({ onSelectEquipment, onAskAgent }: Props) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
             {equipment.map((eq) => {
               const color = STATUS_COLOR[eq.status] ?? "#a0aec0";
-              const bg    = STATUS_BG[eq.status]    ?? "#f7f8fc";
+              const bg    = STATUS_BG[eq.status]    ?? "var(--ws, #f7f8fc)";
               return (
                 <button
                   key={eq.equipment_id}
@@ -151,7 +151,7 @@ export function OverviewDashboard({ onSelectEquipment, onAskAgent }: Props) {
                   <div style={{
                     marginTop: 8,
                     fontSize: 11,
-                    color: "#2b6cb0",
+                    color: "var(--p, #2b6cb0)",
                     fontWeight: 500,
                   }}>
                     查看詳情 →

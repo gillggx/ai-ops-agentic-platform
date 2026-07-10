@@ -258,7 +258,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 const previewBox: React.CSSProperties = {
-  background: "#F8FAFC",
+  background: "var(--pn, #F8FAFC)",
   border: "1px solid #E2E8F0",
   borderRadius: 4,
   padding: 8,

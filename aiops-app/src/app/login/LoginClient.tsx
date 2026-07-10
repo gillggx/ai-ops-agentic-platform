@@ -176,7 +176,7 @@ const pageStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  background: "#f8fafc",
+  background: "var(--ws, #f8fafc)",
   fontFamily: "system-ui, -apple-system, 'Noto Sans TC', sans-serif",
 };
 const cardStyle: React.CSSProperties = {

@@ -78,7 +78,7 @@ export default function ChartDetailPage() {
     return (
       <div style={{ padding: 40, textAlign: "center", color: "#75736d", fontFamily: TYPOGRAPHY }}>
         找不到 chart id「{idStr}」 ·{" "}
-        <Link href="/help/charts" style={{ color: "#2563eb" }}>← 回 catalog</Link>
+        <Link href="/help/charts" style={{ color: "var(--p, #2563eb)" }}>← 回 catalog</Link>
       </div>
     );
   }
@@ -222,9 +222,9 @@ export default function ChartDetailPage() {
           <Section title="樣式設定">
             <div style={{
               fontSize: 11,
-              color: "#1d4ed8",
-              background: "#eff6ff",
-              border: "1px solid #bfdbfe",
+              color: "var(--p, #1d4ed8)",
+              background: "var(--pl, #eff6ff)",
+              border: "1px solid var(--p, #bfdbfe)",
               borderRadius: 4,
               padding: "8px 10px",
               marginBottom: 10,
@@ -322,7 +322,7 @@ export default function ChartDetailPage() {
             style={{
               display: "block",
               padding: "12px 14px",
-              background: "#2563eb",
+              background: "var(--p, #2563eb)",
               color: "#fff",
               textDecoration: "none",
               borderRadius: 6,

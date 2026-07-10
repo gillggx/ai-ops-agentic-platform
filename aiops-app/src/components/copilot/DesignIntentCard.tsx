@@ -651,8 +651,8 @@ function EditForm({
               <label key={opt.kind} style={{
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "5px 8px",
-                border: checked ? "1px solid #2b6cb0" : "1px solid #cbd5e0",
-                background: checked ? "#ebf4ff" : "#fff",
+                border: checked ? "1px solid var(--p, #2b6cb0)" : "1px solid #cbd5e0",
+                background: checked ? "var(--pl, #ebf4ff)" : "#fff",
                 borderRadius: 4,
                 fontSize: 12,
                 cursor: "pointer",
@@ -730,7 +730,7 @@ function btnStyle(
     cursor: "pointer",
   };
   const variants: Record<string, React.CSSProperties> = {
-    primary:    { ...base, borderColor: "#2b6cb0", background: "#2b6cb0", color: "#fff" },
+    primary:    { ...base, borderColor: "var(--p, #2b6cb0)", background: "var(--p, #2b6cb0)", color: "#fff" },
     secondary:  { ...base, borderColor: "#cbd5e0", background: "#fff",   color: "#2d3748", fontWeight: 500 },
     "secondary-disabled": { ...base, borderColor: "#e2e8f0", background: "#edf2f7", color: "#a0aec0", cursor: "default" },
     ghost:      { ...base, borderColor: "transparent", background: "transparent", color: "#4a5568", fontWeight: 500 },

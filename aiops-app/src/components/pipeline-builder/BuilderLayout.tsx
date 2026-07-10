@@ -590,7 +590,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
             <>
               <button
                 onClick={() => router.push(backHref)}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#4F46E5", padding: 0 }}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--p, #4F46E5)", padding: 0 }}
               >
                 {backLabel}
               </button>
@@ -616,7 +616,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 }, 0);
               }}
               title="回 Dashboard（session 內容留存，可從對話列表重開）"
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#4F46E5", padding: 0 }}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--p, #4F46E5)", padding: 0 }}
             >
               ← Dashboard
             </button>
@@ -744,7 +744,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           <button
             data-testid="btn-pipeline-inputs"
             onClick={() => setInputsPanelOpen(true)}
-            style={{ ...btn("ghost"), color: "#3730A3", borderColor: "#C7D2FE" }}
+            style={{ ...btn("ghost"), color: "#3730A3", borderColor: "var(--pl, #C7D2FE)" }}
             title="宣告 pipeline 變數（讓 pipeline 可重用）"
           >
             🔣 Inputs ({state.pipeline.inputs?.length ?? 0})
@@ -870,7 +870,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
               onClick={() => setAutoPatrolModalOpen(true)}
               style={{
                 ...btn("ghost"),
-                border: boundPatrol ? "1px solid #94a3b8" : "1px solid #3182ce",
+                border: boundPatrol ? "1px solid #94a3b8" : "1px solid var(--p, #3182ce)",
                 color: boundPatrol ? "#475569" : "#2c5282",
                 background: boundPatrol ? "#fff" : "#ebf8ff",
                 fontWeight: 600,
@@ -892,7 +892,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
               onClick={() => setAutoCheckModalOpen(true)}
               style={{
                 ...btn("ghost"),
-                border: "1px solid #3182ce",
+                border: "1px solid var(--p, #3182ce)",
                 color: "#2c5282",
                 background: "#ebf8ff",
                 fontWeight: 600,
@@ -1323,7 +1323,7 @@ function btn(variant: "primary" | "ghost" | "success" | "danger", disabled = fal
   };
   switch (variant) {
     case "primary":
-      return { ...base, background: "#4F46E5", color: "#fff", borderColor: "#4F46E5" };
+      return { ...base, background: "var(--p, #4F46E5)", color: "#fff", borderColor: "var(--p, #4F46E5)" };
     case "success":
       return { ...base, background: "#16A34A", color: "#fff", borderColor: "#16A34A" };
     case "danger":

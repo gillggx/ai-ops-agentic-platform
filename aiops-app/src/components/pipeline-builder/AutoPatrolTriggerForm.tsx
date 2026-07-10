@@ -157,9 +157,9 @@ export default function AutoPatrolTriggerForm({ value, onChange, eventTypes, com
             onClick={() => setMode(m)}
             style={{
               flex: 1, padding: compact ? "8px 12px" : "10px 16px", borderRadius: 8, cursor: "pointer",
-              border: `2px solid ${value.mode === m ? "#6366f1" : "#e2e8f0"}`,
-              background: value.mode === m ? "#eef2ff" : "#fff",
-              color: value.mode === m ? "#4338ca" : "#4a5568",
+              border: `2px solid ${value.mode === m ? "var(--p, #6366f1)" : "#e2e8f0"}`,
+              background: value.mode === m ? "var(--pl, #eef2ff)" : "#fff",
+              color: value.mode === m ? "var(--pd, #4338ca)" : "#4a5568",
               fontWeight: value.mode === m ? 600 : 400, fontSize: 13,
               textAlign: "left",
             }}

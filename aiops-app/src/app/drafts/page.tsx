@@ -27,7 +27,7 @@ interface ShelfData {
   free: number;
 }
 
-const INDIGO = "#4F46E5";
+const INDIGO = "var(--p, #4F46E5)";
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "";
@@ -47,14 +47,14 @@ function KindTag({ kind }: { kind: string }) {
     kind === "pareto" ? "PARETO" : "PIPELINE";
   return (
     <span style={{ position: "absolute", left: 9, top: 9, fontSize: 9.5, fontWeight: 700,
-      letterSpacing: ".04em", padding: "2px 7px", borderRadius: 5, background: "#EEF2FF", color: INDIGO }}>
+      letterSpacing: ".04em", padding: "2px 7px", borderRadius: 5, background: "var(--pl, #EEF2FF)", color: INDIGO }}>
       {label}
     </span>
   );
 }
 
 function Thumb({ kind }: { kind: string }) {
-  const c = "#4F46E5", c2 = "#818CF8";
+  const c = "var(--p, #4F46E5)", c2 = "var(--p, #818CF8)";
   let art: React.ReactNode;
   if (kind === "bar" || kind === "pareto") {
     art = (
@@ -79,7 +79,7 @@ function Thumb({ kind }: { kind: string }) {
   } else if (kind === "panel") {
     art = (
       <svg width="150" height="60" viewBox="0 0 150 60">
-        <rect x="10" y="8" width="60" height="20" rx="2" fill="#EEF2FF" /><rect x="80" y="8" width="60" height="20" rx="2" fill="#EEF2FF" />
+        <rect x="10" y="8" width="60" height="20" rx="2" fill="var(--pl, #EEF2FF)" /><rect x="80" y="8" width="60" height="20" rx="2" fill="var(--pl, #EEF2FF)" />
         <rect x="10" y="34" width="130" height="18" rx="2" fill="#F1F5F9" />
         <polyline points="14,22 30,16 46,20 62,12" fill="none" stroke={c2} strokeWidth="1.5" />
       </svg>
@@ -234,7 +234,7 @@ export default function DraftsPage() {
               const isUsed = i < used, isPinned = i < marked;
               return <span key={i} style={{ width: 16, height: 8, borderRadius: 2,
                 background: isUsed ? INDIGO : "#E2E8F0",
-                boxShadow: isPinned ? "inset 0 0 0 2px #fff, 0 0 0 1px #4F46E5" : undefined }} />;
+                boxShadow: isPinned ? "inset 0 0 0 2px #fff, 0 0 0 1px var(--p, #4F46E5)" : undefined }} />;
             })}
           </div>
         </div>
@@ -283,7 +283,7 @@ export default function DraftsPage() {
               <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35, display: "-webkit-box",
                 WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{d.name || d.nl || "Chat 草稿"}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#64748B" }}>
-                {d.marked && <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 999, background: "#EEF2FF", color: INDIGO }}>已標記</span>}
+                {d.marked && <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 999, background: "var(--pl, #EEF2FF)", color: INDIGO }}>已標記</span>}
                 <span style={{ fontFamily: "ui-monospace,monospace" }}>{d.node_count} 節點</span>
                 <span style={{ width: 3, height: 3, borderRadius: "50%", background: "#CBD5E1" }} />
                 <span>{timeAgo(d.created_at)}</span>

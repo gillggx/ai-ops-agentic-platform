@@ -66,7 +66,7 @@ function Chip({ label, value, hint, accent }: {
       <div style={{ fontSize: 10, color: "#718096", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 700 }}>
         {label}
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: isPrimary ? "#2b6cb0" : "#1a202c", marginTop: 2 }}>
+      <div style={{ fontSize: 24, fontWeight: 700, color: isPrimary ? "var(--p, #2b6cb0)" : "#1a202c", marginTop: 2 }}>
         {value.toLocaleString()}
       </div>
       {hint && (

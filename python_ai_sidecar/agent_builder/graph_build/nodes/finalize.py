@@ -227,7 +227,8 @@ async def _maybe_generate_pipeline_name(
             get_llm_client().create(
                 system=(
                     "為一條資料分析 pipeline 取名。只輸出名稱本身，不要任何解釋："
-                    "繁體中文或英文、不超過 20 字、不加引號與標點、不用 emoji，"
+                    "繁體中文（臺灣用字，嚴禁任何簡體字，如「势/趋/监」都不可）或英文、"
+                    "不超過 20 字、不加引號與標點、不用 emoji，"
                     "要讓工程師一眼看出業務用途（例：EQP-01 OOC 次數檢查）。"
                 ),
                 messages=[{"role": "user", "content": f"需求：{flat_instr[:400]}"}],

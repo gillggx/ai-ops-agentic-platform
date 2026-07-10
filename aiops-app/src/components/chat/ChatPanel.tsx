@@ -1046,7 +1046,7 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                   fontSize: 13,
                   lineHeight: 1.6,
                   whiteSpace: "pre-wrap",
-                  background: msg.role === "user" ? "#2b6cb0" : "#1a202c",
+                  background: msg.role === "user" ? "var(--p, #2b6cb0)" : "#1a202c",
                   color: msg.role === "user" ? "#bee3f8" : "#e2e8f0",
                   border: msg.role === "agent" ? "1px solid #2d3748" : "none",
                 }}>

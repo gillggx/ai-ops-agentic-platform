@@ -114,7 +114,7 @@ function RightTabsBar({ tab, setRightTab }: { tab: RightTab; setRightTab: (t: Ri
       style={{
         display: "flex",
         borderBottom: "1px solid #e2e8f0",
-        background: "#f8fafc",
+        background: "var(--pn, #f8fafc)",
         flexShrink: 0,
       }}
     >
@@ -127,10 +127,10 @@ function RightTabsBar({ tab, setRightTab }: { tab: RightTab; setRightTab: (t: Ri
             padding: "8px 10px",
             fontSize: 12,
             fontWeight: tab === it.id ? 600 : 400,
-            color: tab === it.id ? "#2b6cb0" : "#64748b",
+            color: tab === it.id ? "var(--p, #2b6cb0)" : "#64748b",
             background: tab === it.id ? "#fff" : "transparent",
             border: "none",
-            borderBottom: tab === it.id ? "2px solid #2b6cb0" : "2px solid transparent",
+            borderBottom: tab === it.id ? "2px solid var(--p, #2b6cb0)" : "2px solid transparent",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -246,7 +246,7 @@ function InMemoryRunCard({ runResult }: { runResult: ExecuteResponse }) {
               borderRadius: 4,
               padding: "4px 8px",
               fontSize: 10,
-              background: res.status === "success" ? "#f0fdf4" : res.status === "failed" ? "#fef2f2" : "#f8fafc",
+              background: res.status === "success" ? "#f0fdf4" : res.status === "failed" ? "#fef2f2" : "var(--pn, #f8fafc)",
             }}
           >
             <span style={{ fontWeight: 600, color: "#0f172a" }}>{nodeId}</span>
@@ -293,7 +293,7 @@ function RunHistoryRow({ run }: { run: PipelineRunSummary }) {
     run.status === "success" ? "#f0fdf4"
     : run.status === "failed" ? "#fef2f2"
     : run.status === "skipped" ? "#fefce8"
-    : "#f8fafc";
+    : "var(--pn, #f8fafc)";
   return (
     <div
       style={{

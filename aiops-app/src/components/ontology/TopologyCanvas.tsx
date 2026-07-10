@@ -121,7 +121,7 @@ function CenterNodeComp({ data }: NodeProps) {
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0, width: 1, height: 1 }} />
       <div style={{
         width: CENTER_SIZE, height: CENTER_SIZE, borderRadius: "50%",
-        background: "#ebf4ff",
+        background: "var(--pl, #ebf4ff)",
         border: `2.5px solid ${d.accentColor}`,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         boxShadow: d.isSelected ? `0 0 0 4px ${d.accentColor}30, 0 2px 10px #0000001a` : "0 2px 8px #0000001a",
@@ -149,7 +149,7 @@ function CardNodeComp({ data }: NodeProps) {
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0, width: 1, height: 1 }} />
       <div style={{
         width: NODE_W, height: NODE_H,
-        background: d.dimmed ? "#f7f8fc" : "#ffffff",
+        background: d.dimmed ? "var(--ws, #f7f8fc)" : "#ffffff",
         border: `1px solid ${d.isSelected ? d.accentColor : "#e2e8f0"}`,
         borderRadius: 8,
         boxShadow: d.isSelected ? `0 0 0 2px ${d.accentColor}40, 0 2px 6px #0000001a` : "0 1px 4px #0000001a",
@@ -493,7 +493,7 @@ function FdcDetail({ fdc }: { fdc: TopologySnapshot["fdc"] }) {
           {fdc.fault_class}
         </span>
         <span style={{ padding: "2px 10px", borderRadius: 10, fontSize: 10, fontWeight: 600,
-          background: "#f7f8fc", color: "#718096", border: "1px solid #e2e8f0" }}>
+          background: "var(--pn, #f7f8fc)", color: "#718096", border: "1px solid #e2e8f0" }}>
           {fdc.fault_code}
         </span>
       </div>
@@ -544,7 +544,7 @@ function OcapDetail({ ocap }: { ocap: TopologySnapshot["ocap"] }) {
           </span>
         )}
       </div>
-      <div style={{ fontSize: 11, fontFamily: "monospace", color: "#2b6cb0", marginBottom: 8 }}>{ocap.action_code}</div>
+      <div style={{ fontSize: 11, fontFamily: "monospace", color: "var(--p, #2b6cb0)", marginBottom: 8 }}>{ocap.action_code}</div>
       <div style={{ fontSize: 12, color: "#4a5568", marginBottom: 10, lineHeight: 1.6 }}>{ocap.description}</div>
       <DetailRow label="觸發來源" value={ocap.triggered_by.toUpperCase()} />
     </div>
@@ -584,10 +584,10 @@ export function TopologyCanvas({ snapshot, centerType = "LOT", centerId, loading
     }
   }
 
-  const accentForSelected = selectedNodeId ? (NODE_COLORS[selectedNodeId] ?? NODE_COLORS[`${selectedNodeId}_PASS`] ?? "#2b6cb0") : "#2b6cb0";
+  const accentForSelected = selectedNodeId ? (NODE_COLORS[selectedNodeId] ?? NODE_COLORS[`${selectedNodeId}_PASS`] ?? "var(--p, #2b6cb0)") : "var(--p, #2b6cb0)";
 
   return (
-    <div style={{ display: "flex", flex: 1, minHeight: 0, background: "#f7f8fc" }}>
+    <div style={{ display: "flex", flex: 1, minHeight: 0, background: "var(--ws, #f7f8fc)" }}>
       {/* Override React Flow default node container styles so our custom HTML is fully visible */}
       <style>{`
         .react-flow__node { background: transparent !important; border: none !important; padding: 0 !important; border-radius: 0 !important; font-size: inherit !important; color: inherit !important; }
@@ -599,7 +599,7 @@ export function TopologyCanvas({ snapshot, centerType = "LOT", centerId, loading
       {/* ── React Flow canvas ── */}
       <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
         {loading && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#a0aec0", fontSize: 13, zIndex: 10, background: "#f7f8fc" }}>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#a0aec0", fontSize: 13, zIndex: 10, background: "var(--ws, #f7f8fc)" }}>
             載入製程快照...
           </div>
         )}
@@ -621,7 +621,7 @@ export function TopologyCanvas({ snapshot, centerType = "LOT", centerId, loading
             nodesFocusable={false}
             panOnDrag={true}
             zoomOnScroll={true}
-            style={{ background: "#f7f8fc", width: "100%", height: "100%" }}
+            style={{ background: "var(--ws, #f7f8fc)", width: "100%", height: "100%" }}
           >
             <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="#cbd5e0" />
           </ReactFlow>

@@ -71,7 +71,7 @@ export default function PipelineResultsPanel({ open, onClose, summary, nodeResul
         style={{
           padding: "10px 14px",
           borderBottom: "1px solid #E2E8F0",
-          background: "#F8FAFC",
+          background: "var(--pn, #F8FAFC)",
           display: "flex",
           alignItems: "center",
           gap: 10,
@@ -134,12 +134,12 @@ export default function PipelineResultsPanel({ open, onClose, summary, nodeResul
                     display: "flex",
                     gap: 8,
                     alignItems: "center",
-                    background: "#F8FAFC",
+                    background: "var(--pn, #F8FAFC)",
                   }}
                 >
                   <span
                     style={{
-                      background: "#EFF6FF",
+                      background: "var(--pl, #EFF6FF)",
                       color: "#1E40AF",
                       padding: "1px 7px",
                       borderRadius: 10,
@@ -229,9 +229,9 @@ export default function PipelineResultsPanel({ open, onClose, summary, nodeResul
                           fontSize: 11,
                           fontWeight: 600,
                           background: "transparent",
-                          color: active ? "#4F46E5" : "#64748B",
+                          color: active ? "var(--p, #4F46E5)" : "#64748B",
                           border: "none",
-                          borderBottom: `2px solid ${active ? "#4F46E5" : "transparent"}`,
+                          borderBottom: `2px solid ${active ? "var(--p, #4F46E5)" : "transparent"}`,
                           cursor: "pointer",
                           letterSpacing: "0.02em",
                           marginBottom: -1,
@@ -271,7 +271,7 @@ export default function PipelineResultsPanel({ open, onClose, summary, nodeResul
               letterSpacing: "0.04em",
               textTransform: "uppercase",
               fontWeight: 600,
-              background: "#F7F8FC",
+              background: "var(--pn, #F7F8FC)",
               borderRadius: 6,
             }}
           >
@@ -409,13 +409,13 @@ function ChartCard({
           display: "flex",
           gap: 8,
           alignItems: "center",
-          background: "#F8FAFC",
+          background: "var(--pn, #F8FAFC)",
         }}
       >
         <span
           data-testid={`result-chart-seq-${chart.node_id}`}
           style={{
-            background: "#EEF2FF",
+            background: "var(--pl, #EEF2FF)",
             color: "#3730A3",
             padding: "1px 7px",
             borderRadius: 10,

@@ -83,7 +83,7 @@ export default function PipelineInputsPanel({ open, onClose }: Props) {
           style={{
             padding: "12px 16px",
             borderBottom: "1px solid #E2E8F0",
-            background: "#F8FAFC",
+            background: "var(--pn, #F8FAFC)",
             display: "flex",
             alignItems: "center",
             gap: 10,
@@ -112,7 +112,7 @@ export default function PipelineInputsPanel({ open, onClose }: Props) {
                 color: "#94A3B8",
                 fontSize: 11,
                 textAlign: "center",
-                background: "#F8FAFC",
+                background: "var(--pn, #F8FAFC)",
                 borderRadius: 4,
                 marginBottom: 12,
               }}
@@ -125,7 +125,7 @@ export default function PipelineInputsPanel({ open, onClose }: Props) {
               style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 12 }}
             >
               <thead>
-                <tr style={{ background: "#F8FAFC" }}>
+                <tr style={{ background: "var(--pn, #F8FAFC)" }}>
                   {["name", "type", "required", "default", "example", "description", ""].map((h) => (
                     <th
                       key={h}
@@ -220,7 +220,7 @@ export default function PipelineInputsPanel({ open, onClose }: Props) {
                 onClick={addInput}
                 style={{
                   padding: "6px 16px",
-                  background: "#4F46E5",
+                  background: "var(--p, #4F46E5)",
                   color: "#fff",
                   border: "none",
                   borderRadius: 4,

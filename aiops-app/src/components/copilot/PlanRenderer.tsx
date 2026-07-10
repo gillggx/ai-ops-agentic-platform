@@ -37,7 +37,7 @@ const STATUS_GLYPH: Record<PlanItem["status"], string> = {
 
 const STATUS_COLOR: Record<PlanItem["status"], string> = {
   pending: "#a0aec0",
-  in_progress: "#2b6cb0",
+  in_progress: "var(--p, #2b6cb0)",
   done: "#38a169",
   failed: "#e53e3e",
 };
@@ -55,7 +55,7 @@ export function PlanRenderer({ items }: Props) {
       padding: "8px 12px",
       borderRadius: 8,
       border: "1px solid #e2e8f0",
-      background: "#f7f8fc",
+      background: "var(--pn, #f7f8fc)",
       fontSize: 12,
     }}>
       <div style={{

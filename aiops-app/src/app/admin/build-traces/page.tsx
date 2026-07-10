@@ -26,9 +26,9 @@ const T = {
   borderStrong: "#cbd5e1",
 
   // Accent
-  accent: "#3b82f6",
-  accentSoft: "#eff6ff",
-  accentBorder: "#bfdbfe",
+  accent: "var(--p, #3b82f6)",
+  accentSoft: "var(--pl, #eff6ff)",
+  accentBorder: "var(--p, #bfdbfe)",
 
   // Status
   success: "#059669",

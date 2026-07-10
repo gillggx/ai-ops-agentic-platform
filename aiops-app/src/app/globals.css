@@ -20,7 +20,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, sans-serif; background: #f7f8fc; color: #1a202c; }
+body { margin: 0; font-family: system-ui, sans-serif; background: var(--ws, #f7f8fc); color: #1a202c; }
 a { color: inherit; }
 
 /* ── Phase 11 Skill Document tokens ──────────────────────────────────────

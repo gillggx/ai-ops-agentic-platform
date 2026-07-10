@@ -323,7 +323,7 @@ function makeLog(icon: string, text: string, level: LogLevel): LogEntry {
 }
 
 const LEVEL_COLOR: Record<LogLevel, string> = {
-  info:     "#2b6cb0",
+  info:     "var(--p, #2b6cb0)",
   tool:     "#d69e2e",
   thinking: "#718096",
   memory:   "#805ad5",
@@ -382,7 +382,7 @@ const MD_CSS = `
   width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0;
 }
 .md-agent th {
-  background: #ebf4ff; color: #2b6cb0; font-weight: 600;
+  background: var(--pl, #ebf4ff); color: var(--pd, #2b6cb0); font-weight: 600;
   padding: 4px 8px; text-align: left; border: 1px solid #bee3f8;
 }
 .md-agent td {
@@ -392,7 +392,7 @@ const MD_CSS = `
 .md-agent strong { font-weight: 700; color: #1a202c; }
 .md-agent blockquote {
   border-left: 3px solid #bee3f8; padding: 4px 10px;
-  margin: 6px 0; color: #4a5568; background: #ebf4ff20;
+  margin: 6px 0; color: #4a5568; background: var(--pl, #ebf4ff);
 }
 .md-agent hr { border: none; border-top: 1px solid #e2e8f0; margin: 8px 0; }
 `;
@@ -484,7 +484,7 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
       <div style={{
         display: "inline-flex", alignItems: "center", gap: 4,
         padding: "2px 8px", marginTop: 4, borderRadius: 10,
-        fontSize: 10, color: "#718096", background: "#f7f8fc",
+        fontSize: 10, color: "#718096", background: "var(--pn, #f7f8fc)",
       }}>
         <span>{rated === 1 ? t("feedbackDoneHelpful") : t("feedbackDoneInaccurate")}</span>
       </div>
@@ -567,9 +567,9 @@ function FeedbackReasonModal({ onConfirm, onCancel }: {
               style={{
                 padding: "6px 12px", borderRadius: 14, fontSize: 12,
                 cursor: "pointer",
-                border: `1px solid ${reason === r.code ? "#2b6cb0" : "#cbd5e0"}`,
-                background: reason === r.code ? "#ebf4ff" : "#fff",
-                color: reason === r.code ? "#2b6cb0" : "#4a5568",
+                border: `1px solid ${reason === r.code ? "var(--p, #2b6cb0)" : "#cbd5e0"}`,
+                background: reason === r.code ? "var(--pl, #ebf4ff)" : "#fff",
+                color: reason === r.code ? "var(--p, #2b6cb0)" : "#4a5568",
                 fontWeight: reason === r.code ? 600 : 400,
               }}
             >
@@ -600,7 +600,7 @@ function FeedbackReasonModal({ onConfirm, onCancel }: {
             disabled={!reason}
             onClick={() => reason && onConfirm(reason, text)}
             style={{ padding: "6px 14px", fontSize: 12, border: "none",
-                     background: reason ? "#2b6cb0" : "#a0aec0", color: "#fff",
+                     background: reason ? "var(--p, #2b6cb0)" : "#a0aec0", color: "#fff",
                      borderRadius: 4, cursor: reason ? "pointer" : "not-allowed" }}
           >{t("send")}</button>
         </div>
@@ -2171,8 +2171,8 @@ export function AIAgentPanel({
             <span style={{
               fontSize: 11,
               padding: "2px 8px",
-              background: "#ebf4ff",
-              color: "#2b6cb0",
+              background: "var(--pl, #ebf4ff)",
+              color: "var(--p, #2b6cb0)",
               borderRadius: 10,
               fontWeight: 500,
             }}>
@@ -2222,9 +2222,9 @@ export function AIAgentPanel({
             padding: "6px 10px",
             borderRadius: 6,
             fontSize: 11,
-            background: autoRun.status === "error" ? "#fed7d7" : "#ebf4ff",
-            color: autoRun.status === "error" ? "#c53030" : "#2b6cb0",
-            border: `1px solid ${autoRun.status === "error" ? "#feb2b2" : "#bee3f8"}`,
+            background: autoRun.status === "error" ? "#fed7d7" : "var(--pl, #ebf4ff)",
+            color: autoRun.status === "error" ? "#c53030" : "var(--p, #2b6cb0)",
+            border: `1px solid ${autoRun.status === "error" ? "#feb2b2" : "var(--pl, #bee3f8)"}`,
             display: "flex", alignItems: "center", gap: 6,
           }}>
             <span>
@@ -2242,13 +2242,13 @@ export function AIAgentPanel({
               onClick={() => setActiveTab(tab)}
               style={{
                 padding: "5px 12px",
-                background: activeTab === tab ? "#ebf4ff" : "transparent",
+                background: activeTab === tab ? "var(--pl, #ebf4ff)" : "transparent",
                 border: "none",
                 borderRadius: "6px 6px 0 0",
                 cursor: "pointer",
                 fontSize: 12,
                 fontWeight: activeTab === tab ? 600 : 400,
-                color: activeTab === tab ? "#2b6cb0" : "#718096",
+                color: activeTab === tab ? "var(--p, #2b6cb0)" : "#718096",
                 display: "flex",
                 alignItems: "center",
                 gap: 4,
@@ -2551,10 +2551,10 @@ export function AIAgentPanel({
                   padding: "4px 10px",
                   borderRadius: 6,
                   border: "1px solid #e2e8f0",
-                  background: "#f7f8fc",
+                  background: "var(--pn, #f7f8fc)",
                   fontSize: 11, color: "#718096",
                 }}>
-                                    <span style={{ fontFamily: "monospace", color: "#2b6cb0" }}>{msg.mcpResult.mcp_name}</span>
+                                    <span style={{ fontFamily: "monospace", color: "var(--p, #2b6cb0)" }}>{msg.mcpResult.mcp_name}</span>
                   <span>· {t("mcpResultLoaded")}</span>
                 </div>
               ) : (
@@ -2571,7 +2571,7 @@ export function AIAgentPanel({
                       borderRadius: "12px 12px 12px 2px",
                       fontSize: 13,
                       lineHeight: 1.6,
-                      background: "#f7f8fc",
+                      background: "var(--pn, #f7f8fc)",
                       color: "#1a202c",
                       border: msg.role === "agent" ? "1px solid #e2e8f0" : "none",
                     }}>
@@ -2602,14 +2602,14 @@ export function AIAgentPanel({
           {loading && (
             <div style={{ display: "flex", justifyContent: "flex-start" }}>
               {activeRole ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 13px", background: "#f7f8fc", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 2px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 13px", background: "var(--pn, #f7f8fc)", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 2px" }}>
                   <span style={{ fontSize: 10.5, fontWeight: 700, color: "#fff", background: ROLE_COLOR[activeRole.role] ?? "#4F46E5", padding: "2px 8px", borderRadius: 6, letterSpacing: 0.3 }}>
                     {activeRole.role}
                   </span>
                   <span style={{ fontSize: 12, color: "#64748B" }}>{activeRole.text}</span>
                 </div>
               ) : (
-                <div style={{ padding: "10px 14px", background: "#f7f8fc", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 2px", fontSize: 12, color: "#a0aec0" }}>
+                <div style={{ padding: "10px 14px", background: "var(--pn, #f7f8fc)", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 2px", fontSize: 12, color: "#a0aec0" }}>
                   ● ● ●
                 </div>
               )}
@@ -2627,7 +2627,7 @@ export function AIAgentPanel({
                   ? { background: "#f0fff4", color: "#276749", borderColor: "#9ae6b4" }
                   : reflection.status === "amendment"
                   ? { background: "#fffff0", color: "#744210", borderColor: "#f6e05e" }
-                  : { background: "#ebf4ff", color: "#2b6cb0", borderColor: "#bee3f8" }),
+                  : { background: "var(--pl, #ebf4ff)", color: "var(--p, #2b6cb0)", borderColor: "var(--pl, #bee3f8)" }),
               }}>
                 {reflection.status === "running" && t("reflectionRunning")}
                 {reflection.status === "pass"    && t("reflectionVerified")}
@@ -2666,11 +2666,11 @@ export function AIAgentPanel({
               alignItems: "center",
               gap: 6,
               padding: "3px 4px 3px 10px",
-              background: "#ede9fe",
-              border: "1px solid #c4b5fd",
+              background: "var(--pl, #ede9fe)",
+              border: "1px solid var(--pl, #c4b5fd)",
               borderRadius: 12,
               fontSize: 11,
-              color: "#4c1d95",
+              color: "var(--pd, #4c1d95)",
               fontWeight: 500,
             }}
           >
@@ -2745,7 +2745,7 @@ export function AIAgentPanel({
             rows={3}
             style={{
               flex: 1,
-              background: "#f7f8fc",
+              background: "var(--pn, #f7f8fc)",
               border: "1px solid #e2e8f0",
               borderRadius: 8,
               color: "#1a202c",
@@ -2762,7 +2762,7 @@ export function AIAgentPanel({
             onClick={() => sendMessage(input)}
             disabled={loading || !input.trim()}
             style={{
-              background: loading || !input.trim() ? "#e2e8f0" : "#2b6cb0",
+              background: loading || !input.trim() ? "#e2e8f0" : "var(--p, #2b6cb0)",
               color: loading || !input.trim() ? "#a0aec0" : "#fff",
               border: "none",
               borderRadius: 8,

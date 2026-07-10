@@ -17,7 +17,7 @@ export function DataExplorerPanel({ state, onClose }: Props) {
   const { flatData, metadata, uiConfig, queryInfo } = state;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f7f8fc" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--pn, #f7f8fc)" }}>
       {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -28,7 +28,7 @@ export function DataExplorerPanel({ state, onClose }: Props) {
           <span style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "#1a202c" }}>Data Explorer</span>
           <span style={{
             fontSize: "var(--fs-xs)", padding: "2px var(--sp-sm)", borderRadius: 10,
-            background: "#ebf4ff", color: "#2b6cb0", fontWeight: 600,
+            background: "var(--pl, #ebf4ff)", color: "var(--p, #2b6cb0)", fontWeight: 600,
           }}>
             Interactive
           </span>
@@ -76,7 +76,7 @@ export function DataExplorerPanel({ state, onClose }: Props) {
             <StatCard label="Total Events" value={String(metadata.total_events ?? 0)} />
             <StatCard label="OOC Count" value={String(metadata.ooc_count ?? 0)} color="#e53e3e" />
             <StatCard label="OOC Rate" value={`${metadata.ooc_rate ?? 0}%`} color="#dd6b20" />
-            <StatCard label="Datasets" value={String(metadata.available_datasets?.length ?? 0)} color="#2b6cb0" />
+            <StatCard label="Datasets" value={String(metadata.available_datasets?.length ?? 0)} color="var(--p, #2b6cb0)" />
           </div>
         )}
 

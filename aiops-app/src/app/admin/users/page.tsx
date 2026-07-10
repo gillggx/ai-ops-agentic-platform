@@ -97,7 +97,7 @@ export default function UsersAdminPage() {
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
-              <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+              <tr style={{ background: "var(--pn, #f8fafc)", borderBottom: "1px solid #e2e8f0" }}>
                 <th style={th}>ID</th>
                 <th style={th}>使用者</th>
                 <th style={th}>Email</th>

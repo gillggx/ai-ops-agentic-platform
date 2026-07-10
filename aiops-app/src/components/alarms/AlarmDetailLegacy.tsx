@@ -292,11 +292,11 @@ function DRAccordion({ dr, index, total }: { dr: DiagnosticResult; index: number
 function AlarmSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{
-      border: "1px solid #e2e8f0", borderLeft: "4px solid #4f46e5",
+      border: "1px solid #e2e8f0", borderLeft: "4px solid var(--p, #4f46e5)",
       borderRadius: 6, padding: "12px 14px", marginBottom: 12, background: "#fbfcff",
     }}>
       <div style={{
-        fontSize: 11, fontWeight: 700, color: "#4f46e5",
+        fontSize: 11, fontWeight: 700, color: "var(--p, #4f46e5)",
         textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6,
       }}>{label}</div>
       {children}
@@ -417,7 +417,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
               </div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#4a5568", fontFamily: "ui-monospace, monospace" }}>
                 {alarm.check_result.label && <span>{t.rich("alarmDetail.measured", { label: alarm.check_result.label, b: chunks => <b>{chunks}</b> })}</span>}
-                <span>{t.rich("alarmDetail.actualValue", { v: String(alarm.check_result.value ?? "—"), b: chunks => <b style={{ color: "#1d4ed8" }}>{chunks}</b> })}</span>
+                <span>{t.rich("alarmDetail.actualValue", { v: String(alarm.check_result.value ?? "—"), b: chunks => <b style={{ color: "var(--p, #1d4ed8)" }}>{chunks}</b> })}</span>
                 <span>{t.rich("alarmDetail.thresholdExpr", { op: alarm.check_result.operator ?? "", v: String(alarm.check_result.threshold ?? "—"), b: chunks => <b>{chunks}</b> })}</span>
                 {alarm.check_result.evidence_rows != null && <span style={{ color: "#94a3b8" }}>{t("alarmDetail.scanned", { n: alarm.check_result.evidence_rows })}</span>}
               </div>
@@ -590,7 +590,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
 const _DISPOSITIONS: Array<{ key: string; labelKey: string; tone: string }> = [
   { key: "release", labelKey: "dispo.release", tone: "#16a34a" },
   { key: "hold",    labelKey: "dispo.hold",    tone: "#d97706" },
-  { key: "rerun",   labelKey: "dispo.rerun",   tone: "#2563eb" },
+  { key: "rerun",   labelKey: "dispo.rerun",   tone: "var(--p, #2563eb)" },
   { key: "scrap",   labelKey: "dispo.scrap",   tone: "#dc2626" },
 ];
 

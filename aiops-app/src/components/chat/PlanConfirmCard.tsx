@@ -92,7 +92,7 @@ export function PlanConfirmCard({ planSummary, phases, onDecide }: Props) {
           style={{
             padding: "6px 16px", borderRadius: 5, fontSize: 12.5, fontWeight: 700,
             cursor: busy ? "not-allowed" : "pointer", border: "none",
-            background: busy ? "#2d3748" : "#2b6cb0", color: "#fff",
+            background: busy ? "#2d3748" : "var(--p, #2b6cb0)", color: "#fff",
           }}>
           {busy === "confirm" ? "建構中…" : nEdited > 0 ? `確認（含 ${nEdited} 處修改）開始建構` : "確認，開始建構"}
         </button>

@@ -155,7 +155,7 @@ export default function HandoverModal({
                 type="button"
                 disabled={!newGoal.trim() || !!acting}
                 onClick={() => handle("edit_goal", newGoal.trim())}
-                style={btnStyle("#3b82f6", "#fff", "transparent")}
+                style={btnStyle("var(--p, #3b82f6)", "#fff", "transparent")}
               >
                 送出新目標再試
               </button>
@@ -225,7 +225,7 @@ function btnStyle(bg: string, fg: string, border: string): React.CSSProperties {
   };
 }
 
-function optionBtn(bg = "#f8fafc", color = "#0f172a"): React.CSSProperties {
+function optionBtn(bg = "var(--pn, #f8fafc)", color = "#0f172a"): React.CSSProperties {
   return {
     background: bg,
     color,

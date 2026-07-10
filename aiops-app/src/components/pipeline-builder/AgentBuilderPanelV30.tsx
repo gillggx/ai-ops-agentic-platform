@@ -513,7 +513,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
             <div key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: "5px 14px", fontSize: 11.5, cursor: "pointer",
               fontWeight: activeTab === tab ? 600 : 400,
-              color: activeTab === tab ? "#2563eb" : "#8a877e",
+              color: activeTab === tab ? "var(--p, #2563eb)" : "#8a877e",
               background: activeTab === tab ? "#fafafa" : "transparent",
               border: activeTab === tab ? "1px solid #e2e8f0" : "1px solid transparent",
               borderBottom: "none", borderRadius: "7px 7px 0 0",
@@ -563,12 +563,12 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
                 padding: "7px 10px",
                 borderRadius: 8,
                 background:
-                  ln.role === "user" ? "#eff6ff"
+                  ln.role === "user" ? "var(--pl, #eff6ff)"
                   : ln.role === "error" ? "#fef2f2"
                   : ln.role === "info" ? "#f1f5f9"
                   : "#fff",
                 border: `1px solid ${
-                  ln.role === "user" ? "#bfdbfe"
+                  ln.role === "user" ? "var(--p, #bfdbfe)"
                   : ln.role === "error" ? "#fca5a5"
                   : ln.role === "info" ? "#cbd5e1"
                   : "#e2e8f0"
@@ -677,7 +677,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
           disabled={runningRef.current || !input.trim()}
           style={{
             padding: "0 16px",
-            background: runningRef.current || !input.trim() ? "#cbd5e1" : "#2563eb",
+            background: runningRef.current || !input.trim() ? "#cbd5e1" : "var(--p, #2563eb)",
             color: "#fff",
             border: "none",
             borderRadius: 5,

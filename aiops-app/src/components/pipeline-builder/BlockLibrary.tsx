@@ -241,7 +241,7 @@ export default function BlockLibrary({ readOnly }: Props) {
                             alignItems: "center",
                             justifyContent: "center",
                             cursor: "pointer",
-                            color: hoveredBlock === b.name ? "#4F46E5" : "#94A3B8",
+                            color: hoveredBlock === b.name ? "var(--p, #4F46E5)" : "#94A3B8",
                             fontSize: 11,
                             fontWeight: 700,
                             flexShrink: 0,

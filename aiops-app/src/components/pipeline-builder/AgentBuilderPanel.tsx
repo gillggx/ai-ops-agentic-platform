@@ -716,7 +716,7 @@ export default function AgentBuilderPanel({
             rows={2}
             style={{
               flex: 1,
-              background: "#f7f8fc",
+              background: "var(--pn, #f7f8fc)",
               border: "1px solid #e2e8f0",
               borderRadius: 8,
               color: "#1a202c",
@@ -731,7 +731,7 @@ export default function AgentBuilderPanel({
             onClick={() => sendMessage(input)}
             disabled={running || !input.trim()}
             style={{
-              background: running || !input.trim() ? "#e2e8f0" : "#2b6cb0",
+              background: running || !input.trim() ? "#e2e8f0" : "var(--p, #2b6cb0)",
               color: running || !input.trim() ? "#a0aec0" : "#fff",
               border: "none",
               borderRadius: 8,
@@ -754,7 +754,7 @@ function MessageRow({ line }: { line: ChatLine }) {
   if (line.role === "user") {
     return (
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <div style={{ maxWidth: "90%", padding: "8px 12px", borderRadius: "12px 12px 2px 12px", fontSize: 13, background: "#2b6cb0", color: "#fff", whiteSpace: "pre-wrap" }}>
+        <div style={{ maxWidth: "90%", padding: "8px 12px", borderRadius: "12px 12px 2px 12px", fontSize: 13, background: "var(--p, #2b6cb0)", color: "#fff", whiteSpace: "pre-wrap" }}>
           {line.text}
         </div>
       </div>
@@ -820,7 +820,7 @@ function MessageRow({ line }: { line: ChatLine }) {
   // agent default
   return (
     <div style={{ display: "flex", justifyContent: "flex-start" }}>
-      <div style={{ maxWidth: "90%", padding: "9px 12px", borderRadius: "12px 12px 12px 2px", fontSize: 13, background: "#f7f8fc", color: "#1a202c", border: "1px solid #e2e8f0", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+      <div style={{ maxWidth: "90%", padding: "9px 12px", borderRadius: "12px 12px 12px 2px", fontSize: 13, background: "var(--pn, #f7f8fc)", color: "#1a202c", border: "1px solid #e2e8f0", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
         {line.text}
       </div>
     </div>

@@ -104,10 +104,10 @@ export default function PbPipelineCard({ card, onExpand, compact = false }: Prop
           gap: 8,
           padding: "8px 12px",
           borderBottom: "1px solid #E2E8F0",
-          background: "#F8FAFC",
+          background: "var(--pn, #F8FAFC)",
         }}
       >
-        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#4F46E5", background: "#EEF2FF",
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--p, #4F46E5)", background: "var(--pl, #EEF2FF)",
                        padding: "1px 6px", borderRadius: 4, letterSpacing: 0.5 }}>
           {isAdHoc ? "PIPELINE" : "SKILL"}
         </span>
@@ -127,9 +127,9 @@ export default function PbPipelineCard({ card, onExpand, compact = false }: Prop
               padding: "3px 10px",
               fontSize: 10,
               fontWeight: 600,
-              border: "1px solid #2B6CB0",
+              border: "1px solid var(--p, #2B6CB0)",
               borderRadius: 10,
-              background: "#2B6CB0",
+              background: "var(--p, #2B6CB0)",
               color: "#fff",
               cursor: "pointer",
               flexShrink: 0,
@@ -211,7 +211,7 @@ function ChartList({ charts }: { charts: PipelineChartSummary[] }) {
                 fontSize: 10,
                 border: "1px solid #E2E8F0",
                 borderRadius: 4,
-                background: view === v ? "#2B6CB0" : "#fff",
+                background: view === v ? "var(--p, #2B6CB0)" : "#fff",
                 color: view === v ? "#fff" : "#64748B",
                 cursor: "pointer",
                 fontWeight: view === v ? 600 : 400,
@@ -234,9 +234,9 @@ function ChartList({ charts }: { charts: PipelineChartSummary[] }) {
                   padding: "4px 10px",
                   fontSize: 11,
                   border: "none",
-                  borderBottom: activeIdx === i ? "2px solid #2B6CB0" : "2px solid transparent",
+                  borderBottom: activeIdx === i ? "2px solid var(--p, #2B6CB0)" : "2px solid transparent",
                   background: "transparent",
-                  color: activeIdx === i ? "#2B6CB0" : "#64748B",
+                  color: activeIdx === i ? "var(--p, #2B6CB0)" : "#64748B",
                   cursor: "pointer",
                   fontWeight: activeIdx === i ? 600 : 400,
                 }}
@@ -411,7 +411,7 @@ function actionBtnStyle(variant: "primary" | "secondary" | "done"): React.CSSPro
     border: "1px solid",
   };
   if (variant === "primary") {
-    return { ...base, background: "#2B6CB0", color: "#fff", borderColor: "#2B6CB0" };
+    return { ...base, background: "var(--p, #2B6CB0)", color: "#fff", borderColor: "var(--p, #2B6CB0)" };
   }
   if (variant === "done") {
     return { ...base, background: "#F0FDF4", color: "#166534", borderColor: "#BBF7D0", cursor: "default" };

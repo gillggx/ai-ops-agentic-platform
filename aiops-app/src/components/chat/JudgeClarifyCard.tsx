@@ -29,7 +29,7 @@ interface Props {
 
 const ACTION_LABEL: Record<JudgeAction, { label: string; color: string }> = {
   continue: { label: "繼續", color: "#38a169" },
-  replan:   { label: "重來", color: "#2b6cb0" },
+  replan:   { label: "重來", color: "var(--p, #2b6cb0)" },
   cancel:   { label: "放棄", color: "#e53e3e" },
 };
 
@@ -44,7 +44,7 @@ export function JudgeClarifyCard({ data, onPick }: Props) {
       <div style={{
         marginBottom: 4, padding: "6px 12px",
         borderRadius: 8, border: "1px solid #e2e8f0",
-        background: "#f7f8fc", fontSize: 12,
+        background: "var(--pn, #f7f8fc)", fontSize: 12,
         color: "#718096",
       }}>
         <span style={{ marginRight: 6 }}>⚠</span>
@@ -67,7 +67,7 @@ export function JudgeClarifyCard({ data, onPick }: Props) {
     <div style={{
       marginBottom: 4, padding: "8px 12px",
       borderRadius: 8, border: "1px solid #e2e8f0",
-      background: "#f7f8fc", fontSize: 12,
+      background: "var(--pn, #f7f8fc)", fontSize: 12,
     }}>
       {/* Header: matches PlanRenderer */}
       <div style={{

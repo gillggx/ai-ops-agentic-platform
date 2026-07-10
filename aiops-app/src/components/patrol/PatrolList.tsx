@@ -47,7 +47,7 @@ export function PatrolList({ items, selected, onSelect }: Props) {
     }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
-          <tr style={{ background: "#f7f8fc" }}>
+          <tr style={{ background: "var(--pn, #f7f8fc)" }}>
             {HEADERS.map((h) => (
               <th key={h.key} style={{
                 padding: "9px 12px",
@@ -72,7 +72,7 @@ export function PatrolList({ items, selected, onSelect }: Props) {
                 onClick={() => onSelect(item)}
                 style={{
                   cursor: "pointer",
-                  background: isActive ? "#ebf8ff" : "transparent",
+                  background: isActive ? "var(--pl, #ebf8ff)" : "transparent",
                   borderBottom: "1px solid #f0f4f8",
                 }}
               >
@@ -118,12 +118,12 @@ function ResultBadge({ item }: { item: PatrolItem }) {
     return <span style={badge("#c53030", "#fff5f5")}>{item.status}</span>;
   }
   if (item.steps_total === 0) {
-    return <span style={badge("#718096", "#f7f8fc")}>no-op</span>;
+    return <span style={badge("#718096", "var(--pn, #f7f8fc)")}>no-op</span>;
   }
   if (item.steps_passed > 0) {
     return <span style={badge("#22543d", "#f0fff4")}>step pass</span>;
   }
-  return <span style={badge("#718096", "#f7f8fc")}>{item.status}</span>;
+  return <span style={badge("#718096", "var(--pn, #f7f8fc)")}>{item.status}</span>;
 }
 
 function badge(color: string, bg: string): React.CSSProperties {
@@ -148,7 +148,7 @@ function eventChip(eventType: string | null): React.CSSProperties {
     fontWeight: 700,
     padding: "2px 7px",
     borderRadius: 4,
-    color: isOOC ? "#744210" : "#2b6cb0",
+    color: isOOC ? "#744210" : "var(--p, #2b6cb0)",
     background: isOOC ? "#fefcbf" : "#ebf8ff",
   };
 }

@@ -50,7 +50,7 @@ export default function EdgeInspector({ blockCatalog, readOnly }: Props) {
         style={{
           padding: "8px 14px",
           borderBottom: "1px solid #E2E8F0",
-          background: "#F8FAFC",
+          background: "var(--pn, #F8FAFC)",
         }}
       >
         <div
@@ -90,9 +90,9 @@ export default function EdgeInspector({ blockCatalog, readOnly }: Props) {
                     marginLeft: 6,
                     fontSize: 9,
                     padding: "1px 5px",
-                    background: "#EFF6FF",
+                    background: "var(--pl, #EFF6FF)",
                     color: "#1E40AF",
-                    border: "1px solid #BFDBFE",
+                    border: "1px solid var(--p, #BFDBFE)",
                     borderRadius: 3,
                   }}
                 >
@@ -133,9 +133,9 @@ export default function EdgeInspector({ blockCatalog, readOnly }: Props) {
                     marginLeft: 6,
                     fontSize: 9,
                     padding: "1px 5px",
-                    background: "#EFF6FF",
+                    background: "var(--pl, #EFF6FF)",
                     color: "#1E40AF",
-                    border: "1px solid #BFDBFE",
+                    border: "1px solid var(--p, #BFDBFE)",
                     borderRadius: 3,
                   }}
                 >
@@ -163,7 +163,7 @@ export default function EdgeInspector({ blockCatalog, readOnly }: Props) {
       </div>
 
       {!readOnly && (
-        <div style={{ padding: 10, borderTop: "1px solid #E2E8F0", background: "#F8FAFC" }}>
+        <div style={{ padding: 10, borderTop: "1px solid #E2E8F0", background: "var(--pn, #F8FAFC)" }}>
           <button
             data-testid="edge-inspector-delete"
             onClick={() => {

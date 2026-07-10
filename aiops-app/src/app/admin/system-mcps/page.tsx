@@ -184,9 +184,9 @@ function btn(variant: "primary" | "secondary" | "danger" | "ghost" | "dim"): Rea
     padding: "7px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600,
     cursor: "pointer", border: "1px solid transparent", whiteSpace: "nowrap",
   };
-  if (variant === "primary")   return { ...base, background: "#3182ce", color: "#fff", border: "1px solid #2b6cb0" };
+  if (variant === "primary")   return { ...base, background: "var(--p, #3182ce)", color: "#fff", border: "1px solid var(--p, #2b6cb0)" };
   if (variant === "danger")    return { ...base, background: "#fff", color: "#e53e3e", border: "1px solid #feb2b2" };
-  if (variant === "ghost")     return { ...base, background: "transparent", color: "#3182ce", border: "1px solid #bee3f8" };
+  if (variant === "ghost")     return { ...base, background: "transparent", color: "var(--p, #3182ce)", border: "1px solid #bee3f8" };
   if (variant === "dim")       return { ...base, background: "transparent", color: "#718096", border: "1px solid #e2e8f0", padding: "5px 10px", fontSize: 11 };
   return { ...base, background: "#fff", color: "#4a5568", border: "1px solid #e2e8f0" };
 }

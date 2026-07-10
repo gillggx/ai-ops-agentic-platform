@@ -11,13 +11,13 @@ import type { CSSProperties } from "react";
 
 export const T = {
   // surfaces
-  page: "#e9edf3", card: "#fff", subtle: "#fafbfd", subtle2: "#fbfcfe", panel: "#f8fafc",
+  page: "var(--ws, #e9edf3)", card: "#fff", subtle: "#fafbfd", subtle2: "#fbfcfe", panel: "var(--pn, #f8fafc)",
   // borders
   bd: "#e2e8f0", bdIn: "#e8edf3", hair: "#eef2f6",
   // text
   text: "#0f172a", labelC: "#334155", muted: "#64748b", faint: "#94a3b8", faint2: "#cbd5e1",
   // accent (indigo)
-  accent: "#4f46e5", accentBg: "#eef2ff", accentSoft: "#c7d2fe", accentMid: "#6366f1", accentFaint: "#818cf8",
+  accent: "var(--p, #4f46e5)", accentBg: "var(--pl, #eef2ff)", accentSoft: "#c7d2fe", accentMid: "var(--p, #6366f1)", accentFaint: "#818cf8",
   // status
   okT: "#15803d", okBg: "#dcfce7", dot: "#22c55e",
   danger: "#e11d48", dangerBg: "#ffe4e6", dangerBd: "#fecdd3", oocT: "#b91c1c", oocBg: "#fee2e2",

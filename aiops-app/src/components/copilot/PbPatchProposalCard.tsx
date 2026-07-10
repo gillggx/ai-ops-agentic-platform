@@ -58,16 +58,16 @@ export default function PbPatchProposalCard({ proposal, onApply, onReject }: Pro
     <div
       style={{
         width: "100%",
-        border: "1px solid #c7d2fe",
+        border: "1px solid var(--pl, #c7d2fe)",
         borderRadius: 8,
-        background: "#eef2ff",
+        background: "var(--pl, #eef2ff)",
         overflow: "hidden",
         fontFamily: "Inter, system-ui, -apple-system, 'Noto Sans TC', sans-serif",
         marginTop: 4,
       }}
     >
       {/* Header */}
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid #c7d2fe", display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--pl, #c7d2fe)", display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 14 }}>✦</span>
         <span style={{ fontSize: 12, fontWeight: 600, color: "#3730a3", flex: 1 }}>
           建議動作 · {proposal.patches.length} patch{proposal.patches.length > 1 ? "es" : ""}
@@ -89,7 +89,7 @@ export default function PbPatchProposalCard({ proposal, onApply, onReject }: Pro
       </div>
 
       {/* Actions */}
-      <div style={{ padding: "8px 12px", display: "flex", gap: 8, borderTop: "1px solid #c7d2fe", background: "#f5f3ff" }}>
+      <div style={{ padding: "8px 12px", display: "flex", gap: 8, borderTop: "1px solid var(--pl, #c7d2fe)", background: "#f5f3ff" }}>
         {state === "applied" && (
           <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>✓ 已套用至 Canvas</span>
         )}
@@ -105,7 +105,7 @@ export default function PbPatchProposalCard({ proposal, onApply, onReject }: Pro
                 padding: "5px 12px",
                 fontSize: 11,
                 fontWeight: 600,
-                background: "#4338ca",
+                background: "var(--p, #4338ca)",
                 color: "#fff",
                 border: "none",
                 borderRadius: 4,
@@ -142,7 +142,7 @@ function PatchRow({ patch }: { patch: PipelinePatch }) {
     insert_before: { icon: "➕", label: "加入 (before)", color: "#166534" },
     update_params: { icon: "✏️", label: "更新參數", color: "#92400e" },
     delete_node: { icon: "🗑", label: "刪除", color: "#b91c1c" },
-    connect_edge: { icon: "↔", label: "新增邊", color: "#4338ca" },
+    connect_edge: { icon: "↔", label: "新增邊", color: "var(--p, #4338ca)" },
   };
   const meta = opLabel[patch.op] ?? { icon: "•", label: patch.op, color: "#64748b" };
 
@@ -152,7 +152,7 @@ function PatchRow({ patch }: { patch: PipelinePatch }) {
         padding: "6px 8px",
         margin: "4px 0",
         background: "#fff",
-        border: "1px solid #e0e7ff",
+        border: "1px solid var(--pl, #e0e7ff)",
         borderRadius: 4,
         fontSize: 11,
         color: "#1e293b",

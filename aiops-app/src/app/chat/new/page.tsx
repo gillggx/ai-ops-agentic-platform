@@ -91,7 +91,7 @@ function NewChatInner() {
             onClick={() => window.location.reload()}
             style={{
               padding: "6px 14px",
-              background: "#2b6cb0",
+              background: "var(--p, #2b6cb0)",
               color: "#fff",
               border: "none",
               borderRadius: 4,

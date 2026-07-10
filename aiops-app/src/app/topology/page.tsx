@@ -24,7 +24,7 @@ const TopologyWorkbench = dynamic(
     ssr: false,
     loading: () => (
       <div style={{
-        height: "100%", background: "#f7f8fc",
+        height: "100%", background: "var(--ws, #f7f8fc)",
         display: "flex", alignItems: "center", justifyContent: "center", color: "#a0aec0",
       }}>載入...</div>
     ),
@@ -73,7 +73,7 @@ export default function TopologyPage() {
   return (
     <Suspense fallback={
       <div style={{
-        height: "100vh", background: "#f7f8fc",
+        height: "100vh", background: "var(--ws, #f7f8fc)",
         display: "flex", alignItems: "center", justifyContent: "center", color: "#a0aec0",
       }}>載入...</div>
     }>

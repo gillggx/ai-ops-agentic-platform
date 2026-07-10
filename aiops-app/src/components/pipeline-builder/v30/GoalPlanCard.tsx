@@ -169,7 +169,7 @@ export default function GoalPlanCard({
                   disabled={!!acting}
                   style={{
                     width: "100%", resize: "vertical", marginBottom: 3,
-                    border: `1px solid ${edits[p.id] != null && edits[p.id].trim() !== p.goal ? "#3b82f6" : "#e2e8f0"}`,
+                    border: `1px solid ${edits[p.id] != null && edits[p.id].trim() !== p.goal ? "var(--p, #3b82f6)" : "#e2e8f0"}`,
                     borderRadius: 5, color: "#0f172a", fontSize: 13, padding: "4px 8px",
                     fontFamily: "inherit", lineHeight: 1.5, background: "#fff",
                   }}

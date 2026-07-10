@@ -77,7 +77,7 @@ function ChatSessionInner() {
           <div style={{ fontSize: 12, color: "#718096", marginBottom: 16 }}>{error}</div>
           <a
             href="/chat/new"
-            style={{ fontSize: 13, color: "#2b6cb0", textDecoration: "none" }}
+            style={{ fontSize: 13, color: "var(--p, #2b6cb0)", textDecoration: "none" }}
           >
             開啟新對話 →
           </a>

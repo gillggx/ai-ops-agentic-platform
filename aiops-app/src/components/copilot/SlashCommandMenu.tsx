@@ -231,7 +231,7 @@ export default function SlashCommandMenu({
               textTransform: "uppercase",
               fontWeight: 700,
               padding: "8px 12px 4px",
-              background: "#f8fafc",
+              background: "var(--pn, #f8fafc)",
               position: "sticky",
               top: 0,
             }}
@@ -253,7 +253,7 @@ export default function SlashCommandMenu({
                   alignItems: "center",
                   gap: 10,
                   cursor: "pointer",
-                  background: hl ? "#eff6ff" : "transparent",
+                  background: hl ? "var(--pl, #eff6ff)" : "transparent",
                   borderBottom: "1px solid #f1f5f9",
                 }}
               >
@@ -266,8 +266,8 @@ export default function SlashCommandMenu({
                   style={{
                     fontFamily: "ui-monospace, SFMono-Regular, monospace",
                     fontSize: 10,
-                    color: "#2563eb",
-                    background: "#eff6ff",
+                    color: "var(--p, #2563eb)",
+                    background: "var(--pl, #eff6ff)",
                     padding: "1px 6px",
                     borderRadius: 4,
                     flexShrink: 0,
@@ -284,7 +284,7 @@ export default function SlashCommandMenu({
         style={{
           padding: "6px 12px",
           borderTop: "1px solid #f1f5f9",
-          background: "#f8fafc",
+          background: "var(--pn, #f8fafc)",
           fontSize: 11,
           color: "#94a3b8",
           textAlign: "right",

@@ -23,7 +23,10 @@ export default function SkillEditorPage() {
   const t = useTranslations("skills.editor");
   const params = useParams<{ slug: string }>();
   const router = useRouter();
-  const slug = params?.slug ?? "";
+  // useParams returns the segment still percent-encoded; decode ONCE here or
+  // the later encodeURIComponent double-encodes non-ASCII slugs (中文名 skill)
+  // into %25… which Spring's StrictHttpFirewall rejects as 401 (2026-07-10).
+  const slug = decodeURIComponent(params?.slug ?? "");
 
   const [skill, setSkill] = useState<Skill | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -382,7 +385,7 @@ export default function SkillEditorPage() {
                     </button>
                     <button onClick={() => { void openParamWizard(); }} title="開放可換參數 + 草擬說明書" style={{
                       font: `600 11.5px ${FONT.sans}`,
-                      color: TK.indigo, background: "#eef2ff",
+                      color: TK.indigo, background: "var(--pl, #eef2ff)",
                       border: "1px solid #c7d2fe",
                       padding: "6px 11px", borderRadius: 7, cursor: "pointer",
                     }}>

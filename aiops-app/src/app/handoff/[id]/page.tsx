@@ -98,7 +98,7 @@ export default function HandoffPage({ params }: { params: Promise<{ id: string }
     return <div style={wrap}><div style={card}>Redirecting…</div></div>;
   }
 
-  const copy = ACTION_COPY[h.kind] ?? { verb: "執行", tone: "#1d4ed8" };
+  const copy = ACTION_COPY[h.kind] ?? { verb: "執行", tone: "var(--p, #1d4ed8)" };
   let impact = "";
   try { impact = (JSON.parse(h.payload || "{}").impact as string) || ""; } catch { /* noop */ }
 
@@ -116,7 +116,7 @@ export default function HandoffPage({ params }: { params: Promise<{ id: string }
         <h1 style={{ fontSize: 22, margin: "6px 0 4px", color: copy.tone }}>確認{copy.verb}這條 Rule</h1>
         <div style={{ fontSize: 14, color: "#475467", marginBottom: 16 }}>對象：<b>{h.target_ref}</b></div>
         {impact ? (
-          <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: "12px 14px", fontSize: 13, color: "#1f2933", marginBottom: 18 }}>
+          <div style={{ background: "var(--pn, #f8fafc)", border: "1px solid #e5e7eb", borderRadius: 10, padding: "12px 14px", fontSize: 13, color: "#1f2933", marginBottom: 18 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>影響</div>{impact}
           </div>
         ) : null}

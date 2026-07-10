@@ -41,7 +41,7 @@ const STATUS_COLOR: Record<string, string> = {
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const S = {
-  page: { display: "flex", height: "100vh", background: "#f7f8fc", overflow: "hidden" } as React.CSSProperties,
+  page: { display: "flex", height: "100vh", background: "var(--ws, #f7f8fc)", overflow: "hidden" } as React.CSSProperties,
   sidebar: (collapsed: boolean): React.CSSProperties => ({
     width: collapsed ? 48 : 220,
     minWidth: collapsed ? 48 : 220,
@@ -60,8 +60,8 @@ const S = {
     alignItems: "center",
     gap: 10,
     cursor: "pointer",
-    background: selected ? "#e3f2fd" : "transparent",
-    borderLeft: selected ? "3px solid #2b6cb0" : "3px solid transparent",
+    background: selected ? "var(--pl, #e3f2fd)" : "transparent",
+    borderLeft: selected ? "3px solid var(--p, #2b6cb0)" : "3px solid transparent",
     fontSize: 13,
     color: "#2d3748",
     fontWeight: selected ? 600 : 400,
@@ -74,12 +74,12 @@ const S = {
   tabBar: { display: "flex", borderBottom: "1px solid #e2e8f0", background: "#fff" } as React.CSSProperties,
   tab: (active: boolean): React.CSSProperties => ({
     padding: "8px 16px", fontSize: 12, fontWeight: active ? 700 : 400,
-    color: active ? "#2b6cb0" : "#718096", cursor: "pointer",
-    borderBottom: active ? "2px solid #2b6cb0" : "2px solid transparent",
+    color: active ? "var(--p, #2b6cb0)" : "#718096", cursor: "pointer",
+    borderBottom: active ? "2px solid var(--p, #2b6cb0)" : "2px solid transparent",
     background: "transparent", border: "none",
   }),
   tabContent: { flex: 1, overflowY: "auto", padding: "16px 20px" } as React.CSSProperties,
-  refreshBar: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", fontSize: 11, color: "#718096", background: "#f7f8fc", borderBottom: "1px solid #e2e8f0" } as React.CSSProperties,
+  refreshBar: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", fontSize: 11, color: "#718096", background: "var(--pn, #f7f8fc)", borderBottom: "1px solid #e2e8f0" } as React.CSSProperties,
   badge: (color: string): React.CSSProperties => ({
     display: "inline-block", padding: "2px 8px", borderRadius: 10,
     fontSize: 10, fontWeight: 600, background: `${color}20`, color,
@@ -591,12 +591,12 @@ function ProcessTracePanel({ events, toolId }: { events: ProcessEvent[]; toolId:
             <div key={lid} onClick={() => { setSelectedLotIdx(idx); setSelectedNode(null); }}
               style={{
                 flex: 1, padding: "10px 8px", cursor: "pointer", textAlign: "center",
-                background: isSelected ? "#ebf4ff" : "transparent",
-                borderBottom: isSelected ? "3px solid #2b6cb0" : "3px solid transparent",
+                background: isSelected ? "var(--pl, #ebf4ff)" : "transparent",
+                borderBottom: isSelected ? "3px solid var(--p, #2b6cb0)" : "3px solid transparent",
                 borderRight: idx < lots.length - 1 ? "1px solid #edf2f7" : "none",
                 transition: "background 0.15s",
               }}>
-              <div style={{ fontSize: 11, fontWeight: isSelected ? 700 : 500, color: isSelected ? "#2b6cb0" : "#4a5568" }}>
+              <div style={{ fontSize: 11, fontWeight: isSelected ? 700 : 500, color: isSelected ? "var(--p, #2b6cb0)" : "#4a5568" }}>
                 {lid}
               </div>
               <div style={{ fontSize: 9, color: hasOOC ? "#e53e3e" : "#a0aec0", marginTop: 2 }}>
