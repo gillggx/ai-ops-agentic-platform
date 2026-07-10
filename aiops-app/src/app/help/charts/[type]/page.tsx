@@ -87,7 +87,7 @@ export default function ChartDetailPage() {
     <div style={{
       display: "flex",
       height: "100vh",
-      background: "#fafaf8",
+      background: "var(--ws, #fafaf8)",
       fontFamily: TYPOGRAPHY,
       color: "#1a1a17",
       overflow: "hidden",
@@ -239,7 +239,7 @@ export default function ChartDetailPage() {
               padding: 12,
               border: "1px solid #e8e8e4",
               borderRadius: 6,
-              background: "#fafaf8",
+              background: "var(--ws, #fafaf8)",
               minHeight: 56,
               position: "relative",
               display: "flex",

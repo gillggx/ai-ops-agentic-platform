@@ -43,7 +43,7 @@ export default function ChartCatalogGridPage() {
   return (
     <div style={{
       padding: "24px 32px",
-      background: "#fafaf8",
+      background: "var(--ws, #fafaf8)",
       minHeight: "100vh",
       fontFamily: TYPOGRAPHY,
       color: "#1a1a17",
@@ -82,7 +82,7 @@ export default function ChartCatalogGridPage() {
                 borderRadius: 14,
                 border: "1px solid",
                 borderColor: filter === g ? "#1a1a17" : "#d8d6d0",
-                background: filter === g ? "#1a1a17" : "#fff",
+                background: filter === g ? "var(--p, #1a1a17)" : "#fff",
                 color: filter === g ? "#fff" : "#4a4a45",
                 cursor: "pointer",
                 fontFamily: "inherit",

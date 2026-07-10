@@ -13,9 +13,9 @@
 // ── design tokens (section 1a) ──────────────────────────────────────────
 export const TOK = {
   ink: "#211f1c",
-  paper: "#fbfbf9",
+  paper: "var(--ws, #fbfbf9)",
   card: "#fff",
-  cardFoot: "#fcfbf7",
+  cardFoot: "var(--pn, #fcfbf7)",
   border: "#e7e3d9",
   borderSub: "#efece3",
   borderRow: "#f2efe7",
@@ -34,7 +34,7 @@ export const TOK = {
   red: "#b42318", redBg: "#fdf0ee", redBd: "#f3c6bf", redBtnBd: "#f0c1b8",
   slate: "#475569", slateBg: "#f1f5f9", slateBd: "#d7dee7",
   lifeBg: "#f0f6f8", lifeBd: "#cbe2ea", lifeConn: "#9cc2cf",
-  blue: "#1d4ed8",
+  blue: "var(--p, #1d4ed8)",
 } as const;
 
 export interface ChipStyle { fg: string; bg: string; bd: string }

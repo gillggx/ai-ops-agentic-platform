@@ -56,7 +56,7 @@ export function ProposalList({ items, roles, selectedId, onSelect }: {
             onClick={() => onSelect(p.id)}
             style={{
               cursor: "pointer", background: TOK.card,
-              border: `1.5px solid ${p.id === selectedId ? TOK.ink : TOK.border}`,
+              border: `1.5px solid ${p.id === selectedId ? "var(--p, #211f1c)" : TOK.border}`,
               borderRadius: 9, padding: "10px 12px",
               opacity: signable ? 1 : 0.48,
             }}

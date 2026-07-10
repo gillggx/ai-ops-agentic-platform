@@ -9,7 +9,9 @@ interface MonitorData {
   timestamp: string;
   services: Record<string, { status: string; port?: number; data?: Record<string, unknown>; error?: string }>;
   background_tasks: {
-    skill_runner: {
+    // 2026-06-29 sunset: Java no longer returns skill_runner stats — optional
+    // so old-cached shapes and the new payload both render.
+    skill_runner?: {
       alarms_emitted: number;
       alarms_dedup_suppressed: number;
       last_emit_at: string | null;
@@ -71,8 +73,8 @@ export default function SystemMonitorPage() {
   if (error) return <div style={{ padding: 48, color: "#e53e3e" }}>Error: {error}</div>;
   if (!data) return null;
 
-  const skillRunner = data.background_tasks.skill_runner;
-  const scheduler = data.background_tasks.cron_scheduler;
+  const skillRunner = data.background_tasks?.skill_runner;
+  const scheduler = data.background_tasks?.cron_scheduler;
 
   const cardStyle: React.CSSProperties = {
     background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0",
@@ -96,7 +98,7 @@ export default function SystemMonitorPage() {
       <div style={cardStyle}>
         <div style={titleStyle}>Services</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-          {Object.entries(data.services).map(([name, svc]) => (
+          {Object.entries(data.services ?? {}).map(([name, svc]) => (
             <div key={name} style={{
               display: "flex", alignItems: "center", padding: "10px 14px",
               background: svc.status === "UP" ? "#f0fff4" : "#fff5f5",
@@ -115,8 +117,8 @@ export default function SystemMonitorPage() {
         </div>
       </div>
 
-      {/* Skill Runner (alarm-emit activity) */}
-      <div style={cardStyle}>
+      {/* Skill Runner (alarm-emit activity) — legacy; hidden when Java omits it */}
+      {skillRunner && <div style={cardStyle}>
         <div style={titleStyle}>Skill Runner — Alarm Emit</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
           {[
@@ -125,7 +127,7 @@ export default function SystemMonitorPage() {
             { label: "Last Emit", value: timeAgo(skillRunner.last_emit_at) },
             { label: "Last Alarm #", value: skillRunner.last_alarm_id ?? "—" },
           ].map(({ label, value }) => (
-            <div key={label} style={{ padding: "8px 10px", background: "#f7fafc", borderRadius: 6 }}>
+            <div key={label} style={{ padding: "8px 10px", background: "var(--pn, #f7fafc)", borderRadius: 6 }}>
               <div style={{ fontSize: 10, color: "#a0aec0", fontWeight: 600, textTransform: "uppercase" }}>{label}</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: "#2d3748", marginTop: 2 }}>{value}</div>
             </div>
@@ -139,10 +141,10 @@ export default function SystemMonitorPage() {
         <div style={{ marginTop: 10, fontSize: 11, color: "#a0aec0" }}>
           In-memory counters; reset on JVM restart. Persistent metrics: query <code>alarms</code> / <code>skill_runs</code> tables directly.
         </div>
-      </div>
+      </div>}
 
       {/* Cron Scheduler */}
-      <div style={cardStyle}>
+      {scheduler && <div style={cardStyle}>
         <div style={titleStyle}>Cron Scheduler</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <StatusDot up={scheduler.status === "JAVA" || scheduler.status === "RUNNING"} />
@@ -151,14 +153,14 @@ export default function SystemMonitorPage() {
         {scheduler.note && (
           <div style={{ fontSize: 11, color: "#718096", marginLeft: 18 }}>{scheduler.note}</div>
         )}
-      </div>
+      </div>}
 
       {/* DB Stats */}
       <div style={cardStyle}>
         <div style={titleStyle}>Database</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
           {Object.entries(data.db_stats).map(([table, count]) => (
-            <div key={table} style={{ padding: "8px 10px", background: "#f7fafc", borderRadius: 6 }}>
+            <div key={table} style={{ padding: "8px 10px", background: "var(--pn, #f7fafc)", borderRadius: 6 }}>
               <div style={{ fontSize: 10, color: "#a0aec0", fontWeight: 600 }}>{table.replace(/_/g, " ")}</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: "#2d3748", marginTop: 2 }}>{count}</div>
             </div>
