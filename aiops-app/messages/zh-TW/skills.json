@@ -54,7 +54,17 @@
     "alarmYes": "✓ 系統檢查：pipeline 含 alarm 判斷式 · 可自動化為 Auto Patrol（alarm 條件由你設、系統檢查）",
     "alarmNo": "ℹ 系統檢查：pipeline 無 alarm · 只能作為 Data Check 或工具；要出 alarm 請在描述加入判斷條件再重新編譯。",
     "automateAction": "自動化此 Skill →",
-    "editAutomationAction": "編輯自動化 →"
+    "editAutomationAction": "編輯自動化 →",
+    "activateFormTitle": "啟用前確認名稱與描述",
+    "activateFormHint": "啟用後 Skill 會生效並可被搜尋；名稱之後仍可修改。",
+    "nameLabel": "名稱",
+    "descLabel": "描述（這個 Skill 做什麼、什麼時候用）",
+    "nameRequired": "名稱不能空白",
+    "confirmActivate": "確認啟用",
+    "renameTitle": "改名",
+    "renameSave": "儲存",
+    "renameCancel": "取消",
+    "renameSaved": "名稱已更新"
   },
   "canvas": {
     "noNodes": "Pipeline 沒有 nodes",

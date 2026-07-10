@@ -504,11 +504,18 @@ async def _chat_intent_respond_stream(
         # so without it the canvas never opens. session_id must match the build
         # thread so subsequent pb_glass_* ops land on the same overlay.
         if confirmed:
-            yield {"event": "pb_glass_start", "data": json.dumps({
+            _start_payload: dict = {
                 "type": "pb_glass_start",
                 "session_id": pending.build_session_id,
                 "goal": pending.plan_summary or "",
-            }, ensure_ascii=False)}
+            }
+            # F1 (2026-07-10): incremental redesigns must seed the overlay with
+            # the existing canvas, or ops referencing old nodes paint nothing
+            # (same contract as tool_execute's native build).
+            if isinstance(pending.base_pipeline, dict) and pending.base_pipeline.get("nodes"):
+                _start_payload["base_pipeline"] = pending.base_pipeline
+            yield {"event": "pb_glass_start", "data": json.dumps(
+                _start_payload, default=str, ensure_ascii=False)}
 
         final_pipeline_for_exec: Optional[dict] = None
         try:

@@ -54,7 +54,17 @@
     "alarmYes": "✓ System check: pipeline contains an alarm verdict · can be automated as Auto Patrol (you set the alarm condition, the system checks it)",
     "alarmNo": "ℹ System check: pipeline has no alarm · usable only as Data Check or tool; to raise alarms, add a verdict condition to the description and recompile.",
     "automateAction": "Automate this Skill →",
-    "editAutomationAction": "Edit automation →"
+    "editAutomationAction": "Edit automation →",
+    "activateFormTitle": "Confirm name & description before activating",
+    "activateFormHint": "Once active the skill is live and searchable; the name can still be changed later.",
+    "nameLabel": "Name",
+    "descLabel": "Description (what it does, when to use)",
+    "nameRequired": "Name is required",
+    "confirmActivate": "Confirm & activate",
+    "renameTitle": "Rename",
+    "renameSave": "Save",
+    "renameCancel": "Cancel",
+    "renameSaved": "Name updated"
   },
   "canvas": {
     "noNodes": "Pipeline has no nodes",

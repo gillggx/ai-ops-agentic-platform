@@ -202,6 +202,48 @@ def apply_plan_removals(pipeline: dict, removals: list) -> tuple[dict, list, lis
     return out, removed, skipped
 
 
+# F5 (2026-07-10): default names the builder stamps on fresh canvases. A
+# pipeline still carrying one of these at finalize gets an LLM-suggested
+# business name (user can edit at save / activate time).
+_PLACEHOLDER_NAME_PREFIXES: tuple[str, ...] = (
+    "New Pipeline", "Chat-built Pipeline", "Chat 自動化",
+)
+
+
+async def _maybe_generate_pipeline_name(
+    pipeline: PipelineJSON, instruction: str
+) -> None:
+    """Replace a placeholder pipeline name with a short business name derived
+    from the user's instruction. Fail-open: on any LLM issue fall back to the
+    truncated instruction — never block or fail the build over a name."""
+    name = (pipeline.name or "").strip()
+    if not instruction or (name and not name.startswith(_PLACEHOLDER_NAME_PREFIXES)):
+        return  # already has a real name (e.g. modify of a saved pipeline)
+    flat_instr = " ".join(instruction.split())
+    new_name = flat_instr[:24] or name or "未命名分析"
+    try:
+        from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+        resp = await asyncio.wait_for(
+            get_llm_client().create(
+                system=(
+                    "為一條資料分析 pipeline 取名。只輸出名稱本身，不要任何解釋："
+                    "繁體中文或英文、不超過 20 字、不加引號與標點、不用 emoji，"
+                    "要讓工程師一眼看出業務用途（例：EQP-01 OOC 次數檢查）。"
+                ),
+                messages=[{"role": "user", "content": f"需求：{flat_instr[:400]}"}],
+                max_tokens=60,
+            ),
+            timeout=8.0,
+        )
+        cand = (resp.text or "").strip().strip("「」\"'`").splitlines()[0].strip()
+        if 1 < len(cand) <= 40:
+            new_name = cand
+    except Exception as ex:  # noqa: BLE001 — a name must never fail a build
+        logger.warning("finalize: pipeline name generation failed (fallback): %s", ex)
+    logger.info("finalize: pipeline named %r (was %r)", new_name, name)
+    pipeline.name = new_name
+
+
 async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     final_dict = state.get("final_pipeline") or state.get("base_pipeline")
     plan = state.get("plan") or []
@@ -383,6 +425,13 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}"
     )
     logger.info("finalize_node: status=%s | %s", status, summary)
+
+    # F5 (2026-07-10): give the built canvas a human name (LLM-suggested,
+    # user-editable later). Skipped for empty/refused builds.
+    if pipeline.nodes and status in ("finished", "build_partial", "failed_structural"):
+        await _maybe_generate_pipeline_name(
+            pipeline, str(state.get("instruction") or "")
+        )
     if structural_issues:
         for si in structural_issues[:5]:
             logger.warning(

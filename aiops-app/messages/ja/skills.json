@@ -54,7 +54,17 @@
     "alarmYes": "✓ システムチェック：pipeline に alarm 判定が含まれています · Auto Patrol として自動化できます（alarm 条件はユーザーが設定し、システムがチェックします）",
     "alarmNo": "ℹ システムチェック：pipeline に alarm がありません · Data Check またはツールとしてのみ利用できます。alarm を出すには、記述に判定条件を追加して再コンパイルしてください。",
     "automateAction": "この Skill を自動化 →",
-    "editAutomationAction": "自動化を編集 →"
+    "editAutomationAction": "自動化を編集 →",
+    "activateFormTitle": "有効化の前に名前と説明を確認",
+    "activateFormHint": "有効化すると Skill が稼働し検索可能になります。名前は後から変更できます。",
+    "nameLabel": "名前",
+    "descLabel": "説明（この Skill の用途・使いどころ）",
+    "nameRequired": "名前は必須です",
+    "confirmActivate": "確認して有効化",
+    "renameTitle": "名前変更",
+    "renameSave": "保存",
+    "renameCancel": "キャンセル",
+    "renameSaved": "名前を更新しました"
   },
   "canvas": {
     "noNodes": "Pipeline に nodes がありません",

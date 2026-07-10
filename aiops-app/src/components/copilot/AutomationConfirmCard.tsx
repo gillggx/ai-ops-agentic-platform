@@ -15,6 +15,9 @@ import { useRouter } from "next/navigation";
 
 export interface AutomationHandoffData {
   pipeline_json: Record<string, unknown>;
+  /** F2 (2026-07-10): the user's original prompt — persisted as the skill NL
+   *  (was silently ""), so the draft skill keeps its provenance. */
+  goal?: string;
 }
 
 export function AutomationConfirmCard({ data }: { data: AutomationHandoffData }) {
@@ -30,7 +33,7 @@ export function AutomationConfirmCard({ data }: { data: AutomationHandoffData })
       const r = await fetch("/api/skills-v2/with-pipeline", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name, nl: "", sub: "從對話設定自動化",
+          name, nl: data.goal ?? "", sub: "從對話設定自動化",
           pipeline_json: data.pipeline_json, pipeline_kind: "skill",
         }),
       });

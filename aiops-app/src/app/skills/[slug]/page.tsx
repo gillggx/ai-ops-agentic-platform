@@ -155,23 +155,87 @@ export default function SkillEditorPage() {
     }
   }, [nl, skill, slug, t]);
 
+  // F2 (2026-07-10): activation goes through a name/description confirm form
+  // (auto-created skills used to go live as「New Pipeline (v30)」+ raw prompt).
+  const [activateFormOpen, setActivateFormOpen] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [formNl, setFormNl] = useState("");
+  // F3 (2026-07-10): display name is editable in place (slug/URL unchanged).
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+
   const handleToggleActive = useCallback(async (activate: boolean) => {
     if (!skill) return;
+    if (activate) {
+      setFormName(skill.name || "");
+      setFormNl(skill.nl || "");
+      setActivateFormOpen(true);
+      return;
+    }
     setActivating(true);
     try {
       const res = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/activate`, {
-        method: activate ? "POST" : "DELETE",
+        method: "DELETE",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const env = await res.json();
       setSkill((env?.data ?? env) as Skill);
-      setToast(activate ? t("activatedToast") : t("deactivatedToast"));
+      setToast(t("deactivatedToast"));
     } catch (e) {
       setToast(t("actionFailed", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setActivating(false);
     }
   }, [skill, slug, t]);
+
+  const handleConfirmActivate = useCallback(async () => {
+    if (!skill) return;
+    const name = formName.trim();
+    if (!name) { setToast(t("nameRequired")); return; }
+    setActivating(true);
+    try {
+      const put = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, nl: formNl }),
+      });
+      if (!put.ok) throw new Error(`HTTP ${put.status}`);
+      const res = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/activate`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const env = await res.json();
+      setSkill((env?.data ?? env) as Skill);
+      setNl(formNl);
+      setNlDirty(false);
+      setActivateFormOpen(false);
+      setToast(t("activatedToast"));
+    } catch (e) {
+      setToast(t("actionFailed", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setActivating(false);
+    }
+  }, [skill, slug, formName, formNl, t]);
+
+  const handleSaveName = useCallback(async () => {
+    if (!skill) return;
+    const name = nameDraft.trim();
+    if (!name) { setToast(t("nameRequired")); return; }
+    try {
+      const res = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const env = await res.json();
+      setSkill((env?.data ?? env) as Skill);
+      setEditingName(false);
+      setToast(t("renameSaved"));
+    } catch (e) {
+      setToast(t("actionFailed", { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }, [skill, slug, nameDraft, t]);
 
   if (loadError) return <Center>{t("loadFailed", { error: loadError })}</Center>;
   if (!skill) return <Center>{t("loading")}</Center>;
@@ -209,7 +273,43 @@ export default function SkillEditorPage() {
               padding: "3px 8px", borderRadius: 6,
             }}>{roleLabel(skill.role)}</span>
           </div>
-          <h1 style={{ font: `700 22px ${FONT.sans}`, color: TK.ink, margin: "8px 0 4px" }}>{skill.name}</h1>
+          {editingName ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0 4px" }}>
+              <input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                maxLength={60}
+                autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") void handleSaveName(); if (e.key === "Escape") setEditingName(false); }}
+                style={{
+                  font: `700 20px ${FONT.sans}`, color: TK.ink,
+                  border: `1px solid ${TK.divider}`, borderRadius: 8,
+                  padding: "4px 10px", outline: "none", minWidth: 320,
+                }}
+              />
+              <button onClick={() => void handleSaveName()} style={{
+                font: `600 12px ${FONT.sans}`, color: "#fff", background: TK.indigo,
+                border: "none", padding: "7px 12px", borderRadius: 7, cursor: "pointer",
+              }}>{t("renameSave")}</button>
+              <button onClick={() => setEditingName(false)} style={{
+                font: `600 12px ${FONT.sans}`, color: TK.body, background: "#fff",
+                border: `1px solid ${TK.divider}`, padding: "7px 12px", borderRadius: 7, cursor: "pointer",
+              }}>{t("renameCancel")}</button>
+            </div>
+          ) : (
+            <h1 style={{ font: `700 22px ${FONT.sans}`, color: TK.ink, margin: "8px 0 4px", display: "flex", alignItems: "center", gap: 8 }}>
+              {skill.name}
+              <button
+                onClick={() => { setNameDraft(skill.name || ""); setEditingName(true); }}
+                title={t("renameTitle")}
+                style={{
+                  font: `600 11px ${FONT.sans}`, color: TK.body, background: "#fff",
+                  border: `1px solid ${TK.divider}`, padding: "3px 9px", borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >{t("renameTitle")}</button>
+            </h1>
+          )}
           <div style={{ fontSize: 13, color: TK.body }}>{skill.sub}</div>
         </div>
 
@@ -344,6 +444,52 @@ export default function SkillEditorPage() {
           onAction={() => router.push(`/skills/${encodeURIComponent(slug)}/automate`)}
         />
       </div>
+
+      {/* F2 — activation confirm form: name + description reviewed before go-live */}
+      {activateFormOpen && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 70,
+          background: "rgba(15,18,30,.45)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }} onClick={() => !activating && setActivateFormOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: "#fff", borderRadius: 14, width: 460, maxWidth: "92vw",
+            boxShadow: "0 18px 48px rgba(0,0,0,.24)", overflow: "hidden",
+            fontFamily: FONT.sans,
+          }}>
+            <div style={{ padding: "16px 20px 12px", borderBottom: `1px solid ${TK.divider}` }}>
+              <div style={{ font: `700 15px ${FONT.sans}`, color: TK.ink }}>{t("activateFormTitle")}</div>
+              <div style={{ fontSize: 12, color: TK.body, marginTop: 3 }}>{t("activateFormHint")}</div>
+            </div>
+            <div style={{ padding: "14px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 11.5, fontWeight: 600, color: TK.body }}>
+                {t("nameLabel")}
+                <input value={formName} onChange={(e) => setFormName(e.target.value)} maxLength={60}
+                  style={{ font: `14px ${FONT.sans}`, padding: "8px 11px", borderRadius: 8,
+                           border: `1px solid ${TK.divider}`, color: TK.ink, outline: "none" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 11.5, fontWeight: 600, color: TK.body }}>
+                {t("descLabel")}
+                <textarea value={formNl} onChange={(e) => setFormNl(e.target.value)} rows={3}
+                  style={{ font: `13px/1.5 ${FONT.sans}`, padding: "8px 11px", borderRadius: 8,
+                           border: `1px solid ${TK.divider}`, color: TK.ink, outline: "none", resize: "vertical" }} />
+              </label>
+            </div>
+            <div style={{ padding: "12px 20px", borderTop: `1px solid ${TK.divider}`,
+                          display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={() => setActivateFormOpen(false)} disabled={activating} style={{
+                font: `600 12.5px ${FONT.sans}`, color: TK.body, background: "#fff",
+                border: `1px solid ${TK.divider}`, padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+              }}>{t("renameCancel")}</button>
+              <button onClick={() => void handleConfirmActivate()} disabled={activating} style={{
+                font: `700 12.5px ${FONT.sans}`, color: "#fff", background: "#16a34a",
+                border: "1px solid #16a34a", padding: "8px 18px", borderRadius: 8,
+                cursor: activating ? "wait" : "pointer", opacity: activating ? 0.6 : 1,
+              }}>{activating ? t("activating") : t("confirmActivate")}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && <Toast text={toast} />}
 

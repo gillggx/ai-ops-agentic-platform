@@ -15,6 +15,7 @@ import { ChartExplorer } from "./ChartExplorer";
 import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "./AgentConsole";
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
 import { AutomationConfirmCard, type AutomationHandoffData } from "./AutomationConfirmCard";
+import { SkillActivateConfirmCard, type SkillActivateConfirmData } from "./SkillActivateConfirmCard";
 import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } from "./PbPatchProposalCard";
 import type { UiRender } from "@/components/McpChartRenderer";
 import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
@@ -157,7 +158,7 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate";
   content: string;
   /** 對話分頁重整（2026-07-05）— BUILD PLAN 卡單卡生命週期 state。 */
   buildPlan?: BuildPlanState;
@@ -191,6 +192,8 @@ interface ChatMessage {
   pbCompact?: boolean;
   /** 草稿暫存區 P3b (2026-07-09): parsed automation config awaiting confirm. */
   automationConfirm?: AutomationHandoffData;
+  /** F4 (2026-07-10): activate-skill confirm card (editable name/desc). */
+  skillActivate?: SkillActivateConfirmData;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -1291,7 +1294,20 @@ export function AIAgentPanel({
                 id: nextId(), role: "automation_confirm", content: "",
                 automationConfirm: {
                   pipeline_json: (card.pipeline_json ?? {}) as Record<string, unknown>,
+                  // F2 (2026-07-10): keep the user's original prompt as the
+                  // skill NL — was silently persisted as "" before.
+                  goal: lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "").trim(),
                 },
+              }]);
+            } else if (card?.type === "skill_activate_confirm") {
+              // F4 (2026-07-10): activation is a confirm-card write — the
+              // browser performs create/rename/activate only on 確認.
+              const sa = card as unknown as SkillActivateConfirmData;
+              if (!sa.suggested_description) {
+                sa.goal = lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "").trim();
+              }
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "skill_activate", content: "", skillActivate: sa,
               }]);
             } else if (card?.type === "pb_pipeline" || card?.type === "pb_pipeline_published") {
               const pbCard = card as unknown as PbPipelineCardData;
@@ -2512,6 +2528,10 @@ export function AIAgentPanel({
               ) : msg.role === "automation_confirm" && msg.automationConfirm ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <AutomationConfirmCard data={msg.automationConfirm} />
+                </div>
+              ) : msg.role === "skill_activate" && msg.skillActivate ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <SkillActivateConfirmCard data={msg.skillActivate} />
                 </div>
               ) : msg.role === "chart_explorer" && msg.flatData && msg.flatMetadata ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
