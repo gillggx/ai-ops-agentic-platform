@@ -64,8 +64,12 @@ if $REBUILD_APP; then
   # are missing or placeholder. check-prod-env.mjs reads process.env only
   # (`next build` loads .env.local itself, the gate script does not) — so
   # source the app env here for the build step.
+  # (Values may contain spaces / '=' — plain `source` breaks, parse per line.)
   if [[ -f .env.local ]]; then
-    set -a; . ./.env.local; set +a
+    while IFS='=' read -r k v; do
+      [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+      export "$k=$v"
+    done < <(grep -v '^[[:space:]]*#' .env.local)
   fi
   npm run build:prod
   cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
