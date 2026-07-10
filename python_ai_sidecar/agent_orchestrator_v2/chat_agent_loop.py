@@ -473,7 +473,8 @@ async def run_chat_agent(
                   + " → ".join(str(b) for b in blocks)
                   + "）。使用者說「改 / 拿掉 / 換 / 加」多半是要調它（用 modify_current_chart）；"
                   "說「設自動化 / 巡檢 / 定期跑」是要對它設自動化（用 setup_automation）；"
-                  "說「啟用 / 上架 / 存成正式 skill」是要啟用它（用 activate_skill，不用反問是哪個）；"
+                  "說「啟用 / 上架 / 存成正式 skill」是要啟用它——**立刻呼叫 activate_skill**，"
+                  "不要先問名稱、描述或 slug（確認卡會讓使用者看到並修改這些）；"
                   "不用再問「有沒有圖」。")
 
     tools = list(_TOOLS)
