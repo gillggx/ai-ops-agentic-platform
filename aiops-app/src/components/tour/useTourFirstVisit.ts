@@ -21,6 +21,9 @@ export function useTourFirstVisit(
 ) {
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // 手機版 (2026-07-11)：桌機導覽的目標元素在 MobileShell 下不存在（route
+    // children 隱藏），tour portal 卻會逃到 body 蓋住整個手機畫面 — 不自動觸發。
+    if (window.matchMedia("(max-width: 767px)").matches) return;
     const key = KEY(surfaceId, version);
     try {
       if (window.localStorage.getItem(key)) return; // already seen
