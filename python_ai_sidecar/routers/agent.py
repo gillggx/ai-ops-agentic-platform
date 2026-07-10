@@ -161,16 +161,27 @@ async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> As
     # share the same key — and so multi-turn history persists (the model must
     # SEE last turn's proposed plan to know「開始建」means resume).
     final_text = ""
-    async for v1_event in run_chat_agent(
-        message=req.message, history=history, java=java, user_id=caller.user_id or 0,
-        session_id=sid,
-        pipeline_snapshot=req.pipeline_snapshot,
-        pipeline_columns=req.pipeline_columns,
-    ):
-        if v1_event.get("type") == "synthesis":
-            final_text = str(v1_event.get("text") or final_text)
-        ev_type = v1_event.get("type") or "message"
-        yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}
+    try:
+        async for v1_event in run_chat_agent(
+            message=req.message, history=history, java=java, user_id=caller.user_id or 0,
+            session_id=sid,
+            pipeline_snapshot=req.pipeline_snapshot,
+            pipeline_columns=req.pipeline_columns,
+        ):
+            if v1_event.get("type") == "synthesis":
+                final_text = str(v1_event.get("text") or final_text)
+            ev_type = v1_event.get("type") or "message"
+            yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}
+    except Exception as exc:  # noqa: BLE001 — fail LOUD, not a frozen chat
+        # 2026-07-10: an LLM auth/provider failure used to kill the stream
+        # silently (HTTP 200, zero events) — the user saw a frozen panel.
+        # Surface it as an error event + log the traceback.
+        log.exception("chat agent loop crashed")
+        yield {"event": "error", "data": json.dumps({
+            "type": "error",
+            "message": f"AI 回應失敗（{exc.__class__.__name__}）："
+                       f"{str(exc)[:200]}。若持續發生請通知管理員檢查 LLM 設定。",
+        }, ensure_ascii=False)}
 
     # Persist this turn so the conversation is multi-turn (the classifier→graph
     # path saved via the orchestrator; the loop path must do it explicitly).
