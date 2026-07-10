@@ -134,37 +134,75 @@ async def _standard_skill_index(java: Any) -> List[Dict[str, Any]]:
     return _skill_index_cache["rows"]
 
 
+async def _call_system_mcp(java: Any, mcp_name: str, args: Dict[str, Any]) -> Any:
+    """Call a granted external System MCP by name (re-enabled 2026-07-10 per
+    決策: 有標準 Skill 說明書的 System MCP 可直接呼叫). Mirrors block_mcp_call's
+    dispatch: resolve api_config from Java, issue the HTTP call with `args`."""
+    import httpx
+    mcp = await java.get_mcp_by_name(mcp_name)
+    if not mcp:
+        return {"error": f"MCP '{mcp_name}' 未註冊"}
+    raw = mcp.get("api_config") or mcp.get("apiConfig") or "{}"
+    cfg = json.loads(raw) if isinstance(raw, str) else raw
+    url = cfg.get("endpoint_url")
+    method = (cfg.get("method") or "GET").upper()
+    headers = cfg.get("headers") or {}
+    try:
+        from python_ai_sidecar.pipeline_builder.blocks._http_helpers import resolve_headers
+        headers = resolve_headers(headers, mcp_name=mcp_name)
+    except Exception:  # noqa: BLE001 — headers as-is if helper/env missing
+        pass
+    if not url:
+        return {"error": f"MCP '{mcp_name}' 沒有 endpoint_url"}
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await (c.get(url, params=args, headers=headers) if method == "GET"
+                   else c.post(url, json=args, headers=headers))
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+
+def _mcp_param_doc(schema: Any) -> str:
+    """Render a System MCP's input_schema into a short param hint for the tool
+    description. Tolerates both a list of param defs and a JSON-schema dict."""
+    if isinstance(schema, str):
+        try:
+            schema = json.loads(schema)
+        except (ValueError, TypeError):
+            return ""
+    items = []
+    if isinstance(schema, list):
+        for p in schema:
+            if isinstance(p, dict) and p.get("name"):
+                req = "必填" if p.get("required") else "選填"
+                items.append(f"{p['name']}({p.get('type', 'str')},{req}) {p.get('description', '')}".strip())
+    elif isinstance(schema, dict):
+        props = schema.get("properties") or {}
+        req = set(schema.get("required") or [])
+        for k, v in props.items():
+            r = "必填" if k in req else "選填"
+            d = (v or {}).get("description", "") if isinstance(v, dict) else ""
+            items.append(f"{k}({(v or {}).get('type', 'str') if isinstance(v, dict) else 'str'},{r}) {d}".strip())
+    return "；".join(items[:12])
+
+
 def is_chat_agent_loop_enabled() -> bool:
     return os.environ.get("CHAT_AGENT_LOOP_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
+# 2026-07-10 Skill 化: the system prompt is now MINIMAL — persona + a few hard
+# interaction rules only. Everything about「怎麼做事」lives in 標準 Skills
+# (DB, editable in /admin/agent-skills) loaded on demand via load_skill, plus
+# each tool's own description. Do NOT grow this prompt with how-to knowledge.
 _SYSTEM = """你是「AIOps 操作助理」，幫半導體製程的工程師 / 當班人員在這個平台上做事。
 講繁體中文，專業、精準、直指核心，不說多餘客套。
 **全程禁用 emoji 與類 emoji 符號**（⚠️/✅/❌/🔴 等都不行）；要標重點用文字如
 [重要]/[HIGH]/[note] 或粗體、表格。
 
-你能幫的事（需要「動作」時才用對應工具；工具沒涵蓋的先老實說）：
-- 查目前的告警與機台現況（get_current_status）
-- 找平台上現成的分析 Skill（search_skills）
-- 建一張新的 SPC / 趨勢 / 統計圖（build_pipeline）
-- 調整「目前畫面上這張圖」：拿掉區帶、加 tooltip、換機台、線改虛線…（modify_current_chart）
-- 把目前這張圖設成自動執行 / 巡檢 / 告警（setup_automation，會帶去設定頁）
-- 幫使用者啟用 Skill（activate_skill，會出確認卡讓使用者改名稱後確認，不會直接生效）
-
-怎麼跟人互動（重要）：
-- 直接自然講話。可以閒聊、可以解釋、可以回答「你能幫我做什麼」——用人話講清楚，
-  **絕對不要**丟制式選單卡逼使用者選。
-- 判斷清楚再用工具：要「建新圖」用 plan_pipeline；要「改現在這張」用
-  modify_current_chart（畫面上沒圖就先建）；只是查 / 問則用查詢工具或直接回答。
-- 建新圖的標準流程：呼叫 plan_pipeline → 它會在對話裡秀一張『計畫卡』（P1..PN +
-  確認/修改/取消按鈕）→ 使用者在卡片上按確認，就會自動開始建圖。你**不需要**再呼叫
-  build_pipeline，也**不要**用文字重列步驟（卡片自己會顯示）。呼叫 plan_pipeline 後
-  只回一句「計畫在上面了，確認後就開始建」即可。
-- 只有使用者明講「直接建 / 不用給我看計畫」時，才用 build_pipeline 跳過計畫卡。
-- 建圖過程會花幾十秒，系統會顯示 Planner / Builder / Director 正在做什麼。
-- 不確定使用者要什麼時，用**一句話**問清楚即可，不要硬猜、也不要一次丟一堆問題。
-- 使用者問候 / 問你是誰 / 問能力 → 自然回答，不要當成分析請求。
-- 顏色（線色 / 背景）不是我能改的參數；使用者要改色 → 請他用圖右上角的 STYLE 面板。"""
+硬規則（少數，其餘看 [Skill 目錄] 的說明書）：
+- 直接自然講話。可以閒聊、解釋、回答「你能幫我做什麼」——**絕對不要**丟制式選單卡逼使用者選。
+- 做事之前：請求命中 [Skill 目錄] 某項的使用時機 → **先用 load_skill 取說明書照做**；只是閒聊或沒命中就不用。
+- 工具沒涵蓋的事老實說做不到；不確定使用者要什麼時，用**一句話**問清楚，不要硬猜。
+- 使用者問候 / 問你是誰 / 問能力 → 自然回答，不要當成分析請求。"""
 
 
 _TOOLS: List[Dict[str, Any]] = [
@@ -471,6 +509,29 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                               "manual": data.get("body")})
             return
 
+        # ── granted external System MCP (re-enabled 2026-07-10; documented by
+        #    the matching 標準 Skill, e.g. process-info-mcp) ──────────────────
+        if name in (ctx.get("granted_mcps") or {}):
+            data = await _call_system_mcp(java, name, inp.get("args") or inp or {})
+            yield ("result", {"status": "ok", "data": data})
+            return
+
+        # ── manage_domain_skill — Domain Skill 管理 writes, confirm-card only ──
+        if name == "manage_domain_skill":
+            action = str(inp.get("action") or "").strip()
+            slug = str(inp.get("slug") or "").strip()
+            if action not in ("deactivate", "delete", "rename") or not slug:
+                yield ("result", {"status": "bad_args",
+                                  "message": "action ∈ deactivate|delete|rename 且必須給 slug（用 list_skills_v2 找）。啟用請用 activate_skill。"})
+                return
+            card = {"type": "skill_admin_confirm", "action": action, "slug": slug,
+                    "new_name": str(inp.get("new_name") or "") or None,
+                    "new_description": str(inp.get("new_description") or "") or None}
+            yield ("event", {"type": "tool_done", "tool": name, "render_card": card})
+            yield ("result", {"status": "confirm_pending",
+                              "message": "管理動作確認卡已顯示，使用者按確認才會執行。只回一句『確認卡在上面了』。"})
+            return
+
         # ── granted built-in READ tools (Phase 6 fast-follow) ──────────────
         if name in _BUILTIN_READ and name in (ctx.get("granted_reads") or set()):
             spec = _BUILTIN_READ[name]
@@ -613,6 +674,44 @@ async def run_chat_agent(
             "input_schema": {"type": "object", "properties": props,
                              "required": spec.get("required", list(spec["args"].keys()))},
         })
+    # granted external System MCPs (re-enabled 2026-07-10) — one tool each;
+    # params come from the MCP's own input_schema (description = the doc source);
+    # the matching 標準 Skill manual teaches the workflow around them.
+    granted_mcps: Dict[str, Any] = {}
+    ext_keys = [g["key"] for g in granted if g.get("kind") == "external" and g.get("key")]
+    if ext_keys:
+        try:
+            defs = {m.get("name"): m for m in (await java.list_mcps() or [])}
+        except Exception:  # noqa: BLE001
+            defs = {}
+        for key in ext_keys:
+            d = defs.get(key) or {}
+            granted_mcps[key] = d
+            param_doc = _mcp_param_doc(d.get("input_schema") or d.get("inputSchema"))
+            tools.append({
+                "name": key,
+                "description": (str(d.get("description") or key)[:400]
+                                + ("　參數：" + param_doc if param_doc else "")),
+                "input_schema": {"type": "object", "properties": {
+                    "args": {"type": "object", "description": "MCP 參數（依上面 input schema 填）"}
+                }},
+            })
+    ctx["granted_mcps"] = granted_mcps
+
+    # Domain Skill 管理 (標準 Skill: domain-skill-management)。writes 走確認卡。
+    tools.append({
+        "name": "manage_domain_skill",
+        "description": "管理 Domain Skill：action ∈ deactivate（停用）| delete（刪除）| rename（改名/描述）。"
+                       "會出確認卡，使用者按確認才執行。啟用用 activate_skill；查清單用 list_skills_v2。"
+                       "delete 不可逆——先跟使用者確認清楚。",
+        "input_schema": {"type": "object", "properties": {
+            "action": {"type": "string", "description": "deactivate | delete | rename"},
+            "slug": {"type": "string", "description": "目標 skill 的 slug"},
+            "new_name": {"type": "string", "description": "rename 用：新名稱"},
+            "new_description": {"type": "string", "description": "rename 用：新描述"},
+        }, "required": ["action", "slug"]},
+    })
+
     # 標準 Skill 目錄 (V82): lightweight index in the prompt; full manual on
     # demand via load_skill. The manuals carry the how-to (e.g. alarm 處理守則)
     # so knowledge lives in DB, editable in GUI — not hardcoded here.

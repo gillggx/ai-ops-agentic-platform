@@ -78,12 +78,14 @@ public class McpCapabilityService {
             "ack_alarm", "dispose_alarm", "resolve_alarm");
 
     /** Whether a capability needs an explicit 對內 grant to reach the Coordinator.
-     *  Only the platform-meta READ built-ins do. Domain skills are the agent's
-     *  DEFAULT repertoire (always usable via invoke_skill, no grant). External
-     *  System MCPs reach the agent ONLY as their V54-derived Skills — a raw MCP
-     *  is never given, so it is not grantable here either. */
+     *  Platform-meta built-ins from the whitelist, plus (2026-07-10 決策)
+     *  external System MCPs — the Coordinator may call a raw System MCP
+     *  directly when IT admin grants it AND a 標準 Skill manual documents its
+     *  usage (e.g. process-info-mcp). Domain skills stay the DEFAULT repertoire
+     *  (always usable via invoke_skill, no grant). */
     static boolean coordinatorEligible(String kind, String key) {
-        return "builtin".equals(kind) && COORDINATOR_BUILTINS.contains(key);
+        return ("builtin".equals(kind) && COORDINATOR_BUILTINS.contains(key))
+                || "external".equals(kind);
     }
 
     /**
