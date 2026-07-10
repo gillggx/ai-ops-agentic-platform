@@ -52,13 +52,13 @@ _BUILTIN_READ: Dict[str, Dict[str, Any]] = {
     # Alarm 處理能力包 (2026-07-10) — history + handling-state reads.
     "query_alarms": {
         "desc": "查告警「歷史 + 處理狀況」：可依機台 / 期間 / 狀態 / 嚴重度過濾。"
-                "每筆含 status(open|acknowledged|resolved)、acknowledged_by、"
+                "每筆含 status(active|acknowledged|resolved)、acknowledged_by、"
                 "disposition(release|hold|scrap|rerun)、disposition_reason。"
                 "使用者問「EQP-07 過去有哪些告警、處理到哪了」時用；回覆用 markdown 表格整理重點。",
         "path": "/internal/alarms/query", "query": True, "required": [],
         "args": {"equipment_id": {"type": "string", "description": "機台 id，如 EQP-07（省略=全部）"},
                  "since_hours": {"type": "integer", "description": "往回看幾小時（預設 168 = 7 天）"},
-                 "status": {"type": "string", "description": "open | acknowledged | resolved（省略=全部）"},
+                 "status": {"type": "string", "description": "active(未認領) | acknowledged | resolved（省略=全部）"},
                  "severity": {"type": "string", "description": "critical | high | medium | low（省略=全部）"},
                  "limit": {"type": "integer", "description": "最多幾筆（預設 50）"}}},
     "get_alarm_stats": {
