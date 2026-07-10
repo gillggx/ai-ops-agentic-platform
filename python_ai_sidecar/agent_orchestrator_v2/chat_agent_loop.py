@@ -539,6 +539,13 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
             }
             if not slug:
                 card["pipeline_json"] = snap
+                # 參數化 (2026-07-10): deterministic 掃出可變數化的 source 身分
+                # 參數，卡片上讓使用者勾選 — 確認時前端先套用再 create。
+                try:
+                    from python_ai_sidecar.pipeline_builder.parameterize import find_candidates
+                    card["param_candidates"] = find_candidates(snap)
+                except Exception as exc:
+                    logger.warning("find_candidates failed (skill activate card): %s", exc)
             yield ("event", {"type": "tool_done", "tool": "activate_skill", "render_card": card})
             yield ("result", {"status": "confirm_pending",
                               "message": "啟用確認卡已顯示（名稱／描述可改），使用者按確認才會生效。"

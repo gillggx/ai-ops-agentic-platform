@@ -74,6 +74,21 @@ export default function SkillEditorPage() {
   }, [slug]);
   const [toast, setToast] = useState("");
   const nlRef = useRef<HTMLTextAreaElement | null>(null);
+  // 參數化 (2026-07-10): 詳情頁顯示 pipeline 已宣告的可變欄位。
+  const [declaredInputs, setDeclaredInputs] = useState<Array<{
+    name: string; description?: string; default?: unknown;
+  }>>([]);
+  useEffect(() => {
+    if (!skill?.pipeline_id) { setDeclaredInputs([]); return; }
+    fetch(`/api/pipeline-builder/pipelines/${skill.pipeline_id}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const raw = data?.data?.pipeline_json ?? data?.pipeline_json;
+        const pj = typeof raw === "string" ? JSON.parse(raw) : raw;
+        setDeclaredInputs(Array.isArray(pj?.inputs) ? pj.inputs : []);
+      })
+      .catch(() => setDeclaredInputs([]));
+  }, [skill?.pipeline_id, toast]);
 
   useEffect(() => { ensurePlexFont(); }, []);
 
@@ -162,6 +177,14 @@ export default function SkillEditorPage() {
   const [activateFormOpen, setActivateFormOpen] = useState(false);
   const [formName, setFormName] = useState("");
   const [formNl, setFormNl] = useState("");
+  // 參數化 (2026-07-10): 啟用時把寫死的 source 身分參數升級成可變欄位。
+  interface ParamCandidate {
+    name: string; label: string; default: unknown;
+    conflicting_values?: unknown[];
+  }
+  const [paramCands, setParamCands] = useState<ParamCandidate[]>([]);
+  const [paramAccepted, setParamAccepted] = useState<Set<string>>(new Set());
+  const [formPipeline, setFormPipeline] = useState<Record<string, unknown> | null>(null);
   // F3 (2026-07-10): display name is editable in place (slug/URL unchanged).
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -171,7 +194,33 @@ export default function SkillEditorPage() {
     if (activate) {
       setFormName(skill.name || "");
       setFormNl(skill.nl || "");
+      setParamCands([]);
+      setParamAccepted(new Set());
+      setFormPipeline(null);
       setActivateFormOpen(true);
+      // 掃可變欄位候選（deterministic）— 失敗就靜默降級成原本的表單。
+      void (async () => {
+        try {
+          const rf = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/pipeline`, { cache: "no-store" });
+          if (!rf.ok) return;
+          const env = await rf.json();
+          const full = env?.data ?? env;
+          const pj = typeof full?.pipeline_json === "string"
+            ? JSON.parse(full.pipeline_json) : full?.pipeline_json;
+          if (!pj || !Array.isArray(pj.nodes)) return;
+          setFormPipeline(pj as Record<string, unknown>);
+          const rp = await fetch("/api/pipeline/parameterize", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pipeline_json: pj }),
+          });
+          if (!rp.ok) return;
+          const pe = await rp.json();
+          const cands = (pe?.candidates ?? []) as ParamCandidate[];
+          setParamCands(cands);
+          setParamAccepted(new Set(
+            cands.filter((c) => !c.conflicting_values?.length).map((c) => c.name)));
+        } catch { /* scan is best-effort — activation itself unaffected */ }
+      })();
       return;
     }
     setActivating(true);
@@ -196,6 +245,22 @@ export default function SkillEditorPage() {
     if (!name) { setToast(t("nameRequired")); return; }
     setActivating(true);
     try {
+      // 參數化：勾了才動 pipeline；全不勾 = 跟原本啟用完全一樣。
+      const accept = paramCands.filter((c) => paramAccepted.has(c.name)).map((c) => c.name);
+      if (accept.length > 0 && formPipeline) {
+        const rp = await fetch("/api/pipeline/parameterize", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pipeline_json: formPipeline, accept }),
+        });
+        const pe = await rp.json().catch(() => ({}));
+        if (!rp.ok) throw new Error(pe?.detail || pe?.error || `參數化失敗 HTTP ${rp.status}`);
+        if (!pe?.pipeline_json) throw new Error("參數化回傳異常");
+        const pw = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/pipeline`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pipeline_json: pe.pipeline_json }),
+        });
+        if (!pw.ok) throw new Error(`儲存參數化 pipeline 失敗 HTTP ${pw.status}`);
+      }
       const put = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -217,7 +282,7 @@ export default function SkillEditorPage() {
     } finally {
       setActivating(false);
     }
-  }, [skill, slug, formName, formNl, t]);
+  }, [skill, slug, formName, formNl, paramCands, paramAccepted, formPipeline, t]);
 
   const handleSaveName = useCallback(async () => {
     if (!skill) return;
@@ -409,6 +474,26 @@ export default function SkillEditorPage() {
                 )}
               </span>
             </div>
+            {declaredInputs.length > 0 && (
+              <div style={{
+                padding: "9px 18px", borderBottom: `1px solid ${TK.divider}`,
+                display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: TK.body }}>可變欄位</span>
+                {declaredInputs.map((i) => (
+                  <span key={i.name} title={i.description || ""} style={{
+                    fontSize: 11.5, padding: "3px 9px", borderRadius: 999,
+                    background: "var(--pl, #eef2ff)", color: TK.ink,
+                    border: "1px solid #c7d2fe", fontFamily: FONT.mono,
+                  }}>
+                    ${i.name}
+                    {i.default !== undefined && i.default !== null && (
+                      <span style={{ color: TK.body }}> = {String(i.default)}</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
             <div style={{ padding: "14px 18px" }}>
               <SkillCanvasView pipelineId={skill.pipeline_id} height={460} />
             </div>
@@ -483,6 +568,42 @@ export default function SkillEditorPage() {
                   style={{ font: `13px/1.5 ${FONT.sans}`, padding: "8px 11px", borderRadius: 8,
                            border: `1px solid ${TK.divider}`, color: TK.ink, outline: "none", resize: "vertical" }} />
               </label>
+              {paramCands.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: TK.body }}>
+                    可變欄位 — 勾選的值以後每次執行都能換（未勾 = 永遠固定）
+                  </div>
+                  {paramCands.map((c) => {
+                    const on = paramAccepted.has(c.name);
+                    const conflict = (c.conflicting_values?.length ?? 0) > 0;
+                    return (
+                      <label key={c.name} style={{
+                        display: "flex", alignItems: "flex-start", gap: 8,
+                        padding: "7px 10px", borderRadius: 8, cursor: "pointer",
+                        border: `1px solid ${on ? "var(--p, #2b6cb0)" : TK.divider}`,
+                        background: on ? "var(--pl, #f0f7ff)" : "#fff",
+                      }}>
+                        <input type="checkbox" checked={on} style={{ marginTop: 2 }}
+                          onChange={() => setParamAccepted((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(c.name)) next.delete(c.name); else next.add(c.name);
+                            return next;
+                          })} />
+                        <span style={{ fontSize: 12.5, color: TK.ink, lineHeight: 1.5 }}>
+                          <b>{c.label}</b>
+                          <span style={{ color: TK.body }}>（預設 {String(c.default)}）</span>
+                          {conflict && (
+                            <span style={{ display: "block", fontSize: 11, color: "#B45309" }}>
+                              [note] 圖裡有多個不同值（{c.conflicting_values!.map(String).join("、")}）—
+                              勾選後會統一成同一個欄位
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div style={{ padding: "12px 20px", borderTop: `1px solid ${TK.divider}`,
                           display: "flex", justifyContent: "flex-end", gap: 8 }}>

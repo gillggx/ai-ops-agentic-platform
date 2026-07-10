@@ -13,11 +13,24 @@
  */
 import { useEffect, useState } from "react";
 
+export interface SkillParamCandidate {
+  name: string;
+  type: string;
+  label: string;
+  description: string;
+  default: unknown;
+  sites: Array<{ node: string; param: string }>;
+  conflicting_values?: unknown[];
+}
+
 export interface SkillActivateConfirmData {
   slug?: string | null;
   suggested_name?: string | null;
   suggested_description?: string | null;
   pipeline_json?: Record<string, unknown> | null;
+  /** 參數化 (2026-07-10): deterministic scan of hardcoded source identity
+   *  params — checked candidates get upgraded to $inputs before create. */
+  param_candidates?: SkillParamCandidate[];
   /** AIAgentPanel threads the user's original prompt as a description fallback. */
   goal?: string;
 }
@@ -29,6 +42,11 @@ export function SkillActivateConfirmCard({ data }: { data: SkillActivateConfirmD
   const [state, setState] = useState<"idle" | "working" | "done" | "cancelled" | "error">("idle");
   const [msg, setMsg] = useState("");
   const [doneSlug, setDoneSlug] = useState("");
+  const candidates = data.param_candidates ?? [];
+  // 裁決 (2026-07-10): 無衝突的預設全勾（有預設值，行為不變）；同 key 不同值
+  // 的衝突候選預設不勾，勾了就統一成一個欄位。
+  const [accepted, setAccepted] = useState<Set<string>>(
+    () => new Set(candidates.filter((c) => !c.conflicting_values?.length).map((c) => c.name)));
 
   // Existing skill: prefill from the real row (name / nl) if the agent gave none.
   useEffect(() => {
@@ -53,11 +71,23 @@ export function SkillActivateConfirmCard({ data }: { data: SkillActivateConfirmD
       let slug = data.slug || "";
       if (!slug) {
         if (!data.pipeline_json) throw new Error("沒有可啟用的 pipeline");
+        let pj = data.pipeline_json;
+        const accept = candidates.filter((c) => accepted.has(c.name)).map((c) => c.name);
+        if (accept.length > 0) {
+          const rp = await fetch("/api/pipeline/parameterize", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pipeline_json: pj, accept }),
+          });
+          const pe = await rp.json().catch(() => ({}));
+          if (!rp.ok) throw new Error(pe?.detail || pe?.error || "參數化失敗");
+          if (!pe?.pipeline_json) throw new Error("參數化回傳異常");
+          pj = pe.pipeline_json;
+        }
         const r = await fetch("/api/skills-v2/with-pipeline", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: finalName, nl: desc.trim(), sub: desc.trim().slice(0, 60),
-            pipeline_json: data.pipeline_json, pipeline_kind: "skill",
+            pipeline_json: pj, pipeline_kind: "skill",
           }),
         });
         const env = await r.json();
@@ -127,6 +157,42 @@ export function SkillActivateConfirmCard({ data }: { data: SkillActivateConfirmD
           描述（這個 Skill 做什麼、什麼時候用）
           <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} style={{ ...inp, resize: "vertical" }} />
         </label>
+        {candidates.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B" }}>
+              可變欄位 — 勾選的值以後每次執行都能換（未勾 = 永遠固定）
+            </div>
+            {candidates.map((c) => {
+              const on = accepted.has(c.name);
+              const conflict = (c.conflicting_values?.length ?? 0) > 0;
+              return (
+                <label key={c.name} style={{
+                  display: "flex", alignItems: "flex-start", gap: 8,
+                  padding: "7px 10px", borderRadius: 8, cursor: "pointer",
+                  border: `1px solid ${on ? "var(--p, #2b6cb0)" : "#E2E8F0"}`,
+                  background: on ? "var(--pl, #f0f7ff)" : "#fff",
+                }}>
+                  <input type="checkbox" checked={on} style={{ marginTop: 2 }}
+                    onChange={() => setAccepted((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(c.name)) next.delete(c.name); else next.add(c.name);
+                      return next;
+                    })} />
+                  <span style={{ fontSize: 12, color: "#0f172a", lineHeight: 1.5 }}>
+                    <b>{c.label}</b>
+                    <span style={{ color: "#64748B" }}>（預設 {String(c.default)}）</span>
+                    {conflict && (
+                      <span style={{ display: "block", fontSize: 11, color: "#B45309" }}>
+                        [note] 圖裡有多個不同值（{c.conflicting_values!.map(String).join("、")}）—
+                        勾選後會統一成同一個欄位
+                      </span>
+                    )}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
       {msg && <div style={{ padding: "0 15px 8px", fontSize: 12, color: "#B91C1C" }}>{msg}</div>}
       <div style={{ padding: "11px 15px", borderTop: "1px solid #EEF2F6", display: "flex", justifyContent: "flex-end", gap: 8 }}>
