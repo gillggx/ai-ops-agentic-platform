@@ -778,8 +778,16 @@ async def run_chat_agent(
                     yield payload            # relay to frontend (cards / progress)
                 elif kind == "result":
                     result_val = payload     # what the model reads
+            payload_str = json.dumps(result_val, ensure_ascii=False, default=str)
+            # 2026-07-10: a tool once returned ~3.5MB (886K tokens) and blew the
+            # context (400 prompt-too-long, user saw an error). Hard-cap every
+            # tool_result — the model is told to narrow the query instead.
+            if len(payload_str) > 30000:
+                payload_str = (payload_str[:30000]
+                               + f'…[截斷：結果過大（{len(payload_str)} 字元）。'
+                                 '請改用更窄的過濾條件（機台/期間/limit）再查一次。]')
             results.append({"type": "tool_result", "tool_use_id": tu.get("id"),
-                            "content": json.dumps(result_val, ensure_ascii=False, default=str)})
+                            "content": payload_str})
         messages.append({"role": "user", "content": results})
 
     yield {"type": "synthesis", "text": "（我想太久了，先講到這；你可以再說清楚一點我幫你查。）"}
