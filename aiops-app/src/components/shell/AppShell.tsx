@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 // Resizable panel via native CSS resize
+import { ChatOpsSidebar } from "@/components/chatops/ChatOpsSidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import HandoffListener from "@/components/shell/HandoffListener";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
@@ -237,6 +238,23 @@ function Shell({ children }: { children: React.ReactNode }) {
   // Phase 5-UX-5: right-side AI Agent is the sole entry (Topbar reverted).
   // Open by default so users see the chat prompt immediately.
   const [copilotOpen, setCopilotOpen] = useState(true);
+  // Phase B ChatOps (2026-07-10): /chatops renders the SAME panel as a
+  // centered wide column + a conversation-history sidebar. One instance —
+  // all Live-Canvas / glass wiring below keeps working unchanged.
+  const pathname = usePathname() ?? "";
+  const isChatOps = pathname === "/chatops";
+  const [chatOpsSess, setChatOpsSess] = useState<{
+    id: string | null;
+    messages: Array<{ role: string; content: string }>;
+    nonce: number;
+  }>({ id: null, messages: [], nonce: 0 });
+  const [sessionsTick, setSessionsTick] = useState(0);
+  // Remember the last non-ChatOps page so the Topbar Copilot pill returns there.
+  useEffect(() => {
+    if (!isChatOps) {
+      try { localStorage.setItem("chatops:last-path", pathname); } catch { /* ignore */ }
+    }
+  }, [pathname, isChatOps]);
   // Phase 5-UX-6: Live Glass Box overlay.
   // When chat agent calls build_pipeline_live, the first pb_glass_start event
   // opens this overlay with an empty canvas; subsequent pb_glass_op events
@@ -296,94 +314,16 @@ function Shell({ children }: { children: React.ReactNode }) {
     setTriggerMessage(`請執行 ${mcp}，參數：${JSON.stringify(params ?? {})}`);
   }
 
-  return (
-    <div style={{
-      display: "flex", flexDirection: "column",
-      height: "100vh", background: "var(--ws, #f7f8fc)", overflow: "hidden",
-    }}>
-      <Topbar />
-      <HandoffListener />
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {/* Sidebar + main + copilot toggle live in a relative container so
-            LiveCanvasOverlay can position-absolute over them without also
-            covering the right AI Agent rail. */}
-        <div style={{
-          flex: 1, display: "flex", overflow: "hidden",
-          position: "relative", minWidth: 0,
-        }}>
-          <ContextualSidebar />
-          <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
-            {dataExplorer ? (
-              <DataExplorerPanel
-                state={dataExplorer}
-                onClose={() => setDataExplorer(null)}
-              />
-            ) : investigateMode && contract ? (
-              <AnalysisPanel
-                contract={contract}
-                onClose={() => { setInvestigateMode(false); setContract(null); }}
-                onAgentMessage={(msg) => setTriggerMessage(msg)}
-                onHandoff={handleHandoff}
-              />
-            ) : children}
-          </main>
-          {/* Copilot toggle strip (always visible) */}
-          <div
-            onClick={() => setCopilotOpen(o => !o)}
-            style={{
-              width: 28, flexShrink: 0,
-              display: "flex", flexDirection: "column", alignItems: "center",
-              justifyContent: "center", gap: 6,
-              background: copilotOpen ? "var(--ws, #f7f8fc)" : "var(--pl, #ebf8ff)",
-              borderLeft: "1px solid #e2e8f0",
-              cursor: "pointer", userSelect: "none",
-              transition: "background 0.15s",
-            }}
-            title={copilotOpen ? t("collapseCopilot") : t("expandCopilot")}
-          >
-            <span style={{ fontSize: 14 }}>{copilotOpen ? "▶" : "◀"}</span>
-            <span style={{
-              writingMode: "vertical-rl", fontSize: 11, fontWeight: 600,
-              color: copilotOpen ? "#a0aec0" : "var(--p, #2b6cb0)", letterSpacing: "1px",
-            }}>
-              AI Agent
-            </span>
-          </div>
-
-          {/* Lite Canvas overlay — auto-opens on pb_glass_start. Hosts a
-              read-only DagCanvas + a "結果" tab that shows the auto-run
-              ResultsBody. Sits as an absolute layer over sidebar+main, not
-              over the right AI Agent rail. */}
-          {glassOverlay && (
-            <LiteCanvasOverlay
-              sessionId={glassOverlay.sessionId}
-              goal={glassOverlay.goal}
-              active={glassOverlay.active}
-              events={glassEvents}
-              planItems={overlayPlanItems}
-              runPhase={runPhase}
-              runError={runError}
-              durationMs={durationMs}
-              summary={pipelineResult?.summary ?? null}
-              nodeResults={pipelineResult?.nodeResults ?? {}}
-              onClose={() => {
-                setGlassOverlay(null);
-                resetOverlayState();
-              }}
-            />
-          )}
-        </div>
-
-        {/* AI Agent panel (collapsible) */}
-        {copilotOpen && (
-          <aside style={{
-            width: 380, minWidth: 280, maxWidth: "50vw", flexShrink: 0,
-            display: "flex", flexDirection: "column",
-            background: "var(--pn, #ffffff)", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
-            resize: "horizontal", direction: "rtl",
-          }}>
-            <div style={{ direction: "ltr", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+  const agentPanelEl = (
               <AIAgentPanel
+                key={isChatOps ? `chatops-${chatOpsSess.nonce}` : "dock"}
+                sessionId={isChatOps ? (chatOpsSess.id ?? undefined) : undefined}
+                initialMessages={isChatOps ? chatOpsSess.messages : undefined}
+                onSessionResolved={(sid) => {
+                  if (!isChatOps) return;
+                  setChatOpsSess((prev) => (prev.id === sid ? prev : { ...prev, id: sid }));
+                  setSessionsTick((x) => x + 1);
+                }}
                 onContract={handleContract}
                 onDataExplorer={handleDataExplorer}
                 triggerMessage={triggerMessage}
@@ -460,6 +400,135 @@ function Shell({ children }: { children: React.ReactNode }) {
                   setRunError(msg);
                 }}
               />
+  );
+
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column",
+      height: "100vh", background: "var(--ws, #f7f8fc)", overflow: "hidden",
+    }}>
+      <Topbar />
+      <HandoffListener />
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* Sidebar + main + copilot toggle live in a relative container so
+            LiveCanvasOverlay can position-absolute over them without also
+            covering the right AI Agent rail. */}
+        <div style={{
+          flex: 1, display: "flex", overflow: "hidden",
+          position: "relative", minWidth: 0,
+        }}>
+          <ContextualSidebar />
+          {isChatOps ? (
+            <>
+              <ChatOpsSidebar
+                activeId={chatOpsSess.id}
+                refreshTick={sessionsTick}
+                onNew={() => setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }))}
+                onSelect={async (sid) => {
+                  // Hydrate the persisted text history, then remount the panel
+                  // on that session (cards are not persisted — text turns only).
+                  let msgs: Array<{ role: string; content: string }> = [];
+                  try {
+                    const r = await fetch(`/api/agent/session/${encodeURIComponent(sid)}`, { cache: "no-store" });
+                    const env = await r.json();
+                    const row = env?.data ?? env;
+                    const raw = row?.messages;
+                    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+                    if (Array.isArray(parsed)) msgs = parsed;
+                  } catch { /* resume with empty history — new turns still work */ }
+                  setChatOpsSess((prev) => ({ id: sid, messages: msgs, nonce: prev.nonce + 1 }));
+                }}
+              />
+              <div style={{
+                flex: 1, display: "flex", justifyContent: "center",
+                overflow: "hidden", minWidth: 0, background: "var(--ws, #f7f8fc)",
+              }}>
+                <div style={{
+                  width: "100%", maxWidth: 960,
+                  display: "flex", flexDirection: "column", overflow: "hidden",
+                  background: "var(--pn, #ffffff)",
+                  borderLeft: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0",
+                }}>
+                  {agentPanelEl}
+                </div>
+              </div>
+              {/* keep the route's page mounted (it renders null) */}
+              <div style={{ display: "none" }}>{children}</div>
+            </>
+          ) : (
+          <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
+            {dataExplorer ? (
+              <DataExplorerPanel
+                state={dataExplorer}
+                onClose={() => setDataExplorer(null)}
+              />
+            ) : investigateMode && contract ? (
+              <AnalysisPanel
+                contract={contract}
+                onClose={() => { setInvestigateMode(false); setContract(null); }}
+                onAgentMessage={(msg) => setTriggerMessage(msg)}
+                onHandoff={handleHandoff}
+              />
+            ) : children}
+          </main>
+          )}
+          {/* Copilot toggle strip (hidden in ChatOps — the panel IS the page) */}
+          {!isChatOps && <div
+            onClick={() => setCopilotOpen(o => !o)}
+            style={{
+              width: 28, flexShrink: 0,
+              display: "flex", flexDirection: "column", alignItems: "center",
+              justifyContent: "center", gap: 6,
+              background: copilotOpen ? "var(--ws, #f7f8fc)" : "var(--pl, #ebf8ff)",
+              borderLeft: "1px solid #e2e8f0",
+              cursor: "pointer", userSelect: "none",
+              transition: "background 0.15s",
+            }}
+            title={copilotOpen ? t("collapseCopilot") : t("expandCopilot")}
+          >
+            <span style={{ fontSize: 14 }}>{copilotOpen ? "▶" : "◀"}</span>
+            <span style={{
+              writingMode: "vertical-rl", fontSize: 11, fontWeight: 600,
+              color: copilotOpen ? "#a0aec0" : "var(--p, #2b6cb0)", letterSpacing: "1px",
+            }}>
+              AI Agent
+            </span>
+          </div>}
+
+          {/* Lite Canvas overlay — auto-opens on pb_glass_start. Hosts a
+              read-only DagCanvas + a "結果" tab that shows the auto-run
+              ResultsBody. Sits as an absolute layer over sidebar+main, not
+              over the right AI Agent rail. */}
+          {glassOverlay && (
+            <LiteCanvasOverlay
+              sessionId={glassOverlay.sessionId}
+              goal={glassOverlay.goal}
+              active={glassOverlay.active}
+              events={glassEvents}
+              planItems={overlayPlanItems}
+              runPhase={runPhase}
+              runError={runError}
+              durationMs={durationMs}
+              summary={pipelineResult?.summary ?? null}
+              nodeResults={pipelineResult?.nodeResults ?? {}}
+              onClose={() => {
+                setGlassOverlay(null);
+                resetOverlayState();
+              }}
+            />
+          )}
+        </div>
+
+        {/* AI Agent panel (collapsible; hidden in ChatOps — same instance renders center) */}
+        {!isChatOps && copilotOpen && (
+          <aside style={{
+            width: 380, minWidth: 280, maxWidth: "50vw", flexShrink: 0,
+            display: "flex", flexDirection: "column",
+            background: "var(--pn, #ffffff)", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
+            resize: "horizontal", direction: "rtl",
+          }}>
+            <div style={{ direction: "ltr", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+              {agentPanelEl}
             </div>
           </aside>
         )}

@@ -306,6 +306,13 @@ interface Props {
   // second copy of the charts / DAG. Instead we leave a compact chip so the
   // user still sees a chat trace of the event.
   liteCanvasActive?: boolean;
+  /** Phase B ChatOps (2026-07-10): seed the conversation with persisted text
+   *  history when resuming a session from the ChatOps sidebar. Cards are not
+   *  persisted — resumed history renders as plain text turns. */
+  initialMessages?: Array<{ role: string; content: string }>;
+  /** Fires when the backend resolves/creates the session id (done event) so
+   *  the ChatOps sidebar can refresh + highlight the active conversation. */
+  onSessionResolved?: (sessionId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -646,6 +653,8 @@ export function AIAgentPanel({
   agentMode = "chat",
   pipelineSnapshot,
   liteCanvasActive = false,
+  initialMessages,
+  onSessionResolved,
 }: Props) {
   // Part B (SPEC_context_engineering): pull selected equipment from AppContext
   // so chat requests can carry user focus to the agent's load_context_node.
@@ -660,7 +669,15 @@ export function AIAgentPanel({
   // drives a long build — makes the「等十幾秒」transparent (who is doing what).
   const [activeRole, setActiveRole] = useState<{ role: string; text: string } | null>(null);
   const [logs, setLogs]             = useState<LogEntry[]>([]);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(() =>
+    // ChatOps resume: persisted history is text-only turns.
+    (initialMessages ?? [])
+      .filter((m) => typeof m.content === "string" && m.content.trim())
+      .map((m) => ({
+        id: nextId(),
+        role: (m.role === "user" ? "user" : "agent") as "user" | "agent",
+        content: m.content,
+      })));
   // v1.7 — slash command menu (triggered by typing "/" at start of input).
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
@@ -2004,6 +2021,7 @@ export function AIAgentPanel({
 
           case "done":
             sessionIdRef.current = ev.session_id as string;
+            if (ev.session_id) onSessionResolved?.(ev.session_id as string);
             break;
 
           // ── Auto-Run after build_pipeline_live ──────────────────

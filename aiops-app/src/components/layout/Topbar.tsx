@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
 import { NotificationBell } from "./NotificationBell";
@@ -32,10 +33,45 @@ export function Topbar() {
       <span style={{ fontWeight: 700, fontSize: "var(--fs-xl)", color: "var(--p, #2b6cb0)", letterSpacing: "-0.3px" }}>
         AIOps
       </span>
+      {session && <ModeSwitch />}
       <div style={{ flex: 1 }} />
       {session && <NotificationBell />}
       <UserMenu />
     </header>
+  );
+}
+
+/** Phase B (design v2): Copilot ⇄ ChatOps presentation switch. ChatOps is the
+ *  conversation-first surface (/chatops); Copilot returns to the last page. */
+function ModeSwitch() {
+  const pathname = usePathname() ?? "";
+  const router = useRouter();
+  const chatOps = pathname === "/chatops";
+  const go = (mode: "copilot" | "chatops") => {
+    try { localStorage.setItem("ui_mode", mode); } catch { /* private mode */ }
+    if (mode === "chatops" && !chatOps) router.push("/chatops");
+    if (mode === "copilot" && chatOps) {
+      let target = "/dashboard";
+      try { target = localStorage.getItem("chatops:last-path") || "/dashboard"; } catch { /* ignore */ }
+      router.push(target.startsWith("/") ? target : "/dashboard");
+    }
+  };
+  const base: React.CSSProperties = {
+    padding: "4px 14px", borderRadius: 7, fontSize: 12.5, fontWeight: 600,
+    border: "none", cursor: "pointer", background: "transparent", color: "#64748b",
+  };
+  const on: React.CSSProperties = {
+    ...base, background: "#fff", color: "#0f172a",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.10)",
+  };
+  return (
+    <div style={{
+      display: "flex", gap: 2, background: "var(--ws, #f1f5f9)",
+      border: "1px solid #e2e8f0", borderRadius: 9, padding: 2, marginLeft: 10,
+    }}>
+      <button style={chatOps ? base : on} onClick={() => go("copilot")}>Copilot</button>
+      <button style={chatOps ? on : base} onClick={() => go("chatops")}>ChatOps</button>
+    </div>
   );
 }
 
