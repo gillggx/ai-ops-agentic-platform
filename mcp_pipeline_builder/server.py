@@ -938,6 +938,23 @@ async def resolve_alarm(alarm_id: int) -> dict:
 
 
 @mcp.tool()
+async def list_standard_skills() -> Any:
+    """標準 Skill 目錄 — named instruction manuals (name + when_to_use) that
+    teach the agent HOW to handle a task family (e.g. alarm-handling). READ-
+    only. Distinct from Domain Skills (pipelines). Load one with load_skill."""
+    async with httpx.AsyncClient() as c:
+        return await _api_v1(c, "GET", "/agent-skills")
+
+
+@mcp.tool()
+async def load_skill(name: str) -> Any:
+    """Fetch one 標準 Skill's full manual (markdown body). Call when the
+    human's request matches its when_to_use, then FOLLOW the manual. READ-only."""
+    async with httpx.AsyncClient() as c:
+        return await _api_v1(c, "GET", f"/agent-skills/{name}")
+
+
+@mcp.tool()
 async def list_agent_knowledge() -> Any:
     """List the build agent's active directives (the knowledge that steers how
     it plans/builds pipelines). READ-only. To ADD a knowledge item use

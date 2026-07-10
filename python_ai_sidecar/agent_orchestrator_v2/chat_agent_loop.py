@@ -114,6 +114,26 @@ async def _granted_agent_tools(java: Any) -> List[Dict[str, Any]]:
     return _granted_cache["tools"]
 
 
+# 標準 Skill index (V82, 2026-07-10): name + when_to_use lines injected into
+# the system prompt; the FULL manual is fetched via load_skill only when the
+# request matches — progressive disclosure, the manual is DB data not code.
+_skill_index_cache: dict = {"rows": [], "at": 0.0}
+
+
+async def _standard_skill_index(java: Any) -> List[Dict[str, Any]]:
+    import time
+    now = time.monotonic()
+    if _skill_index_cache["at"] > 0 and now - _skill_index_cache["at"] < _GRANTED_TTL:
+        return _skill_index_cache["rows"]
+    try:
+        data = await java._get_data("/internal/agent-skills/index")
+        _skill_index_cache["rows"] = data if isinstance(data, list) else []
+        _skill_index_cache["at"] = now
+    except Exception as ex:  # noqa: BLE001 — fail-soft (no index, tools still work)
+        logger.warning("standard skill index fetch failed: %s", ex)
+    return _skill_index_cache["rows"]
+
+
 def is_chat_agent_loop_enabled() -> bool:
     return os.environ.get("CHAT_AGENT_LOOP_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -438,6 +458,19 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                               "message": "已開一張卡帶使用者去自動化設定頁（跟 Skill 庫一致），不用在對話裡填設定。"})
             return
 
+        # ── load_skill — fetch a 標準 Skill's full manual (always available) ──
+        if name == "load_skill":
+            skill_name = str(inp.get("name") or "").strip()
+            data = await java._get_data(
+                f"/internal/agent-skills/{skill_name}") if skill_name else None
+            if not isinstance(data, dict) or not data.get("body"):
+                yield ("result", {"status": "not_found",
+                                  "message": f"沒有叫「{skill_name}」的標準 Skill；目錄裡有哪些就用哪些。"})
+                return
+            yield ("result", {"status": "ok", "name": data.get("name"),
+                              "manual": data.get("body")})
+            return
+
         # ── granted built-in READ tools (Phase 6 fast-follow) ──────────────
         if name in _BUILTIN_READ and name in (ctx.get("granted_reads") or set()):
             spec = _BUILTIN_READ[name]
@@ -580,12 +613,23 @@ async def run_chat_agent(
             "input_schema": {"type": "object", "properties": props,
                              "required": spec.get("required", list(spec["args"].keys()))},
         })
-    if granted_writes:
-        system += ("\n\n[告警處理守則] 查詢（query_alarms / get_alarm_stats / get_alarm_detail）直接用工具秒回，"
-                   "**不要**為了查資料建 pipeline。動作（ack / dispose / resolve）一律出確認卡、使用者按了才生效；"
-                   "dispose 前先看 detail 的 evidence 並確認原因。"
-                   "只有使用者要「自動跑 / 定期巡檢 / 幫我盯著」時，才用 search_skills 找現成 Skill"
-                   "（有就 invoke_skill 或帶去設自動化；沒有才提議建一條）。")
+    # 標準 Skill 目錄 (V82): lightweight index in the prompt; full manual on
+    # demand via load_skill. The manuals carry the how-to (e.g. alarm 處理守則)
+    # so knowledge lives in DB, editable in GUI — not hardcoded here.
+    skill_index = await _standard_skill_index(java)
+    if skill_index:
+        tools.append({
+            "name": "load_skill",
+            "description": "載入一份「標準 Skill」的完整說明書（操作手冊）。當使用者的請求符合"
+                           "[Skill 目錄] 某項的使用時機時，**先呼叫這個**取得作法，再照著做。參數 name。",
+            "input_schema": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "目錄裡的 skill 名稱，如 alarm-handling"}
+            }, "required": ["name"]},
+        })
+        lines = "\n".join(f"- {s.get('name')}：{s.get('when_to_use')}"
+                          for s in skill_index[:20])
+        system += ("\n\n[Skill 目錄]（命中使用時機 → 先用 load_skill 取全文說明書再動工；"
+                   "只是閒聊或目錄沒命中就不用）\n" + lines)
 
     for _round in range(MAX_TOOL_ROUNDS):
         resp = await client.create(system=system, messages=messages,

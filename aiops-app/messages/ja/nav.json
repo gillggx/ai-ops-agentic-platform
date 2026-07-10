@@ -23,5 +23,6 @@
   "expandCopilot": "Copilot を展開",
   "collapseCopilot": "Copilot を折りたたむ",
   "buildIncomplete": "ビルドが完了しませんでした（status={status}）",
-  "draftShelf": "下書き棚"
+  "draftShelf": "下書き棚",
+  "agentSkills": "標準スキル"
 }

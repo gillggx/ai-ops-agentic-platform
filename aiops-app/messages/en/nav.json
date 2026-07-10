@@ -23,5 +23,6 @@
   "expandCopilot": "Expand Copilot",
   "collapseCopilot": "Collapse Copilot",
   "buildIncomplete": "Build incomplete (status={status})",
-  "draftShelf": "Draft Shelf"
+  "draftShelf": "Draft Shelf",
+  "agentSkills": "Agent Skills"
 }

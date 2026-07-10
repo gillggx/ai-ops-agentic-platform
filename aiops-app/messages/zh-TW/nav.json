@@ -23,5 +23,6 @@
   "expandCopilot": "展開 Copilot",
   "collapseCopilot": "收合 Copilot",
   "buildIncomplete": "建構未完成（status={status}）",
-  "draftShelf": "草稿暫存區"
+  "draftShelf": "草稿暫存區",
+  "agentSkills": "標準 Skill"
 }

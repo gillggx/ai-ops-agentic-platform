@@ -90,6 +90,8 @@ const ADMIN_ITEMS = [
   { href: "/system/monitor",          labelKey: "systemMonitor",    icon: "🖥️" },
   { href: "/admin/simulator-health",  labelKey: "simulatorHealth",  icon: "💓" },
   { href: "/admin/mcp",               labelKey: "mcpRegistry",      icon: "⬢" },
+  // V82 標準 Skill — agent 說明書管理 (non-emoji icon per feedback_no_emoji)
+  { href: "/admin/agent-skills",      labelKey: "agentSkills",      icon: "▤" },
   { href: "/admin/users",             labelKey: "users",            icon: "👥" },
 ];
 
