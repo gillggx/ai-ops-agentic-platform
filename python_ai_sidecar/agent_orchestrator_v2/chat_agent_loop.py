@@ -250,10 +250,11 @@ _TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "plan_pipeline",
-        "description": "使用者要建一張新的圖 / pipeline 時，**用這個**（這是標準做法）。"
+        "description": "使用者要建一張新的圖 / pipeline 時，**直接用這個**（這是標準做法）。"
                        "它會規劃步驟並在對話裡顯示一張『計畫卡』（列出 P1..PN + 確認/修改/取消按鈕），"
                        "使用者在卡片上按確認就會自動開始建圖——你不需要、也不應該再呼叫 build_pipeline。"
-                       "呼叫後只要回一句『計畫在上面了，確認後就開始建』，不要用文字重列步驟。",
+                       "**不要為了 chart 類型、站點等細節先反問**——計畫卡會把規劃結果列出讓使用者確認或修改，"
+                       "那才是收集細節的地方。呼叫後只要回一句『計畫在上面了，確認後就開始建』，不要用文字重列步驟。",
         "input_schema": {"type": "object", "properties": {
             "instruction": {"type": "string", "description": "要建什麼的完整自然語言需求"},
             "edit_current": {"type": "boolean", "description":
