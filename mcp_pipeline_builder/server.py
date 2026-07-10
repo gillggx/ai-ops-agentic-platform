@@ -877,6 +877,66 @@ async def get_alarm_detail(alarm_id: int) -> dict:
         return await _api_v1(c, "GET", f"/alarms/{alarm_id}")
 
 
+# ── Alarm 處理能力包 (2026-07-10) ───────────────────────────────────────────
+# Reads answer history / handling-state questions directly. The three writes
+# NEVER execute from here — alarm actions are confirmed by the human in the
+# authed GUI (same external rule as rules / supervisor), so each returns the
+# /alarms launch_url. The INTERNAL Coordinator gets the same capabilities but
+# via in-chat confirm cards (sidecar chat_agent_loop).
+
+@mcp.tool()
+async def query_alarms(equipment_id: str = "", since_hours: int = 168,
+                       status: str = "", severity: str = "", limit: int = 50) -> Any:
+    """Alarm HISTORY with handling state. Filters: equipment_id (e.g. EQP-07),
+    since_hours (default 168 = 7d), status (open|acknowledged|resolved),
+    severity (critical|high|medium|low), limit (<=200). Each row: id, title,
+    equipment_id, severity, status, created_at, acknowledged_by/at,
+    disposition (release|hold|scrap|rerun), disposition_reason, resolved_at.
+    Use for「EQP-07 過去有哪些告警、處理到哪了」. For the CURRENT situation
+    overview use list_alarms instead. READ-only."""
+    q = (f"?since_hours={int(since_hours)}&limit={int(limit)}"
+         + (f"&equipment_id={equipment_id}" if equipment_id else "")
+         + (f"&status={status}" if status else "")
+         + (f"&severity={severity}" if severity else ""))
+    async with httpx.AsyncClient() as c:
+        return await _api_v1(c, "GET", f"/alarms/query{q}")
+
+
+@mcp.tool()
+async def get_alarm_stats(since_hours: int = 168) -> Any:
+    """Alarm handling statistics over a window (default 7d): total,
+    by_equipment (哪台最多), by_status, by_severity, acked, disposed,
+    ack_rate. Use for「處理狀況如何 / 哪台告警最多」. READ-only."""
+    async with httpx.AsyncClient() as c:
+        return await _api_v1(c, "GET", f"/alarms/stats?since_hours={int(since_hours)}")
+
+
+@mcp.tool()
+async def ack_alarm(alarm_id: int = 0, equipment_id: str = "") -> dict:
+    """Acknowledge (認領) one alarm (alarm_id) or a whole equipment cluster
+    (equipment_id). WRITE — never executes here: returns the /alarms GUI
+    launch_url; the human confirms in the authed UI."""
+    return {"status": "handoff", "launch_url": f"{PUBLIC}/alarms",
+            "note": "alarm 動作需在 GUI 內由本人確認（ack／處置按鈕在告警詳情）。"}
+
+
+@mcp.tool()
+async def dispose_alarm(alarm_id: int, disposition: str, reason: str = "") -> dict:
+    """Record an end-state (release | hold | scrap | rerun) + reason for an
+    alarm; also closes it. WRITE — never executes here: returns the /alarms
+    GUI launch_url for the human to confirm (scrap is irreversible)."""
+    return {"status": "handoff", "launch_url": f"{PUBLIC}/alarms",
+            "note": "處置為不可逆動作，需在 GUI 內由本人確認。"}
+
+
+@mcp.tool()
+async def resolve_alarm(alarm_id: int) -> dict:
+    """Close (結案) an alarm without a disposition. WRITE — never executes
+    here: returns the /alarms GUI launch_url (ADMIN / PE role confirms)."""
+    return {"status": "handoff", "launch_url": f"{PUBLIC}/alarms",
+            "note": "結案需在 GUI 內由本人確認（ADMIN / PE 權限）。"}
+
+
 @mcp.tool()
 async def list_agent_knowledge() -> Any:
     """List the build agent's active directives (the knowledge that steers how
@@ -916,6 +976,8 @@ _WRITE_TOOLS: set[str] = {
     "rule_set_confirm_check_nl", "rule_add_step_nl",
     "rule_request_review", "rule_request_activate", "rule_request_disable",
     "rule_request_delete",
+    # Alarm 處理 (2026-07-10) — GUI-confirm handoffs, never direct writes
+    "ack_alarm", "dispose_alarm", "resolve_alarm",
 }
 
 

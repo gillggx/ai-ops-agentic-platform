@@ -16,6 +16,7 @@ import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "./AgentCon
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
 import { AutomationConfirmCard, type AutomationHandoffData } from "./AutomationConfirmCard";
 import { SkillActivateConfirmCard, type SkillActivateConfirmData } from "./SkillActivateConfirmCard";
+import { AlarmActionConfirmCard, type AlarmActionData } from "./AlarmActionConfirmCard";
 import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } from "./PbPatchProposalCard";
 import type { UiRender } from "@/components/McpChartRenderer";
 import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
@@ -158,7 +159,7 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate" | "alarm_action";
   content: string;
   /** 對話分頁重整（2026-07-05）— BUILD PLAN 卡單卡生命週期 state。 */
   buildPlan?: BuildPlanState;
@@ -194,6 +195,8 @@ interface ChatMessage {
   automationConfirm?: AutomationHandoffData;
   /** F4 (2026-07-10): activate-skill confirm card (editable name/desc). */
   skillActivate?: SkillActivateConfirmData;
+  /** Alarm 處理能力包 (2026-07-10): ack/dispose/resolve confirm card. */
+  alarmAction?: AlarmActionData;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -1315,6 +1318,12 @@ export function AIAgentPanel({
                   // skill NL — was silently persisted as "" before.
                   goal: lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "").trim(),
                 },
+              }]);
+            } else if (card?.type === "alarm_action_confirm") {
+              // Alarm 處理 (2026-07-10): browser-side write on user confirm.
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "alarm_action", content: "",
+                alarmAction: card as unknown as AlarmActionData,
               }]);
             } else if (card?.type === "skill_activate_confirm") {
               // F4 (2026-07-10): activation is a confirm-card write — the
@@ -2550,6 +2559,10 @@ export function AIAgentPanel({
               ) : msg.role === "skill_activate" && msg.skillActivate ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <SkillActivateConfirmCard data={msg.skillActivate} />
+                </div>
+              ) : msg.role === "alarm_action" && msg.alarmAction ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <AlarmActionConfirmCard data={msg.alarmAction} />
                 </div>
               ) : msg.role === "chart_explorer" && msg.flatData && msg.flatMetadata ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>

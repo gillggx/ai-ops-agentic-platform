@@ -69,7 +69,13 @@ public class McpCapabilityService {
             "list_alarms", "get_alarm_detail", "list_agent_knowledge",
             "list_supervisor_proposals", "list_skills_v2", "get_skill_v2",
             "list_agent_activity", "get_agent_activity",
-            "check_skill_ready_for_role", "list_event_sources");
+            "check_skill_ready_for_role", "list_event_sources",
+            // Alarm 處理能力包 (2026-07-10): history/stats reads + handling
+            // writes. The writes never execute server-side from the agent —
+            // they emit a confirm card and the browser performs the POST under
+            // the user's JWT (role gates like resolve=ADMIN_OR_PE apply as-is).
+            "query_alarms", "get_alarm_stats",
+            "ack_alarm", "dispose_alarm", "resolve_alarm");
 
     /** Whether a capability needs an explicit 對內 grant to reach the Coordinator.
      *  Only the platform-meta READ built-ins do. Domain skills are the agent's

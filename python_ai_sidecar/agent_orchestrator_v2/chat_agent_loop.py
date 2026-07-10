@@ -42,18 +42,61 @@ _GRANTED_TTL = 30.0
 # Only added to the Coordinator's toolset when IT admin grants them 對內.
 _BUILTIN_READ: Dict[str, Dict[str, Any]] = {
     "list_alarms": {
-        "desc": "查全廠告警現況：active alarm clusters + KPIs。使用者問「現在有什麼告警 / 廠區狀況」時用。",
+        "desc": "查全廠告警「現況」：active alarm clusters + KPIs。使用者問「現在有什麼告警 / 廠區狀況」時用。"
+                "要查歷史或處理狀況用 query_alarms。",
         "path": "/internal/alarms/situation", "args": {}},
     "get_alarm_detail": {
-        "desc": "查單一告警的完整診斷（AI 綜整 + trigger + evidence）。參數 alarm_id（從 list_alarms 拿）。",
+        "desc": "查單一告警的完整診斷（AI 綜整 + trigger + evidence）。參數 alarm_id（從 list_alarms / query_alarms 拿）。",
         "path": "/internal/alarms/{alarm_id}",
         "args": {"alarm_id": {"type": "integer", "description": "告警 id"}}},
+    # Alarm 處理能力包 (2026-07-10) — history + handling-state reads.
+    "query_alarms": {
+        "desc": "查告警「歷史 + 處理狀況」：可依機台 / 期間 / 狀態 / 嚴重度過濾。"
+                "每筆含 status(open|acknowledged|resolved)、acknowledged_by、"
+                "disposition(release|hold|scrap|rerun)、disposition_reason。"
+                "使用者問「EQP-07 過去有哪些告警、處理到哪了」時用；回覆用 markdown 表格整理重點。",
+        "path": "/internal/alarms/query", "query": True, "required": [],
+        "args": {"equipment_id": {"type": "string", "description": "機台 id，如 EQP-07（省略=全部）"},
+                 "since_hours": {"type": "integer", "description": "往回看幾小時（預設 168 = 7 天）"},
+                 "status": {"type": "string", "description": "open | acknowledged | resolved（省略=全部）"},
+                 "severity": {"type": "string", "description": "critical | high | medium | low（省略=全部）"},
+                 "limit": {"type": "integer", "description": "最多幾筆（預設 50）"}}},
+    "get_alarm_stats": {
+        "desc": "告警處理統計：total、by_equipment（哪台最多）、by_status、by_severity、acked、disposed、ack_rate。"
+                "使用者問「處理狀況如何 / 哪台告警最多 / 最常 OOC 的機台」時先用這個。",
+        "path": "/internal/alarms/stats", "query": True, "required": [],
+        "args": {"since_hours": {"type": "integer", "description": "往回看幾小時（預設 168 = 7 天）"}}},
     "list_agent_knowledge": {
-        "desc": "列 build agent 目前生效的 knowledge / directives（引導它怎麼規劃建圖的規則）。",
+        "desc": "列出目前生效的 knowledge / directives——使用者交代過的規則、偏好都在這。"
+                "使用者問「我跟你說過什麼 / 有哪些 rules」時用。",
         "path": "/internal/agent-knowledge/directives/active?user_id={user_id}", "args": {}},
     "list_supervisor_proposals": {
         "desc": "列 Supervisor 待人審核的策展提案（prune / promote / merge / correct）。核准在 /supervisor 頁做。",
         "path": "/internal/supervisor/proposals-open", "args": {}},
+}
+
+# Alarm handling WRITES (2026-07-10). The agent NEVER executes these — each
+# emits an `alarm_action_confirm` card and the browser performs the POST under
+# the user's JWT after they press 確認 (role gates, e.g. resolve=ADMIN/PE,
+# apply as the user's own). Granted 對內 like the reads.
+_ALARM_WRITES: Dict[str, Dict[str, Any]] = {
+    "ack_alarm": {
+        "desc": "認領告警：單筆（alarm_id）或整台機台的 cluster（equipment_id，二擇一）。"
+                "會出確認卡，使用者按確認才執行。批次認領前先用 query_alarms 列給使用者看。",
+        "args": {"alarm_id": {"type": "integer", "description": "要認領的告警 id"},
+                 "equipment_id": {"type": "string", "description": "整台機台一次認領（cluster ack）"}},
+        "required": []},
+    "dispose_alarm": {
+        "desc": "對告警下處置並結案：disposition ∈ release | hold | scrap | rerun + 原因。"
+                "**不可逆**（尤其 scrap）——先用 get_alarm_detail 看過 evidence、跟使用者確認原因後才提出；確認卡按了才執行。",
+        "args": {"alarm_id": {"type": "integer", "description": "告警 id"},
+                 "disposition": {"type": "string", "description": "release | hold | scrap | rerun"},
+                 "reason": {"type": "string", "description": "處置原因（會寫入記錄）"}},
+        "required": ["alarm_id", "disposition"]},
+    "resolve_alarm": {
+        "desc": "單純結案（不下處置）。需要 ADMIN / PE 權限（以使用者本人身分執行）。確認卡按了才執行。",
+        "args": {"alarm_id": {"type": "integer", "description": "告警 id"}},
+        "required": ["alarm_id"]},
 }
 
 
@@ -399,12 +442,37 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
         if name in _BUILTIN_READ and name in (ctx.get("granted_reads") or set()):
             spec = _BUILTIN_READ[name]
             path = spec["path"]
-            for a in spec["args"]:
-                path = path.replace("{" + a + "}", str(inp.get(a) or ""))
+            if spec.get("query"):
+                # query-style: append only the args the model actually set
+                # (empty values would break Java's @RequestParam int parsing).
+                from urllib.parse import urlencode
+                qp = {a: inp[a] for a in spec["args"]
+                      if inp.get(a) not in (None, "", 0)}
+                if qp:
+                    path = f"{path}?{urlencode(qp)}"
+            else:
+                for a in spec["args"]:
+                    path = path.replace("{" + a + "}", str(inp.get(a) or ""))
             # {user_id} comes from the caller context, never from the model.
             path = path.replace("{user_id}", str(ctx.get("user_id") or 0))
             data = await java._get_data(path)
             yield ("result", {"status": "ok", "data": data})
+            return
+
+        # ── granted alarm WRITE tools — confirm-card only, never direct ────
+        if name in _ALARM_WRITES and name in (ctx.get("granted_writes") or set()):
+            if name == "ack_alarm" and not (inp.get("alarm_id") or inp.get("equipment_id")):
+                yield ("result", {"status": "missing_target",
+                                  "message": "要認領哪筆（alarm_id）或哪台機台（equipment_id）？先用 query_alarms 找。"})
+                return
+            card = {"type": "alarm_action_confirm", "action": name,
+                    "alarm_id": inp.get("alarm_id") or None,
+                    "equipment_id": str(inp.get("equipment_id") or "") or None,
+                    "disposition": str(inp.get("disposition") or "") or None,
+                    "reason": str(inp.get("reason") or "") or None}
+            yield ("event", {"type": "tool_done", "tool": name, "render_card": card})
+            yield ("result", {"status": "confirm_pending",
+                              "message": "動作確認卡已顯示，使用者按確認才會執行。只回一句『確認卡在上面了』即可，不要重複描述動作內容。"})
             return
 
         # ── invoke_skill — run any published domain skill's pipeline. Domain
@@ -499,16 +567,25 @@ async def run_chat_agent(
     granted = await _granted_agent_tools(java)
     granted_reads = [g["key"] for g in granted
                      if g.get("kind") == "builtin" and g.get("key") in _BUILTIN_READ]
+    granted_writes = [g["key"] for g in granted
+                      if g.get("kind") == "builtin" and g.get("key") in _ALARM_WRITES]
     ctx["granted_reads"] = set(granted_reads)
-    for key in granted_reads:
-        spec = _BUILTIN_READ[key]
+    ctx["granted_writes"] = set(granted_writes)
+    for key in granted_reads + granted_writes:
+        spec = _BUILTIN_READ.get(key) or _ALARM_WRITES[key]
         props = {a: {"type": v["type"], "description": v["description"]}
                  for a, v in spec["args"].items()}
         tools.append({
             "name": key, "description": spec["desc"],
             "input_schema": {"type": "object", "properties": props,
-                             "required": list(spec["args"].keys())},
+                             "required": spec.get("required", list(spec["args"].keys()))},
         })
+    if granted_writes:
+        system += ("\n\n[告警處理守則] 查詢（query_alarms / get_alarm_stats / get_alarm_detail）直接用工具秒回，"
+                   "**不要**為了查資料建 pipeline。動作（ack / dispose / resolve）一律出確認卡、使用者按了才生效；"
+                   "dispose 前先看 detail 的 evidence 並確認原因。"
+                   "只有使用者要「自動跑 / 定期巡檢 / 幫我盯著」時，才用 search_skills 找現成 Skill"
+                   "（有就 invoke_skill 或帶去設自動化；沒有才提議建一條）。")
 
     for _round in range(MAX_TOOL_ROUNDS):
         resp = await client.create(system=system, messages=messages,

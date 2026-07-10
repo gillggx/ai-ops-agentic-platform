@@ -50,6 +50,81 @@ public class InternalAlarmController {
 				"kpis", clusterService.computeKpis(sinceHours)));
 	}
 
+	/** Filtered alarm HISTORY incl. handling state (Coordinator's query_alarms,
+	 *  2026-07-10). Unlike /situation (現在的戰況), this answers「EQP-07 過去
+	 *  N 天有哪些告警、處理到哪了」— per-alarm status / acked-by / disposition. */
+	@GetMapping("/query")
+	public ApiResponse<java.util.List<Map<String, Object>>> query(
+			@RequestParam(name = "equipment_id", required = false) String equipmentId,
+			@RequestParam(name = "since_hours", defaultValue = "168") int sinceHours,
+			@RequestParam(required = false) String status,
+			@RequestParam(required = false) String severity,
+			@RequestParam(defaultValue = "50") int limit) {
+		int safeLimit = Math.min(Math.max(limit, 1), 200);
+		OffsetDateTime since = OffsetDateTime.now(java.time.ZoneOffset.UTC)
+				.minusHours(Math.min(Math.max(sinceHours, 1), 24 * 90));
+		java.util.List<Map<String, Object>> out = repository.findAll().stream()
+				.filter(a -> a.getCreatedAt() != null && a.getCreatedAt().isAfter(since))
+				.filter(a -> equipmentId == null || equipmentId.isBlank()
+						|| equipmentId.equalsIgnoreCase(a.getEquipmentId()))
+				.filter(a -> status == null || status.isBlank()
+						|| status.equalsIgnoreCase(a.getStatus()))
+				.filter(a -> severity == null || severity.isBlank()
+						|| severity.equalsIgnoreCase(a.getSeverity()))
+				.sorted(java.util.Comparator.comparing(AlarmEntity::getCreatedAt).reversed())
+				.limit(safeLimit)
+				.map(a -> {
+					Map<String, Object> m = new java.util.LinkedHashMap<>();
+					m.put("id", a.getId());
+					m.put("title", a.getTitle());
+					m.put("equipment_id", a.getEquipmentId());
+					m.put("severity", a.getSeverity());
+					m.put("status", a.getStatus());
+					m.put("created_at", a.getCreatedAt());
+					m.put("acknowledged_by", a.getAcknowledgedBy());
+					m.put("acknowledged_at", a.getAcknowledgedAt());
+					m.put("disposition", a.getDisposition());
+					m.put("disposition_reason", a.getDispositionReason());
+					m.put("resolved_at", a.getResolvedAt());
+					return m;
+				})
+				.toList();
+		return ApiResponse.ok(out);
+	}
+
+	/** Handling statistics (Coordinator's get_alarm_stats, 2026-07-10):
+	 *  per-equipment counts + status/severity breakdown + ack rate. */
+	@GetMapping("/stats")
+	public ApiResponse<Map<String, Object>> stats(
+			@RequestParam(name = "since_hours", defaultValue = "168") int sinceHours) {
+		OffsetDateTime since = OffsetDateTime.now(java.time.ZoneOffset.UTC)
+				.minusHours(Math.min(Math.max(sinceHours, 1), 24 * 90));
+		var rows = repository.findAll().stream()
+				.filter(a -> a.getCreatedAt() != null && a.getCreatedAt().isAfter(since))
+				.toList();
+		Map<String, Long> byEquipment = new java.util.TreeMap<>();
+		Map<String, Long> byStatus = new java.util.TreeMap<>();
+		Map<String, Long> bySeverity = new java.util.TreeMap<>();
+		long acked = 0, disposed = 0;
+		for (AlarmEntity a : rows) {
+			byEquipment.merge(a.getEquipmentId() == null ? "(unknown)" : a.getEquipmentId(), 1L, Long::sum);
+			byStatus.merge(a.getStatus() == null ? "open" : a.getStatus(), 1L, Long::sum);
+			bySeverity.merge(a.getSeverity() == null ? "(none)" : a.getSeverity(), 1L, Long::sum);
+			if (a.getAcknowledgedAt() != null) acked++;
+			if (a.getDisposition() != null) disposed++;
+		}
+		Map<String, Object> out = new java.util.LinkedHashMap<>();
+		out.put("since_hours", sinceHours);
+		out.put("total", rows.size());
+		out.put("by_equipment", byEquipment);
+		out.put("by_status", byStatus);
+		out.put("by_severity", bySeverity);
+		out.put("acked", acked);
+		out.put("disposed", disposed);
+		out.put("ack_rate", rows.isEmpty() ? 0.0 : Math.round(acked * 1000.0 / rows.size()) / 1000.0);
+		return ApiResponse.ok(out);
+	}
+
 	/** One alarm's full diagnosis (Coordinator's get_alarm_detail). */
 	@GetMapping("/{id}")
 	public ApiResponse<AlarmDtos.Detail> detail(@PathVariable Long id) {
