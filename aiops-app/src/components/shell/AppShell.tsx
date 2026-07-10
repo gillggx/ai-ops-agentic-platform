@@ -251,6 +251,11 @@ function Shell({ children }: { children: React.ReactNode }) {
     nonce: number;
   }>({ id: null, messages: [], nonce: 0 });
   const [sessionsTick, setSessionsTick] = useState(0);
+  // ChatOps (2026-07-10): builds render INLINE in the conversation; the Lite
+  // Canvas overlay never auto-opens there (it hid the chat = user couldn't
+  // see progress). Events still stream into glassEvents so「↗ 展開 canvas」
+  // can open the overlay on demand.
+  const lastGlassStartRef = useRef<{ sessionId: string; goal?: string } | null>(null);
   // Remember the last non-ChatOps page so the Topbar Copilot pill returns there.
   useEffect(() => {
     if (!isChatOps) {
@@ -368,15 +373,19 @@ function Shell({ children }: { children: React.ReactNode }) {
                 // its sub-agent's operations here; AppShell mounts the live
                 // canvas overlay so the user watches node-by-node build.
                 onGlassStart={(ev) => {
-                  // Open the Lite Canvas overlay and reset prior state so the
-                  // build paints from a clean canvas + Results tab is empty.
+                  // Reset prior state so the build paints from a clean canvas.
+                  // ChatOps: keep the conversation visible — record the stream
+                  // but do NOT auto-open the overlay (inline card shows progress).
                   resetOverlayState();
                   setRunPhase("building");
-                  setGlassOverlay({
-                    sessionId: ev.session_id,
-                    goal: ev.goal,
-                    active: true,
-                  });
+                  lastGlassStartRef.current = { sessionId: ev.session_id, goal: ev.goal };
+                  if (!isChatOps) {
+                    setGlassOverlay({
+                      sessionId: ev.session_id,
+                      goal: ev.goal,
+                      active: true,
+                    });
+                  }
                   pushGlassEvent({ kind: "start", sessionId: ev.session_id, goal: ev.goal, base_pipeline: ev.base_pipeline });
                 }}
                 onGlassOp={(ev) => pushGlassEvent({
