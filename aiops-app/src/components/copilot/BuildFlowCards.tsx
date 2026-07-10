@@ -548,10 +548,13 @@ export interface BuildDoneState {
 }
 
 export function BuildDoneCard({
-  state, onRate,
+  state, onRate, onExpand,
 }: {
   state: BuildDoneState;
   onRate?: (rating: 1 | -1) => void;
+  /** ChatOps (2026-07-10): overlay doesn't auto-open there — this link is the
+   *  way into the Lite Canvas for plan-path builds. */
+  onExpand?: () => void;
 }) {
   const t = useTranslations("buildFlow.done");
   const rated = state.rating != null;
@@ -559,6 +562,12 @@ export function BuildDoneCard({
     <div style={{ ...cardStyle(false), padding: "9px 12px" }}>
       <div style={{ fontSize: 11, lineHeight: 1.6, color: CHAT_T.sub }}>
         <span style={{ color: CHAT_T.greenMark }}>✓</span> {state.text}
+        {onExpand && (
+          <button onClick={onExpand} style={{
+            marginLeft: 8, fontSize: 10.5, fontWeight: 600, cursor: "pointer",
+            color: "var(--p, #2b6cb0)", background: "none", border: "none", padding: 0,
+          }}>↗ 展開 canvas</button>
+        )}
       </div>
       {state.verified && (
         <div style={{ fontSize: 10, color: CHAT_T.green, marginTop: 3 }}>▣ {state.verified}</div>

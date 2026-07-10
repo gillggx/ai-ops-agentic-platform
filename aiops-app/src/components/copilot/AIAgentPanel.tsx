@@ -1859,6 +1859,10 @@ export function AIAgentPanel({
             // chip 表達，不再貼卡。
             if (cardStatus === "done") {
               const pj = ev.pipeline_json as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+              if (pj && (pj.nodes ?? []).length > 0) {
+                // keep the freshest built pipeline for the完成卡's 展開 link
+                lastChatPipelineRef.current = pj as unknown as Record<string, unknown>;
+              }
               const counts = pj
                 ? t("buildDoneCounts", { nodes: (pj.nodes ?? []).length, edges: (pj.edges ?? []).length })
                 : "";
@@ -2353,6 +2357,13 @@ export function AIAgentPanel({
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <BuildDoneCard
                     state={msg.buildDone}
+                    onExpand={onPbPipelineExpand && lastChatPipelineRef.current ? () => {
+                      onPbPipelineExpand({
+                        type: "pb_pipeline",
+                        pipeline_json: lastChatPipelineRef.current,
+                        node_results: {},
+                      } as unknown as PbPipelineCardData);
+                    } : undefined}
                     onRate={(rating) => {
                       setChatHistory((prev) => prev.map((m) =>
                         m.id === msg.id && m.buildDone
