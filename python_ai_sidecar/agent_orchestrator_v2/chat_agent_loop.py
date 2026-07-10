@@ -771,7 +771,10 @@ async def run_chat_agent(
             param_doc = _mcp_param_doc(raw_schema)
             tools.append({
                 "name": key,
-                "description": (str(d.get("description") or key)[:400]
+                # description 是唯一文件來源（含判讀紀律）——400 字元曾把文件
+                # 尾段全截掉，模型看不到就自己腦補。3000 夠涵蓋現有最長文件
+                # （get_process_info 2754），再長就該精煉文件而不是加大上限。
+                "description": (str(d.get("description") or key)[:3000]
                                 + ("　參數：" + param_doc if param_doc else "")),
                 # 結構化 schema 鎖參數名（沒有 schema 的 MCP 才退回自由物件）
                 "input_schema": structured or {"type": "object", "properties": {
