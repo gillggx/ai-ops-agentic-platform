@@ -1862,17 +1862,28 @@ export function AIAgentPanel({
               const counts = pj
                 ? t("buildDoneCounts", { nodes: (pj.nodes ?? []).length, edges: (pj.edges ?? []).length })
                 : "";
-              const learned = memoryWritesRef.current;
-              const doneId = nextId();
-              currentBuildDoneIdRef.current = doneId;
-              setChatHistory((prev) => [...prev, {
-                id: doneId, role: "build_done", content: "",
-                buildDone: {
-                  text: t("buildDone", { counts, summary: summary || t("buildDoneDefaultSummary") }),
-                  learned: [...learned],
-                  rating: null,
-                },
-              }]);
+              const text = t("buildDone", { counts, summary: summary || t("buildDoneDefaultSummary") });
+              // 2026-07-10: a build streams pb_glass_done TWICE
+              // (build_finalized + graph done) — we used to append two
+              // near-identical完成卡 (user:「多餘又占版面」). One card per
+              // build: the second event just refreshes the text (the later
+              // one carries node/edge counts).
+              const existingId = currentBuildDoneIdRef.current;
+              if (existingId != null) {
+                setChatHistory((prev) => prev.map((m) =>
+                  m.id === existingId && m.buildDone
+                    ? { ...m, buildDone: { ...m.buildDone, text } }
+                    : m,
+                ));
+              } else {
+                const learned = memoryWritesRef.current;
+                const doneId = nextId();
+                currentBuildDoneIdRef.current = doneId;
+                setChatHistory((prev) => [...prev, {
+                  id: doneId, role: "build_done", content: "",
+                  buildDone: { text, learned: [...learned], rating: null },
+                }]);
+              }
             }
             break;
           }
