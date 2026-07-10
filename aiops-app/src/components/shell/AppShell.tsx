@@ -29,6 +29,8 @@ type RunPhase = "idle" | "building" | "build_failed" | "running" | "done" | "err
 
 interface GlassEvent {
   kind: "start" | "op" | "chat" | "error" | "done" | "user";
+  /** ChatOps rail Console card (2026-07-10): stamped at push time. */
+  ts?: string;
   sessionId?: string;
   goal?: string;
   op?: string;
@@ -288,6 +290,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [durationMs, setDurationMs] = useState<number | null>(null);
 
   const pushGlassEvent = (e: GlassEvent) => {
+    e = { ...e, ts: new Date().toTimeString().slice(0, 8) };
     glassEventsRef.current = [...glassEventsRef.current, e];
     setGlassEvents(glassEventsRef.current);
   };
@@ -456,6 +459,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               <ChatOpsAgentRail
                 runPhase={runPhase}
                 goal={lastGlassStartRef.current?.goal ?? null}
+                events={glassEvents}
                 onNew={() => setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }))}
               />
               <div style={{
