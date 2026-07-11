@@ -383,6 +383,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 key={(isChatOps || isMobile) ? `chatops-${chatOpsSess.nonce}` : "dock"}
                 sessionId={(isChatOps || isMobile) ? (chatOpsSess.id ?? undefined) : undefined}
                 initialMessages={(isChatOps || isMobile) ? chatOpsSess.messages : undefined}
+                persistHistory={isChatOps || isMobile}
                 onSessionResolved={(sid) => {
                   if (!isChatOps && !isMobile) return;
                   try { localStorage.setItem("chatops:session-id", sid); } catch { /* ignore */ }

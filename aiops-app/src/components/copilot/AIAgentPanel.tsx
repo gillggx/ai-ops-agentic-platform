@@ -316,6 +316,9 @@ interface Props {
    *  history when resuming a session from the ChatOps sidebar. Cards are not
    *  persisted — resumed history renders as plain text turns. */
   initialMessages?: Array<{ role: string; content: string }>;
+  /** ChatOps / 手機 (2026-07-11)：把完整訊息串（含圖卡）持久化到 localStorage，
+   *  重載時整包還原 — server session 只存文字輪次，圖卡曾在重載後消失。 */
+  persistHistory?: boolean;
   /** Fires when the backend resolves/creates the session id (done event) so
    *  the ChatOps sidebar can refresh + highlight the active conversation. */
   onSessionResolved?: (sessionId: string) => void;
@@ -327,6 +330,45 @@ interface Props {
 
 let _seq = 0;
 const nextId = () => ++_seq;
+
+// ── ChatOps / 手機 rich-history 持久化 (2026-07-11) ─────────────────────────
+// server session 只存文字輪次；圖卡（chartSpec / pbPipeline / 完成卡…）在
+// 重載後會消失（手機瀏覽器切走就回收分頁，最常中）。ChatMessage 全是純資料，
+// 直接整包存 localStorage、重載整包還原。
+const HISTORY_VERSION = 1;
+const HISTORY_KEY_PREFIX = "chatops:history:";
+const HISTORY_TTL_MS = 7 * 24 * 3600_000;
+
+function loadPersistedHistory(sid: string): ChatMessage[] | null {
+  try {
+    const raw = window.localStorage.getItem(HISTORY_KEY_PREFIX + sid);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { v?: number; at?: number; items?: ChatMessage[] };
+    if (parsed?.v !== HISTORY_VERSION || !Array.isArray(parsed.items) || parsed.items.length === 0) return null;
+    // 還原的 id 要墊高計數器，否則新訊息 id 會撞號（feedback / in-place 更新靠 id）。
+    const maxId = Math.max(...parsed.items.map((m) => Number(m.id) || 0));
+    if (maxId >= _seq) _seq = maxId + 1;
+    return parsed.items;
+  } catch { return null; }
+}
+
+function savePersistedHistory(sid: string, items: ChatMessage[]): void {
+  try {
+    // 順手清 7 天前的舊 key（別的 session 留下的）。
+    for (const k of Object.keys(window.localStorage)) {
+      if (!k.startsWith(HISTORY_KEY_PREFIX)) continue;
+      try {
+        const at = (JSON.parse(window.localStorage.getItem(k) || "{}") as { at?: number }).at ?? 0;
+        if (Date.now() - at > HISTORY_TTL_MS) window.localStorage.removeItem(k);
+      } catch { window.localStorage.removeItem(k); }
+    }
+    const write = (slice: ChatMessage[]) =>
+      window.localStorage.setItem(HISTORY_KEY_PREFIX + sid,
+        JSON.stringify({ v: HISTORY_VERSION, at: Date.now(), items: slice }));
+    try { write(items.slice(-30)); }
+    catch { try { write(items.slice(-10)); } catch { /* quota — 放棄，文字輪次仍有 server 備援 */ } }
+  } catch { /* localStorage unavailable */ }
+}
 
 function makeLog(icon: string, text: string, level: LogLevel): LogEntry {
   return {
@@ -660,6 +702,7 @@ export function AIAgentPanel({
   pipelineSnapshot,
   liteCanvasActive = false,
   initialMessages,
+  persistHistory = false,
   onSessionResolved,
 }: Props) {
   // Part B (SPEC_context_engineering): pull selected equipment from AppContext
@@ -675,15 +718,21 @@ export function AIAgentPanel({
   // drives a long build — makes the「等十幾秒」transparent (who is doing what).
   const [activeRole, setActiveRole] = useState<{ role: string; text: string } | null>(null);
   const [logs, setLogs]             = useState<LogEntry[]>([]);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(() =>
-    // ChatOps resume: persisted history is text-only turns.
-    (initialMessages ?? [])
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>(() => {
+    // ChatOps / 手機 resume：優先整包還原本機的 rich history（含圖卡）；
+    // 沒有才退回 server 的文字輪次。
+    if (persistHistory && externalSessionId) {
+      const restored = loadPersistedHistory(externalSessionId);
+      if (restored) return restored;
+    }
+    return (initialMessages ?? [])
       .filter((m) => typeof m.content === "string" && m.content.trim())
       .map((m) => ({
         id: nextId(),
         role: (m.role === "user" ? "user" : "agent") as "user" | "agent",
         content: m.content,
-      })));
+      }));
+  });
   // v1.7 — slash command menu (triggered by typing "/" at start of input).
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
@@ -854,6 +903,33 @@ export function AIAgentPanel({
   // 草稿暫存區 (V78): signature of the last auto-saved pipeline, so the same
   // build re-rendering doesn't create duplicate drafts.
   const lastSavedDraftSigRef = useRef<string>("");
+
+  // rich-history 持久化 (2026-07-11)：debounce 存檔（streaming 期間變動頻繁）。
+  useEffect(() => {
+    if (!persistHistory) return;
+    const sid = sessionIdRef.current;
+    if (!sid || chatHistory.length === 0) return;
+    const timer = setTimeout(() => savePersistedHistory(sid, chatHistory), 800);
+    return () => clearTimeout(timer);
+  }, [chatHistory, persistHistory]);
+
+  // 還原後補回「畫面上這張圖」的 snapshot — 沒有它，重載後說「啟用／改圖」
+  // 會被當成沒有圖可用而反問（缺口 D1 的 client 端解法）。
+  useEffect(() => {
+    if (!persistHistory || lastChatPipelineRef.current) return;
+    // Loose cast: the union's published variant has no pipeline_json.
+    const pjOf = (m: ChatMessage) =>
+      (m.pbPipeline as unknown as { pipeline_json?: { nodes?: unknown[] } } | undefined)?.pipeline_json;
+    const last = [...chatHistory].reverse().find((m) => {
+      const pj = pjOf(m);
+      return Array.isArray(pj?.nodes) && pj.nodes.length > 0;
+    });
+    if (last) {
+      lastChatPipelineRef.current = pjOf(last) as unknown as Record<string, unknown>;
+    }
+    // 只在還原的初始 render 跑一次。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
