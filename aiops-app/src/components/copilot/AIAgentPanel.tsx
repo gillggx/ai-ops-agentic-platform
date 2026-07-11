@@ -967,6 +967,21 @@ export function AIAgentPanel({
 
         const seenCharts = new Set(
           restored.filter((m) => m.role === "chart_inline").map((m) => m.chartNodeId));
+        // F2 fix (2026-07-11): 還原的 BUILD PLAN 卡要接回事件流原地更新 —
+        // 之前只有獨立進度行在動，計畫卡凍在重載當下（user:「沒有繼續更新」）。
+        const planCardId = [...restored].reverse()
+          .find((m) => m.role === "build_plan" && m.buildPlan)?.id ?? null;
+        const patchPlan = (fn: (rt: Record<string, PhaseRuntimeUI>) => Record<string, PhaseRuntimeUI>,
+                           status?: "building" | "done" | "error") => {
+          if (planCardId == null) return;
+          setChatHistory((prev) => prev.map((m) => {
+            if (m.id !== planCardId || !m.buildPlan) return m;
+            return { ...m, buildPlan: {
+              ...m.buildPlan, runtime: fn({ ...m.buildPlan.runtime }),
+              ...(status ? { status } : {}),
+            }};
+          }));
+        };
         let doneSeen = false;
         let ops = 0;
         const progressId = nextId();
@@ -984,6 +999,28 @@ export function AIAgentPanel({
             setChatHistory((prev) => prev.map((m) => m.id === progressId
               ? { ...m, content: `[接續] 建構進行中——第 ${ops} 步（${String(ev.op ?? "")}）` }
               : m));
+          } else if (type === "pb_glass_chat") {
+            // 計畫卡 phase 進度（phase_update / ff_update）→ 原地更新還原的卡。
+            const pu = ev.phase_update as { phase_id?: string; status?: string } | undefined;
+            const ff = ev.ff_update as { phase_ids?: string[] } | undefined;
+            if (ff && Array.isArray(ff.phase_ids)) {
+              patchPlan((rt) => {
+                for (const fid of ff.phase_ids ?? []) {
+                  rt[String(fid)] = { ...(rt[String(fid)] ?? {}), status: "completed" };
+                }
+                return rt;
+              });
+            } else if (pu?.phase_id) {
+              const s = String(pu.status ?? "");
+              const mapped: PhaseRuntimeUI["status"] =
+                ["completed", "handover_take_over"].includes(s) ? "completed"
+                : ["failed", "handover_drop"].includes(s) ? "failed"
+                : "in_progress";
+              patchPlan((rt) => {
+                rt[pu.phase_id!] = { ...(rt[pu.phase_id!] ?? {}), status: mapped };
+                return rt;
+              });
+            }
           } else if (type === "pb_glass_chart") {
             const chartSpec = ev.chart_spec as Record<string, unknown> | undefined;
             const nodeId = String(ev.node_id ?? "");
@@ -1002,6 +1039,13 @@ export function AIAgentPanel({
               lastChatPipelineRef.current = pj as unknown as Record<string, unknown>;
             }
             const ok = ["finished", "success"].includes(String(ev.status ?? "finished"));
+            // 計畫卡收尾：全 phase 標完成 + 卡片轉 done/error 狀態。
+            patchPlan((rt) => {
+              for (const k of Object.keys(rt)) {
+                if (rt[k]?.status === "in_progress" && ok) rt[k] = { ...rt[k], status: "completed" };
+              }
+              return rt;
+            }, ok ? "done" : "error");
             const text = ok
               ? `建構完成 — ${(pj?.nodes ?? []).length} nodes / ${(pj?.edges ?? []).length} edges（背景完成，畫面離線期間照跑）`
               : `建構結束：${String(ev.status ?? "?")}`;

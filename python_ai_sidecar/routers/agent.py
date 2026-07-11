@@ -363,6 +363,34 @@ class ChatIntentRespondRequest(BaseModel):
     plan_decision: Optional[dict] = None
 
 
+def _spc_limits_to_rules(spec: dict) -> dict:
+    """V85 fix (2026-07-11): list 形狀的 chart DSL 常把 ucl/lcl 常數欄放進 y
+    序列 → 前端畫成整排 marker 圓點。轉成 DSL `rules`（虛線管制線），跟
+    平台標準 SPC 呈現一致。值會逐列變動（分站管制限）就保留原樣。"""
+    try:
+        ys = spec.get("y") or []
+        data = spec.get("data") or []
+        if not (isinstance(ys, list) and isinstance(data, list) and data):
+            return spec
+        rules = list(spec.get("rules") or [])
+        keep_y = []
+        changed = False
+        for col in ys:
+            low = str(col).lower()
+            vals = [r.get(col) for r in data
+                    if isinstance(r, dict) and isinstance(r.get(col), (int, float))]
+            if low in ("ucl", "lcl") and vals and len({round(float(v), 6) for v in vals}) == 1:
+                rules.append({"value": vals[0], "label": str(col).upper(), "style": "danger"})
+                changed = True
+            else:
+                keep_y.append(col)
+        if changed and keep_y:
+            return {**spec, "y": keep_y, "rules": rules}
+        return spec
+    except Exception:  # noqa: BLE001 — 呈現最佳化，失敗回原樣
+        return spec
+
+
 async def _emit_pipeline_charts(
     pipeline_json: dict, session_id: str,
 ) -> AsyncGenerator[dict, None]:
@@ -458,7 +486,7 @@ async def _emit_pipeline_charts(
                             "session_id": session_id,
                             "node_id": f"{nid}#{ci}",
                             "port": port_name,
-                            "chart_spec": spec,
+                            "chart_spec": _spc_limits_to_rules(spec),
                         }
                         yield {
                             "event": "pb_glass_chart",
