@@ -40,6 +40,22 @@ rm -rf /opt/aiops/aiops-app/.next/cache 2>/dev/null || true
 # 5. apt 快取
 apt-get clean 2>/dev/null || true
 
+# 6. DB：execution_logs 的執行 payload（llm_readable_data/event_context）
+#    只留 7 天 — 這張表曾長到 7.4GB（磁碟 98% 的真兇）。列與統計欄位保留
+#    （patrol 漏斗/追溯不受影響），只清肥欄位；plain VACUUM 讓空間可重用
+#    （檔案縮小需手動 VACUUM FULL，日常不需要）。
+ENV_FILE=/opt/aiops/java-backend/.env
+if [[ -f "$ENV_FILE" ]]; then
+  DBU=$(grep '^DB_USER' "$ENV_FILE" | cut -d= -f2)
+  export PGPASSWORD=$(grep '^DB_PASSWORD' "$ENV_FILE" | cut -d= -f2)
+  psql -h localhost -U "$DBU" -d aiops_db -q -c \
+    "UPDATE execution_logs SET llm_readable_data = NULL, event_context = NULL
+     WHERE started_at < now() - interval '7 days' AND llm_readable_data IS NOT NULL;" \
+    2>/dev/null || true
+  psql -h localhost -U "$DBU" -d aiops_db -q -c "VACUUM execution_logs;" 2>/dev/null || true
+  unset PGPASSWORD
+fi
+
 # 還是很滿（>=90%）→ trace 只留 24 小時
 USAGE=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 if (( USAGE >= 90 )); then
