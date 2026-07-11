@@ -57,6 +57,9 @@ elif git -C "$APP_DIR" diff HEAD@{1} HEAD --name-only 2>/dev/null \
 fi
 
 if $REBUILD_APP; then
+  # 磁碟守門 (2026-07-11)：build 需要 ~1GB 暫存，>=80% 先清（曾 98% 讓
+  # next build 無聲死掉 EXIT=254）。
+  bash "$APP_DIR/deploy/disk-clean.sh" --if-above 80 || true
   echo "🔨  Building aiops-app..."
   cd "$APP_DIR/aiops-app"
   npm ci --silent

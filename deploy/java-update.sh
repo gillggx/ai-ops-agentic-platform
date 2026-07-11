@@ -45,6 +45,8 @@ git -C "$APP_DIR" pull --ff-only
 #   java-backend/target/aiops-api-library.jar      (plain library — used by scheduler)
 #   java-scheduler/target/aiops-scheduler.jar      (executable boot)
 # systemd unit files (deploy/aiops-java-*.service) point to target/.
+# 磁碟守門 (2026-07-11)：>=80% 先清 traces/npm cache/journal。
+bash "$APP_DIR/deploy/disk-clean.sh" --if-above 80 || true
 echo "☕  Building Java fat jars (api + scheduler) via Maven..."
 cd "$APP_DIR"
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"

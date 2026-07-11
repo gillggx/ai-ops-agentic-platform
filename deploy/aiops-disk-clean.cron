@@ -1,0 +1,4 @@
+# /etc/cron.d/aiops-disk-clean (2026-07-11)
+# 每小時檢查 root 磁碟，>= 80% 就清（traces/npm cache/journal/next cache）。
+# 安裝：sudo cp deploy/aiops-disk-clean.cron /etc/cron.d/aiops-disk-clean
+17 * * * * root /usr/bin/bash /opt/aiops/deploy/disk-clean.sh --if-above 80 >> /var/log/aiops-disk-clean.log 2>&1
