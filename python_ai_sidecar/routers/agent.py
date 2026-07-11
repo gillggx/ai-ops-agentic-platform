@@ -444,6 +444,27 @@ async def _emit_pipeline_charts(
                         "data": json.dumps(payload, default=str, ensure_ascii=False),
                     }
                     n_charts += 1
+                    continue
+                # V85 fix (2026-07-11): chart blocks that output a LIST of
+                # chart DSL dicts（preview 形狀 {type:'list', sample:[{__dsl…}]}）
+                # 從未被這個 loop 認出 → 即時與回放都拿不到 inline 圖。
+                sample = blob.get("sample")
+                if blob.get("type") == "list" and isinstance(sample, list):
+                    for ci, spec in enumerate(sample[:8]):  # inline 上限 8 張
+                        if not (isinstance(spec, dict) and spec.get("__dsl")):
+                            continue
+                        payload = {
+                            "type": "pb_glass_chart",
+                            "session_id": session_id,
+                            "node_id": f"{nid}#{ci}",
+                            "port": port_name,
+                            "chart_spec": spec,
+                        }
+                        yield {
+                            "event": "pb_glass_chart",
+                            "data": json.dumps(payload, default=str, ensure_ascii=False),
+                        }
+                        n_charts += 1
 
         # Phase 3: pb_run_done — Lite Canvas 結果 tab populates from this
         done_payload = {

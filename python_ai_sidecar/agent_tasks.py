@@ -92,12 +92,15 @@ def _finish(task: AgentTask) -> None:
 
 
 def _terminal_events(task: AgentTask) -> List[Event]:
-    """收尾事件 = 最後一個 pb_glass_done 起（含圖卡/run 摘要/最終 done）。"""
+    """收尾事件 = 最後一個 pb_glass_done 起（含圖卡/run 摘要/最終 done）。
+    單一事件 >300KB（通常是 pb_run_done 的完整 node_results）不進持久層 —
+    reattach 回放靠 done 卡與圖卡就夠。"""
     idx = 0
     for i, ev in enumerate(task.history):
         if ev.get("event") == "pb_glass_done":
             idx = i
-    return task.history[idx:][:_TERMINAL_KEEP_EVENTS]
+    return [ev for ev in task.history[idx:][:_TERMINAL_KEEP_EVENTS]
+            if len(ev.get("data") or "") <= 300_000]
 
 
 async def _persist(task: AgentTask) -> None:
