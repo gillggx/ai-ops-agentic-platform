@@ -157,11 +157,16 @@ export function buildAxis(values: ReadonlyArray<unknown>, opts: BuildOpts): Axis
     }
     const sc = scale(mn, mx, opts.rangeStart, opts.rangeEnd);
     const tk = ticks(mn, mx, tickCount);
+    // 2026-07-11: 小數位跟著 tick 間距走 — 固定 2 位曾讓小範圍軸
+    // （如 etch_time_offset 0.005~0.03）整排刻度都顯示成「0.01」。
+    const step = tk.length > 1 ? Math.abs(tk[1] - tk[0]) : Math.abs(mx - mn) || 1;
+    const decimals = step >= 1 ? (step >= 10 ? 0 : 1)
+      : Math.min(6, Math.max(0, Math.ceil(-Math.log10(step))));
     return {
       kind: 'numeric',
       scale: sc,
       ticks: tk,
-      format: (v) => (Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(2)),
+      format: (v) => (Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(decimals)),
     };
   }
   if (kind === 'time') {

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "@/styles/tour.css";
 import "@/styles/themes.css";
@@ -11,6 +11,14 @@ import { TourRoot } from "@/components/tour/TourRoot";
 export const metadata: Metadata = {
   title: "AIOps",
   description: "AIOps Application",
+};
+
+// 手機 (2026-07-11)：viewport-fit=cover 讓 env(safe-area-inset-*) 生效
+// （底部 tab bar 避開 iPhone home indicator）。
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

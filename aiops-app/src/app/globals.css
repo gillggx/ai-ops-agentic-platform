@@ -72,3 +72,13 @@ a { color: inherit; }
 }
 @keyframes skill-spin { to { transform: rotate(360deg); } }
 @keyframes skill-modal-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+
+/* 手機 (2026-07-11)：iOS Safari 對 font-size < 16px 的輸入框會自動放大整頁，
+   且 blur 後不縮回 — 版面比例跑掉、右側「送出」被推出畫面。
+   ≤767px 時所有輸入元件鎖 16px（iOS 不觸發 zoom 的最小值）。 */
+@media (max-width: 767px) {
+  textarea, input[type="text"], input[type="search"], input[type="password"],
+  input[type="email"], input[type="number"], input:not([type]), select {
+    font-size: 16px !important;
+  }
+}
