@@ -54,4 +54,29 @@ public class AgentSessionController {
 		return ApiResponse.ok(repository.findById(sessionId)
 				.orElseThrow(() -> ApiException.notFound("agent session")));
 	}
+
+	/** V85 (2026-07-11) — 跨裝置 rich history（完整訊息串含圖卡，opaque JSON）。 */
+	@GetMapping("/session/{sessionId}/rich-history")
+	public ApiResponse<Map<String, Object>> getRichHistory(@PathVariable String sessionId) {
+		AgentSessionEntity e = repository.findById(sessionId)
+				.orElseThrow(() -> ApiException.notFound("agent session"));
+		return ApiResponse.ok(Map.of("rich_history",
+				e.getRichHistory() == null ? "" : e.getRichHistory()));
+	}
+
+	@PutMapping("/session/{sessionId}/rich-history")
+	public ApiResponse<Void> putRichHistory(@PathVariable String sessionId,
+	                                        @RequestBody Map<String, Object> body) {
+		AgentSessionEntity e = repository.findById(sessionId)
+				.orElseThrow(() -> ApiException.notFound("agent session"));
+		Object blob = body.get("rich_history");
+		if (blob instanceof String s) {
+			if (s.length() > 2_000_000) {
+				throw ApiException.badRequest("rich_history too large (>2MB)");
+			}
+			e.setRichHistory(s);
+			repository.save(e);
+		}
+		return ApiResponse.ok(null);
+	}
 }

@@ -281,6 +281,24 @@ function Shell({ children }: { children: React.ReactNode }) {
     const fixedSid = sid;
     let cancelled = false;
     setChatOpsHydrating(true);
+    // V85 (2026-07-11): server rich history（跨裝置）— 比本機新就蓋進
+    // localStorage，AIAgentPanel 的還原邏輯會直接吃到含圖卡的完整版。
+    const richMerge = fetch(
+      `/api/agent/session/${encodeURIComponent(fixedSid)}/rich-history`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((env) => {
+        const blob = (env?.data ?? env)?.rich_history as string | undefined;
+        if (!blob) return;
+        const key = `chatops:history:${fixedSid}`;
+        const serverAt = (JSON.parse(blob) as { at?: number }).at ?? 0;
+        let localAt = 0;
+        try {
+          localAt = (JSON.parse(localStorage.getItem(key) || "{}") as { at?: number }).at ?? 0;
+        } catch { /* corrupt local — overwrite */ }
+        if (serverAt > localAt) localStorage.setItem(key, blob);
+      })
+      .catch(() => { /* server 備份 best-effort */ });
+    Promise.resolve(richMerge).then(() =>
     fetch(`/api/agent/session/${encodeURIComponent(fixedSid)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((env) => {
@@ -302,7 +320,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         try { localStorage.removeItem("chatops:session-id"); } catch { /* ignore */ }
         setChatOpsSess((prev) => (prev.id ? { id: null, messages: [], nonce: prev.nonce + 1 } : prev));
       })
-      .finally(() => { if (!cancelled) setChatOpsHydrating(false); });
+      .finally(() => { if (!cancelled) setChatOpsHydrating(false); }));
     return () => { cancelled = true; };
     // Run on ChatOps entry only — mid-conversation id changes must not remount.
     // eslint-disable-next-line react-hooks/exhaustive-deps

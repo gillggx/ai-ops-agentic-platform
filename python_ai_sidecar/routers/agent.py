@@ -514,84 +514,99 @@ async def _chat_intent_respond_stream(
         # doesn't run the native build tool (which is what normally emits this),
         # so without it the canvas never opens. session_id must match the build
         # thread so subsequent pb_glass_* ops land on the same overlay.
-        if confirmed:
-            _start_payload: dict = {
-                "type": "pb_glass_start",
-                "session_id": pending.build_session_id,
-                "goal": pending.plan_summary or "",
-            }
-            # F1 (2026-07-10): incremental redesigns must seed the overlay with
-            # the existing canvas, or ops referencing old nodes paint nothing
-            # (same contract as tool_execute's native build).
-            if isinstance(pending.base_pipeline, dict) and pending.base_pipeline.get("nodes"):
-                _start_payload["base_pipeline"] = pending.base_pipeline
-            yield {"event": "pb_glass_start", "data": json.dumps(
-                _start_payload, default=str, ensure_ascii=False)}
+        # V85 (2026-07-11) 工作與畫面非同步：整段 build 事件生產搬進 detached
+        # 背景任務；這條 SSE 只是訂閱者 — 客戶端斷線（鎖屏/關分頁）只斷訂閱，
+        # build 照跑到完成並把收尾事件持久化，任何裝置可 reattach。
+        async def _plan_build_events() -> AsyncGenerator[dict, None]:
+            if confirmed:
+                _start_payload: dict = {
+                    "type": "pb_glass_start",
+                    "session_id": pending.build_session_id,
+                    "goal": pending.plan_summary or "",
+                }
+                # F1 (2026-07-10): incremental redesigns must seed the overlay with
+                # the existing canvas, or ops referencing old nodes paint nothing
+                # (same contract as tool_execute's native build).
+                if isinstance(pending.base_pipeline, dict) and pending.base_pipeline.get("nodes"):
+                    _start_payload["base_pipeline"] = pending.base_pipeline
+                yield {"event": "pb_glass_start", "data": json.dumps(
+                    _start_payload, default=str, ensure_ascii=False)}
 
-        final_pipeline_for_exec: Optional[dict] = None
-        try:
-            async for stream_event in resume_graph_v30(
-                session_id=pending.build_session_id,
-                resume_payload=resume_payload,
-                trace_label="chat_plan_confirm",
-            ):
-                # Subsequent judge pause (deficit) — re-register pending_judge
-                # + surface the card, same as the judge branch's hotfix.
-                if stream_event.type == "judge_clarify_pending":
-                    sd = stream_event.data or {}
-                    try:
-                        _pj.register(_pj.PendingJudge(
-                            chat_session_id=req.chat_session_id,
-                            build_session_id=str(sd.get("session_id")
-                                                 or pending.build_session_id),
-                            phase_id=str(sd.get("phase_id") or "?"),
-                            requested_n=int(sd.get("requested_n") or 0),
-                            actual_rows=int(sd.get("actual_rows") or 0),
-                            value_desc=str(sd.get("value_desc") or ""),
-                            block_id=str(sd.get("block_id") or ""),
-                            instruction=pending.instruction,
-                            base_pipeline=pending.base_pipeline,
-                            skill_step_mode=pending.skill_step_mode,
-                            user_id=pending.user_id,
-                        ))
-                    except Exception as ex:  # noqa: BLE001
-                        log.warning("plan-resume: re-register pending_judge failed: %s", ex)
-                    yield {"event": "pb_judge_clarify", "data": json.dumps({
-                        "type": "pb_judge_clarify",
-                        "session_id": req.chat_session_id,
-                        "build_session_id": sd.get("session_id") or pending.build_session_id,
-                        "phase_id": sd.get("phase_id"),
-                        "requested_n": sd.get("requested_n"),
-                        "actual_rows": sd.get("actual_rows"),
-                        "ratio": sd.get("ratio"),
-                        "value_desc": sd.get("value_desc"),
-                        "block_id": sd.get("block_id"),
-                    }, default=str, ensure_ascii=False)}
-                    yield {"event": "done", "data": json.dumps({"status": "judge_clarify_pending"})}
-                    return
-                wrapped = wrap_build_event_for_chat(stream_event, pending.build_session_id)
-                if wrapped is not None:
-                    ev_type = wrapped.get("type") or "message"
-                    yield {"event": ev_type,
-                           "data": json.dumps(wrapped, default=str, ensure_ascii=False)}
-                elif stream_event.type == "done":
-                    yield {"event": "done",
-                           "data": json.dumps(stream_event.data, default=str, ensure_ascii=False)}
-                if stream_event.type == "done" and stream_event.data:
-                    pj = stream_event.data.get("pipeline_json")
-                    if isinstance(pj, dict):
-                        final_pipeline_for_exec = pj
-            if final_pipeline_for_exec is not None and confirmed:
-                async for chart_ev in _emit_pipeline_charts(
-                    final_pipeline_for_exec, pending.build_session_id,
+            final_pipeline_for_exec: Optional[dict] = None
+            try:
+                async for stream_event in resume_graph_v30(
+                    session_id=pending.build_session_id,
+                    resume_payload=resume_payload,
+                    trace_label="chat_plan_confirm",
                 ):
-                    yield chart_ev
-        except Exception as ex:  # noqa: BLE001
-            log.exception("chat/intent-respond plan resume failed")
-            yield {"event": "error", "data": json.dumps({
-                "message": f"plan resume failed: {ex.__class__.__name__}: {str(ex)[:200]}",
-            }, ensure_ascii=False)}
-            yield {"event": "done", "data": json.dumps({"status": "failed"})}
+                    # Subsequent judge pause (deficit) — re-register pending_judge
+                    # + surface the card, same as the judge branch's hotfix.
+                    if stream_event.type == "judge_clarify_pending":
+                        sd = stream_event.data or {}
+                        try:
+                            _pj.register(_pj.PendingJudge(
+                                chat_session_id=req.chat_session_id,
+                                build_session_id=str(sd.get("session_id")
+                                                     or pending.build_session_id),
+                                phase_id=str(sd.get("phase_id") or "?"),
+                                requested_n=int(sd.get("requested_n") or 0),
+                                actual_rows=int(sd.get("actual_rows") or 0),
+                                value_desc=str(sd.get("value_desc") or ""),
+                                block_id=str(sd.get("block_id") or ""),
+                                instruction=pending.instruction,
+                                base_pipeline=pending.base_pipeline,
+                                skill_step_mode=pending.skill_step_mode,
+                                user_id=pending.user_id,
+                            ))
+                        except Exception as ex:  # noqa: BLE001
+                            log.warning("plan-resume: re-register pending_judge failed: %s", ex)
+                        yield {"event": "pb_judge_clarify", "data": json.dumps({
+                            "type": "pb_judge_clarify",
+                            "session_id": req.chat_session_id,
+                            "build_session_id": sd.get("session_id") or pending.build_session_id,
+                            "phase_id": sd.get("phase_id"),
+                            "requested_n": sd.get("requested_n"),
+                            "actual_rows": sd.get("actual_rows"),
+                            "ratio": sd.get("ratio"),
+                            "value_desc": sd.get("value_desc"),
+                            "block_id": sd.get("block_id"),
+                        }, default=str, ensure_ascii=False)}
+                        yield {"event": "done", "data": json.dumps({"status": "judge_clarify_pending"})}
+                        return
+                    wrapped = wrap_build_event_for_chat(stream_event, pending.build_session_id)
+                    if wrapped is not None:
+                        ev_type = wrapped.get("type") or "message"
+                        yield {"event": ev_type,
+                               "data": json.dumps(wrapped, default=str, ensure_ascii=False)}
+                    elif stream_event.type == "done":
+                        yield {"event": "done",
+                               "data": json.dumps(stream_event.data, default=str, ensure_ascii=False)}
+                    if stream_event.type == "done" and stream_event.data:
+                        pj = stream_event.data.get("pipeline_json")
+                        if isinstance(pj, dict):
+                            final_pipeline_for_exec = pj
+                if final_pipeline_for_exec is not None and confirmed:
+                    async for chart_ev in _emit_pipeline_charts(
+                        final_pipeline_for_exec, pending.build_session_id,
+                    ):
+                        yield chart_ev
+            except Exception as ex:  # noqa: BLE001
+                log.exception("chat/intent-respond plan resume failed")
+                yield {"event": "error", "data": json.dumps({
+                    "message": f"plan resume failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+                }, ensure_ascii=False)}
+                yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+        from python_ai_sidecar import agent_tasks as _tasks
+        task = _tasks.start_task(
+            kind="build", chat_session_id=req.chat_session_id,
+            user_id=pending.user_id or 0,
+            goal=pending.plan_summary or pending.instruction or "",
+            gen=_plan_build_events())
+        yield {"event": "agent_task", "data": json.dumps(
+            {"type": "agent_task", "task_id": task.task_id})}
+        async for ev in _tasks.subscribe(task):
+            yield ev
         return
 
     # v30.17j — judge_decision branch takes priority over confirmations
@@ -611,8 +626,10 @@ async def _chat_intent_respond_stream(
             req.chat_session_id, judge_pending.build_session_id,
             judge_pending.phase_id, action,
         )
-        final_pipeline_for_exec: Optional[dict] = None
-        try:
+        # V85: judge resume 同樣走背景任務（斷線不中斷）。
+        async def _judge_build_events() -> AsyncGenerator[dict, None]:
+          final_pipeline_for_exec: Optional[dict] = None
+          try:
             async for stream_event in resume_graph_build_with_judge_decision(
                 session_id=judge_pending.build_session_id,
                 phase_id=judge_pending.phase_id,
@@ -690,12 +707,23 @@ async def _chat_intent_respond_stream(
                     final_pipeline_for_exec, judge_pending.build_session_id,
                 ):
                     yield chart_ev
-        except Exception as ex:  # noqa: BLE001
+          except Exception as ex:  # noqa: BLE001
             log.exception("chat/intent-respond judge resume failed")
             yield {"event": "error", "data": json.dumps({
                 "message": f"judge resume failed: {ex.__class__.__name__}: {str(ex)[:200]}",
             }, ensure_ascii=False)}
             yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+        from python_ai_sidecar import agent_tasks as _tasks
+        task = _tasks.start_task(
+            kind="build", chat_session_id=req.chat_session_id,
+            user_id=judge_pending.user_id or 0,
+            goal=judge_pending.instruction or "",
+            gen=_judge_build_events())
+        yield {"event": "agent_task", "data": json.dumps(
+            {"type": "agent_task", "task_id": task.task_id})}
+        async for ev in _tasks.subscribe(task):
+            yield ev
         return
 
     # Existing intent_confirm path
@@ -1326,3 +1354,79 @@ loadList();
 
 
 # (the /view route is registered above, before /{filename})
+
+
+# ── V85 (2026-07-11) Agent Tasks — 工作與畫面非同步的 reattach 端點 ──────────
+
+
+@router.get("/tasks")
+async def list_agent_tasks(
+    chat_session_id: str, caller: CallerContext = ServiceAuth,
+) -> dict:
+    """對話的背景工作清單 — 記憶體 registry（即時）優先，Java 持久層補洞
+    （sidecar 重啟後仍看得到 finished/interrupted 的紀錄）。"""
+    from python_ai_sidecar import agent_tasks as _tasks
+
+    live = {t.task_id: t.public_dict() for t in _tasks.tasks_for_session(chat_session_id)}
+    rows: list = []
+    try:
+        java = JavaAPIClient(CONFIG.java_api_url, CONFIG.java_internal_token,
+                             timeout_sec=CONFIG.java_timeout_sec)
+        persisted = await java._get_data(
+            "/internal/agent-tasks", params={"chat_session_id": chat_session_id}) or []
+        for p in persisted:
+            tid = p.get("id")
+            if tid in live:
+                continue
+            status = p.get("status")
+            # Java 說 running 但 registry 查無 → sidecar 重啟過，工作已死。
+            if status == "running":
+                status = "interrupted"
+            rows.append({"task_id": tid, "kind": p.get("kind"), "status": status,
+                         "goal": p.get("goal"), "created_at": p.get("created_at"),
+                         "has_terminal_events": bool(p.get("terminal_events"))})
+    except Exception as ex:  # noqa: BLE001
+        log.warning("agent-tasks java list failed: %s", ex)
+    out = list(live.values()) + rows
+    out.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return {"tasks": out[:10]}
+
+
+@router.get("/tasks/{task_id}/stream")
+async def stream_agent_task(
+    task_id: str, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """Reattach：回放事件緩衝再接即時流。記憶體沒有（sidecar 重啟）就回放
+    Java 的 terminal_events（至少拿得到結果卡＋圖）。"""
+    from python_ai_sidecar import agent_tasks as _tasks
+
+    async def _gen() -> AsyncGenerator[dict, None]:
+        task = _tasks.get_task(task_id)
+        if task is not None:
+            async for ev in _tasks.subscribe(task):
+                yield ev
+            return
+        try:
+            java = JavaAPIClient(CONFIG.java_api_url, CONFIG.java_internal_token,
+                                 timeout_sec=CONFIG.java_timeout_sec)
+            row = await java._get_data(f"/internal/agent-tasks/{task_id}")
+        except Exception as ex:  # noqa: BLE001
+            row = None
+            log.warning("agent-task fetch failed (%s): %s", task_id, ex)
+        if not row:
+            yield {"event": "error", "data": json.dumps({"message": "task not found"})}
+            yield {"event": "done", "data": json.dumps({"status": "not_found"})}
+            return
+        events = []
+        try:
+            events = json.loads(row.get("terminal_events") or "[]")
+        except Exception:  # noqa: BLE001
+            pass
+        for ev in events:
+            if isinstance(ev, dict) and ev.get("event"):
+                yield ev
+        if not events:
+            yield {"event": "done", "data": json.dumps(
+                {"status": row.get("status") or "unknown"})}
+
+    return EventSourceResponse(_with_keepalive(_gen()))

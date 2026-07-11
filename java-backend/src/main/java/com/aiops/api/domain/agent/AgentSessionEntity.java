@@ -50,6 +50,10 @@ public class AgentSessionEntity {
 	@Column(name = "title", length = 200)
 	private String title;
 
+	/** V85 (2026-07-11): 完整訊息串（含圖卡）的 JSON — 跨裝置還原用。 */
+	@Column(name = "rich_history", columnDefinition = "text")
+	private String richHistory;
+
 	@UpdateTimestamp
 	@Column(name = "updated_at", columnDefinition = "timestamp with time zone")
 	private OffsetDateTime updatedAt;

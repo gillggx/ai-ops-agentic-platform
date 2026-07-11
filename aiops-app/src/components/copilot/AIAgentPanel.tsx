@@ -913,6 +913,135 @@ export function AIAgentPanel({
     return () => clearTimeout(timer);
   }, [chatHistory, persistHistory]);
 
+  // V85 (2026-07-11) — rich history 的 server 備份（跨裝置）。3s debounce：
+  // streaming 期間不打；停下來才 PUT 最終狀態。失敗靜默（本機 localStorage 仍在）。
+  useEffect(() => {
+    if (!persistHistory) return;
+    const sid = sessionIdRef.current;
+    if (!sid || chatHistory.length === 0) return;
+    const timer = setTimeout(() => {
+      try {
+        let payload = JSON.stringify({ v: 1, at: Date.now(), items: chatHistory.slice(-30) });
+        if (payload.length > 1_200_000) {
+          payload = JSON.stringify({ v: 1, at: Date.now(), items: chatHistory.slice(-12) });
+        }
+        void fetch(`/api/agent/session/${encodeURIComponent(sid)}/rich-history`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rich_history: payload }),
+        }).catch(() => { /* server 備份 best-effort */ });
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [chatHistory, persistHistory]);
+
+  // V85 (2026-07-11) — 工作與畫面非同步：重載後查此對話的背景工作。
+  // running → 重新接上事件流（回放緩衝+即時）；離線期間完成 → 回放收尾事件
+  // 補上完成卡與圖。輕量 dispatcher（進度行 in-place + 圖卡/完成卡 append），
+  // 不動主 dispatcher。
+  const reattachedRef = useRef(false);
+  useEffect(() => {
+    if (!persistHistory || !externalSessionId || reattachedRef.current) return;
+    reattachedRef.current = true;
+    let cancelled = false;
+    const restored = chatHistory; // 還原快照（deps=[] 的 closure 正是要這份）
+    (async () => {
+      try {
+        const r = await fetch(
+          `/api/agent/tasks?session_id=${encodeURIComponent(externalSessionId)}`,
+          { cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        const tasks = (d?.tasks ?? []) as Array<{
+          task_id: string; status: string; goal?: string;
+          has_terminal_events?: boolean;
+        }>;
+        const running = tasks.find((t) => t.status === "running");
+        const roles = restored.map((m) => m.role);
+        const lastPlanIdx = roles.lastIndexOf("build_plan");
+        const doneAfter = lastPlanIdx >= 0 &&
+          roles.slice(lastPlanIdx).includes("build_done");
+        const unresolved = lastPlanIdx >= 0 && !doneAfter;
+        const target = running
+          ?? (unresolved ? tasks.find((t) => t.status === "finished") : undefined);
+        if (!target || cancelled) return;
+
+        const seenCharts = new Set(
+          restored.filter((m) => m.role === "chart_inline").map((m) => m.chartNodeId));
+        let doneSeen = false;
+        let ops = 0;
+        const progressId = nextId();
+        setChatHistory((prev) => [...prev, {
+          id: progressId, role: "agent",
+          content: running
+            ? "[接續] 背景建構進行中——已重新接上進度。"
+            : "[接續] 離線期間建構已完成，回放結果…",
+        }]);
+
+        const handle = (ev: Record<string, unknown>) => {
+          const type = String(ev.type ?? "");
+          if (type === "pb_glass_op") {
+            ops += 1;
+            setChatHistory((prev) => prev.map((m) => m.id === progressId
+              ? { ...m, content: `[接續] 建構進行中——第 ${ops} 步（${String(ev.op ?? "")}）` }
+              : m));
+          } else if (type === "pb_glass_chart") {
+            const chartSpec = ev.chart_spec as Record<string, unknown> | undefined;
+            const nodeId = String(ev.node_id ?? "");
+            if (chartSpec && !seenCharts.has(nodeId)) {
+              seenCharts.add(nodeId);
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "chart_inline", content: "",
+                chartSpec, chartNodeId: nodeId,
+              }]);
+            }
+          } else if (type === "pb_glass_done") {
+            if (doneSeen) return; // build_finalized + done 兩發，取一
+            doneSeen = true;
+            const pj = ev.pipeline_json as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+            if (pj && Array.isArray(pj.nodes) && pj.nodes.length > 0) {
+              lastChatPipelineRef.current = pj as unknown as Record<string, unknown>;
+            }
+            const ok = ["finished", "success"].includes(String(ev.status ?? "finished"));
+            const text = ok
+              ? `建構完成 — ${(pj?.nodes ?? []).length} nodes / ${(pj?.edges ?? []).length} edges（背景完成，畫面離線期間照跑）`
+              : `建構結束：${String(ev.status ?? "?")}`;
+            setChatHistory((prev) => [
+              ...prev.map((m) => m.id === progressId ? { ...m, content: "[接續] 建構結果：" } : m),
+              { id: nextId(), role: "build_done" as const, content: "",
+                buildDone: { text, learned: [], rating: null } },
+            ]);
+          } else if (type === "error") {
+            setChatHistory((prev) => [...prev, {
+              id: nextId(), role: "agent",
+              content: `建構失敗：${String(ev.message ?? "")}`,
+            }]);
+          }
+        };
+
+        const res = await fetch(
+          `/api/agent/tasks/${encodeURIComponent(target.task_id)}/stream`,
+          { cache: "no-store" });
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            try { handle(JSON.parse(line.slice(5).trim())); } catch { /* skip */ }
+          }
+        }
+      } catch { /* reattach 是加值功能——失敗靜默，本機還原仍完整 */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 還原後補回「畫面上這張圖」的 snapshot — 沒有它，重載後說「啟用／改圖」
   // 會被當成沒有圖可用而反問（缺口 D1 的 client 端解法）。
   useEffect(() => {

@@ -144,6 +144,10 @@ class JavaAPIClient:
         env = await self._request("PATCH", path, json=json)
         return env.get("data") if isinstance(env, dict) else env
 
+    async def _put_data(self, path: str, json: Any) -> Any:
+        env = await self._request("PUT", path, json=json)
+        return env.get("data") if isinstance(env, dict) else env
+
     # ---- typed methods ----
 
     async def search_published_skills(self, query: str, top_k: int = 5) -> list[dict]:
