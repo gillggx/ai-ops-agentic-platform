@@ -277,6 +277,10 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
   const stepMode = style.line_style === 'step';
   const dotR = markerRadius(style, T.pointR);
   for (const tr of traces) {
+    // 2026-07-11: y 序列若是管制限欄位（ucl/lcl/usl/lsl，值逐列變動所以進不了
+    // rules）→ 語意呈現：紅色細虛線、無 marker。原本畫成粗 marker 鏈，
+    // 50 點在窄幅上重疊成一整條橘/藍胖帶（user:「圖不對」）。
+    const isLimit = ['ucl', 'lcl', 'usl', 'lsl'].includes(tr.name.toLowerCase());
     const yProj = tr.axis === 'secondary' && y2 ? y2 : y;
     const projectedPts = tr.points.map(([px, py, row]) => [px, Number.isFinite(py) ? yProj(py) : NaN, row] as [number, number, Record<string, unknown>]);
     // step: insert an intermediate (x2, y1) knee between consecutive points
@@ -295,21 +299,22 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
     el('path', {
       d: path,
       fill: 'none',
-      stroke: tr.color,
-      'stroke-width': T.stroke,
+      stroke: isLimit ? '#e5484d' : tr.color,
+      'stroke-width': isLimit ? 1.2 : T.stroke,
       'stroke-linecap': 'round',
       'stroke-linejoin': 'round',
-      'stroke-dasharray': tr.axis === 'secondary' ? '4 3' : primaryDash,
+      'stroke-dasharray': isLimit ? '6 4' : (tr.axis === 'secondary' ? '4 3' : primaryDash),
     }, svg);
     // Points (dotR 0 = markers off; hover targets stay via invisible dots)
+    const trDotR = isLimit ? 0 : dotR;
     for (const [px, py, row] of projectedPts) {
       if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
       const dot = el('circle', {
         cx: px,
         cy: py,
-        r: dotR > 0 ? dotR : 4,
-        fill: dotR > 0 ? tr.color : 'transparent',
-        stroke: dotR > 0 ? T.bg : 'none',
+        r: trDotR > 0 ? trDotR : 4,
+        fill: trDotR > 0 ? tr.color : 'transparent',
+        stroke: trDotR > 0 ? T.bg : 'none',
         'stroke-width': 0.5,
       }, svg);
       (dot as SVGElement).style.cursor = 'pointer';
