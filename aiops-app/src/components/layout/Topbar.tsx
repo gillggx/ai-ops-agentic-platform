@@ -14,7 +14,10 @@ const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   ON_DUTY:  { bg: "#f0fdf4", color: "#166534" },
 };
 
-export function Topbar() {
+export function Topbar({ agentStatus }: {
+  /** 2026-07-13 mockup：agent 執行中 pill（AppShell 餵 runPhase/goal）。 */
+  agentStatus?: { running: boolean; goal?: string | null; onClick?: () => void };
+} = {}) {
   const { data: session } = useSession();
   return (
     <header style={{
@@ -35,6 +38,21 @@ export function Topbar() {
       </span>
       {session && <ModeSwitch />}
       <div style={{ flex: 1 }} />
+      {session && agentStatus?.running && (
+        <button onClick={agentStatus.onClick} title={agentStatus.goal ?? undefined} style={{
+          display: "flex", alignItems: "center", gap: 7, padding: "5px 13px",
+          borderRadius: 16, border: "none", cursor: agentStatus.onClick ? "pointer" : "default",
+          background: "var(--pd, #14402F)", color: "#fff", fontSize: 12, fontWeight: 700,
+          maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden",
+        }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: "50%", background: "#39d98a", flexShrink: 0,
+            animation: "topbar-pulse 1.4s ease-in-out infinite",
+          }} />
+          <style>{"@keyframes topbar-pulse{0%,100%{opacity:1}50%{opacity:.35}}"}</style>
+          agent 執行中{agentStatus.goal ? ` ・ ${agentStatus.goal.slice(0, 18)}` : ""}
+        </button>
+      )}
       {session && <NotificationBell />}
       <UserMenu />
     </header>

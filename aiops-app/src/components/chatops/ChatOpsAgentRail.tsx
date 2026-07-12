@@ -1,53 +1,44 @@
 "use client";
 
 /**
- * ChatOpsAgentRail (v2, 2026-07-10 per design mockup + user feedback).
+ * ChatOpsAgentRail (v3, 2026-07-13 per design mockup).
  *
- * Left rail = what the agent is DOING, not a chat log:
+ * 左欄結構（上而下）：
  *   1. + 新對話
- *   2. Console card — LIVE step feed of the current run (dark, mono,
- *      timestamped lines from the glass-event stream), agent-activity link
- *   3. 最近運作 — the platform agent's recent episodes
+ *   2. 最近運作 — 本人跨對話的背景工作（agent_tasks），點了跳回該對話
+ *   3. 對話紀錄 — SessionList 常駐（近期 x/5 / 打包歷史）
+ *   4. MY DRAFTS — 草稿清單
+ * Console 自 v3 起移到右側深色面板（ChatOpsConsolePanel），不在 rail。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SessionList } from "./SessionList";
 import { DraftList } from "./DraftList";
 import type { DraftCardData } from "./DraftCard";
 
-interface RailGlassEvent {
-  kind: "start" | "op" | "chat" | "error" | "done" | "user";
-  ts?: string;
-  goal?: string;
-  op?: string;
-  args?: Record<string, unknown>;
-  message?: string;
-  status?: string;
+interface RecentTask {
+  task_id: string;
+  status: string;               // running | finished | failed | interrupted
+  goal?: string | null;
+  created_at?: string;
+  finished_at?: string | null;
+  chat_session_id?: string | null;
 }
 
-/** One compact console line per meaningful glass event. */
-function lineFor(e: RailGlassEvent): { text: string; tone: "ok" | "err" | "info" } | null {
-  if (e.kind === "start") {
-    return { text: `▶ ${String(e.goal ?? "build").slice(0, 34)}`, tone: "info" };
-  }
-  if (e.kind === "op") {
-    const a = e.args ?? {};
-    const target = (a.block_name ?? a.node_id ?? a.to_node ?? "") as string;
-    return { text: `${e.op ?? "op"} ${String(target).slice(0, 26)} ✓`, tone: "ok" };
-  }
-  if (e.kind === "error") {
-    return { text: `✗ ${String(e.message ?? "error").slice(0, 40)}`, tone: "err" };
-  }
-  if (e.kind === "done") {
-    const ok = e.status === "finished" || e.status === "success";
-    return { text: ok ? "OK — 建構完成" : `結束：${e.status ?? "?"}`, tone: ok ? "ok" : "err" };
-  }
-  return null;
+function ago(iso?: string): string {
+  if (!iso) return "";
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 90) return "剛剛";
+  if (s < 3600) return `${Math.floor(s / 60)} 分鐘前`;
+  if (s < 86400) return `${Math.floor(s / 3600)} 小時前`;
+  return `${Math.floor(s / 86400)} 天前`;
 }
 
-export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession, activeSessionId, onOpenDraft }: {
+const TASK_DOT: Record<string, string> = {
+  running: "#39d98a", finished: "#0f9d6a", failed: "#e5484d", interrupted: "#c8841a",
+};
+
+export function ChatOpsAgentRail({ runPhase, onNew, onOpenSession, activeSessionId, onOpenDraft }: {
   runPhase: string;
-  goal: string | null;
-  events: RailGlassEvent[];
   onNew: () => void;
   /** Session 管理 (2026-07-12)：預設開新 — 舊對話從「對話紀錄」進。 */
   onOpenSession: (sessionId: string) => void;
@@ -55,24 +46,20 @@ export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession,
   /** My Drafts (2026-07-12)：點草稿 → 草稿卡插入當前對話（B 案）。 */
   onOpenDraft: (d: DraftCardData) => void;
 }) {
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const consoleEndRef = useRef<HTMLDivElement>(null);
+  const [tasks, setTasks] = useState<RecentTask[]>([]);
 
-  const lines = useMemo(() => {
-    const out: Array<{ ts?: string; text: string; tone: "ok" | "err" | "info" }> = [];
-    for (const e of events) {
-      const l = lineFor(e);
-      if (l) out.push({ ts: e.ts, ...l });
-    }
-    return out.slice(-40);
-  }, [events]);
-
+  const loadTasks = useCallback(() => {
+    fetch("/api/agent/tasks/recent", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (Array.isArray(j?.tasks)) setTasks(j.tasks.slice(0, 4)); })
+      .catch(() => { /* ambient */ });
+  }, []);
+  // 建構開始/結束時刷新 + 背景 60s 輪詢（狀態翻轉靠這個）。
+  useEffect(() => { loadTasks(); }, [loadTasks, runPhase]);
   useEffect(() => {
-    consoleEndRef.current?.scrollIntoView({ block: "nearest" });
-  }, [lines.length]);
-
-  const live = runPhase === "building" || runPhase === "running";
-  const TONE: Record<string, string> = { ok: "#7ee2b8", err: "#ff9d9d", info: "#e6eaee" };
+    const t = setInterval(loadTasks, 60000);
+    return () => clearInterval(t);
+  }, [loadTasks]);
 
   return (
     <div style={{
@@ -80,7 +67,7 @@ export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession,
       background: "var(--pn, #F8F6F0)", borderRight: "1px solid #e2e8f0",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
-      <div style={{ padding: "12px 12px 8px", flexShrink: 0 }}>
+      <div style={{ padding: "12px 12px 4px", flexShrink: 0 }}>
         <button onClick={onNew} style={{
           width: "100%", padding: "9px 0", borderRadius: 9, border: "none",
           background: "var(--p, #1E5A44)", color: "#fff",
@@ -88,74 +75,55 @@ export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession,
         }}>
           + 新對話
         </button>
-        <button onClick={() => setHistoryOpen((o) => !o)} style={{
-          width: "100%", marginTop: 6, padding: "7px 0", borderRadius: 9,
-          border: "1px solid #e2e8f0", background: "#fff", color: "#5b6070",
-          fontSize: 12, fontWeight: 700, cursor: "pointer",
-        }}>
-          對話紀錄 {historyOpen ? "▴" : "▾"}
-        </button>
       </div>
-      {historyOpen && (
-        <div style={{
-          margin: "0 10px 8px", padding: "10px 10px 6px", borderRadius: 12,
-          background: "#fff", border: "1px solid #e2e8f0", flexShrink: 0,
-          maxHeight: 300, display: "flex", flexDirection: "column",
-        }}>
-          <SessionList activeId={activeSessionId}
-            onOpen={(sid) => { setHistoryOpen(false); onOpenSession(sid); }} />
-        </div>
-      )}
 
-      {/* Console — live step feed (design mockup: dark card, mono lines) */}
+      {/* 最近運作 — 背景工作（V85 agent_tasks），點了回到該對話 */}
+      <div style={{ padding: "8px 14px 2px", flexShrink: 0, display: "flex", alignItems: "center" }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8b90a7", letterSpacing: ".05em" }}>最近運作</span>
+        <span style={{ flex: 1 }} />
+        <a href="/agent-activity" target="_blank" rel="noreferrer"
+           style={{ fontSize: 10.5, color: "#8b90a7", textDecoration: "none" }}>全部 →</a>
+      </div>
+      <div style={{ padding: "2px 10px 6px", flexShrink: 0 }}>
+        {tasks.length === 0 && (
+          <div style={{ padding: "6px 4px", fontSize: 11.5, color: "#a0a4b5" }}>還沒有背景工作</div>
+        )}
+        {tasks.map((tk) => (
+          <button key={tk.task_id}
+            onClick={() => tk.chat_session_id && onOpenSession(tk.chat_session_id)}
+            title={tk.goal ?? ""}
+            style={{
+              width: "100%", textAlign: "left", padding: "7px 8px", borderRadius: 9,
+              border: "none", background: "transparent", cursor: tk.chat_session_id ? "pointer" : "default",
+              display: "flex", gap: 8, alignItems: "flex-start",
+            }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: "50%", marginTop: 5, flexShrink: 0,
+              background: TASK_DOT[tk.status] ?? "#a0a4b5",
+            }} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{
+                display: "block", fontSize: 12, fontWeight: 600, color: "#1a1d29",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{(tk.goal ?? "（未命名工作）").slice(0, 40)}</span>
+              <span style={{ display: "block", fontSize: 10.5, color: "#8b90a7", fontFamily: "ui-monospace, Menlo, monospace" }}>
+                {ago(tk.created_at)} ・ {tk.status === "running" ? "執行中" : tk.status}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* 對話紀錄 — 常駐（近期 x/5 / 打包歷史 x/10） */}
       <div style={{
-        margin: "4px 10px 0", borderRadius: 12, overflow: "hidden",
-        background: "var(--nav, #14211C)", flexShrink: 0,
-        display: "flex", flexDirection: "column", maxHeight: 300,
+        margin: "2px 10px 8px", padding: "10px 10px 6px", borderRadius: 12,
+        background: "#fff", border: "1px solid #e2e8f0",
+        flex: 1, minHeight: 120, display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
-        <div style={{
-          padding: "9px 12px", display: "flex", alignItems: "center", gap: 7,
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-        }}>
-          <span style={{
-            width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-            background: live ? "#39d98a" : "#5b6673",
-          }} />
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#f0f2f5" }}>Console</span>
-          {live && <span style={{
-            fontSize: 9.5, fontWeight: 700, color: "#39d98a", letterSpacing: "0.4px",
-            border: "1px solid rgba(57,217,138,0.4)", borderRadius: 8, padding: "0 6px",
-          }}>live</span>}
-          <span style={{ flex: 1 }} />
-          <a href="/agent-activity" target="_blank" rel="noreferrer" style={{
-            fontSize: 10, color: "#9aa1b5", textDecoration: "none",
-            fontFamily: "ui-monospace, Menlo, monospace",
-          }}>agent-activity ↗</a>
-        </div>
-        <div style={{
-          padding: "8px 12px 10px", overflowY: "auto",
-          font: "10.5px/1.75 ui-monospace, Menlo, monospace",
-        }}>
-          {lines.length === 0 && (
-            <div style={{ color: "#6d7386" }}>待命 — 送出需求後這裡會即時顯示 agent 的每一步。</div>
-          )}
-          {lines.map((l, i) => (
-            <div key={i} style={{ color: TONE[l.tone], whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {l.ts && <span style={{ color: "#6d7386", marginRight: 6 }}>{l.ts}</span>}
-              {l.text}
-            </div>
-          ))}
-          <div ref={consoleEndRef} />
-        </div>
+        <SessionList activeId={activeSessionId} onOpen={onOpenSession} />
       </div>
-      {goal && live && (
-        <div style={{ margin: "6px 14px 0", fontSize: 11, color: "#64748b", lineHeight: 1.5 }}>
-          {goal.slice(0, 60)}
-        </div>
-      )}
 
-      {/* My Drafts (2026-07-12) — 取代最近運作（episodes 從 Console 的
-          agent-activity 連結進）。點草稿 → 草稿卡插入對話。 */}
+      {/* My Drafts — 點草稿 → 草稿卡插入對話 */}
       <DraftList onOpenDraft={onOpenDraft} />
     </div>
   );

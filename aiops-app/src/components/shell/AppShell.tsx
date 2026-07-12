@@ -8,6 +8,7 @@ import { signOut, useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 // Resizable panel via native CSS resize
 import { ChatOpsAgentRail } from "@/components/chatops/ChatOpsAgentRail";
+import { ChatOpsConsolePanel } from "@/components/chatops/ChatOpsConsolePanel";
 import type { DraftCardData } from "@/components/chatops/DraftCard";
 import { MobileShell } from "@/components/mobile/MobileShell";
 import { applyTheme } from "@/lib/themes";
@@ -570,7 +571,11 @@ function Shell({ children }: { children: React.ReactNode }) {
       display: "flex", flexDirection: "column",
       height: "100vh", background: "var(--ws, #f7f8fc)", overflow: "hidden",
     }}>
-      <Topbar />
+      <Topbar agentStatus={{
+        running: runPhase === "building" || runPhase === "running" || !!runningTask,
+        goal: lastGlassStartRef.current?.goal ?? runningTask?.goal ?? null,
+        onClick: runningTask ? () => openChatSession(runningTask.chat_session_id) : undefined,
+      }} />
       <HandoffListener />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Sidebar + main + copilot toggle live in a relative container so
@@ -585,8 +590,6 @@ function Shell({ children }: { children: React.ReactNode }) {
             <>
               <ChatOpsAgentRail
                 runPhase={runPhase}
-                goal={lastGlassStartRef.current?.goal ?? null}
-                events={glassEvents}
                 onNew={newChatSession}
                 onOpenSession={openChatSession}
                 activeSessionId={chatOpsSess.id}
@@ -621,6 +624,12 @@ function Shell({ children }: { children: React.ReactNode }) {
                   ) : agentPanelEl}
                 </div>
               </div>
+              {/* Console 右側深色面板 (2026-07-13 mockup) — 自動收合/釘選 */}
+              <ChatOpsConsolePanel
+                runPhase={runPhase}
+                goal={lastGlassStartRef.current?.goal ?? null}
+                events={glassEvents}
+              />
               {/* keep the route's page mounted (it renders null) */}
               <div style={{ display: "none" }}>{children}</div>
             </>

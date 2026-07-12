@@ -35,6 +35,14 @@ public class InternalAgentTaskController {
 				.stream().map(Dto::of).toList());
 	}
 
+	/** ChatOps rail 最近運作 (2026-07-13)：本人跨對話近期工作（點了跳回該對話）。 */
+	@GetMapping("/recent")
+	public ApiResponse<List<Dto>> recent(@RequestParam("user_id") Long userId) {
+		return ApiResponse.ok(repository
+				.findTop10ByUserIdOrderByCreatedAtDesc(userId)
+				.stream().map(Dto::of).toList());
+	}
+
 	@GetMapping("/{id}")
 	public ApiResponse<Dto> get(@PathVariable String id) {
 		return repository.findById(id)

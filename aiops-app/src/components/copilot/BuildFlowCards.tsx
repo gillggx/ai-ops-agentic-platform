@@ -390,6 +390,30 @@ export function BuildPlanCard({
         {chip}
       </div>
 
+      {/* 建構中 header（2026-07-13 mockup）— step x/y + 當前動作 + 背景執行副行 */}
+      {status === "building" && (() => {
+        const cur = phases.find((p) => runtime[p.id]?.status === "in_progress");
+        const stepNo = Math.min(doneCount + 1, total);
+        return (
+          <div style={{ marginTop: 8, display: "flex", gap: 9, alignItems: "flex-start" }}>
+            <span aria-hidden style={{
+              width: 14, height: 14, flexShrink: 0, marginTop: 2, borderRadius: "50%",
+              border: `2px solid ${CHAT_T.line}`, borderTopColor: CHAT_T.ink,
+              animation: "bfc-spin 0.9s linear infinite",
+            }} />
+            <style>{"@keyframes bfc-spin{to{transform:rotate(360deg)}}"}</style>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: CHAT_T.ink, lineHeight: 1.45 }}>
+                建構中 ・ step {stepNo}/{total}{cur ? ` — ${cur.goal.slice(0, 46)}` : ""}
+              </div>
+              <div style={{ fontSize: 10.5, color: CHAT_T.weak, marginTop: 2 }}>
+                背景執行，斷線照跑 ・ 詳細步驟見右側 Console
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 目標句 — 全對話唯一一次 */}
       {state.summary && (
         <div style={{ fontSize: 11.5, fontWeight: 600, color: CHAT_T.ink, lineHeight: 1.55, marginTop: 7 }}>
@@ -545,16 +569,20 @@ export interface BuildDoneState {
   verified?: string;                  // ▣ 數值已驗證（…）
   learned: string[];                  // ["W1 偏好（…）"]
   rating?: 1 | -1 | null;
+  /** 2026-07-13 mockup：已自動存入草稿 (x/10) + 打開編輯。 */
+  draftInfo?: { draft: { id: number } | null; count: number } | null;
 }
 
 export function BuildDoneCard({
-  state, onRate, onExpand,
+  state, onRate, onExpand, onOpenDraftCard,
 }: {
   state: BuildDoneState;
   onRate?: (rating: 1 | -1) => void;
   /** ChatOps (2026-07-10): overlay doesn't auto-open there — this link is the
    *  way into the Lite Canvas for plan-path builds. */
   onExpand?: () => void;
+  /** 打開編輯 → 把草稿卡插進對話（Try Run / 啟用 / 編輯都在卡上）。 */
+  onOpenDraftCard?: (draftId: number) => void;
 }) {
   const t = useTranslations("buildFlow.done");
   const rated = state.rating != null;
@@ -575,6 +603,23 @@ export function BuildDoneCard({
       {state.learned.length > 0 && (
         <div style={{ fontSize: 10, color: CHAT_T.purple, marginTop: 3 }}>
           ◆ {t("learned", { n: state.learned.length })}{state.learned.join(" · ")}
+        </div>
+      )}
+      {/* 2026-07-13 mockup：草稿 footer — 已自動存入草稿 (x/10) + 打開編輯 */}
+      {state.draftInfo && (
+        <div style={{
+          marginTop: 8, paddingTop: 7, borderTop: `1px solid ${CHAT_T.innerLine}`,
+          display: "flex", alignItems: "center", fontSize: 10.5, color: CHAT_T.weak,
+        }}>
+          <span>已自動存入草稿（{state.draftInfo.count}/10）</span>
+          <span style={{ flex: 1 }} />
+          {state.draftInfo.draft && onOpenDraftCard && (
+            <button onClick={() => onOpenDraftCard(state.draftInfo!.draft!.id)} style={{
+              border: `1px solid ${CHAT_T.chipBorder}`, background: "#fff", color: CHAT_T.ink,
+              fontSize: 10.5, fontWeight: 600, padding: "4px 12px", borderRadius: 7,
+              cursor: "pointer", fontFamily: "inherit",
+            }}>打開編輯</button>
+          )}
         </div>
       )}
       {onRate && (

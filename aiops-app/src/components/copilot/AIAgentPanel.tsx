@@ -83,12 +83,12 @@ async function autoSaveDraft(
   pj: Record<string, unknown> | null,
   columns: Record<string, string[]> | null,
   nl: string,
-): Promise<void> {
+): Promise<{ draft: DraftCardData | null; count: number } | null> {
   const nodes = (pj?.nodes as unknown[]) ?? [];
   const edges = (pj?.edges as unknown[]) ?? [];
-  if (!pj || nodes.length === 0) return;
+  if (!pj || nodes.length === 0) return null;
   try {
-    await fetch("/api/chat-drafts", {
+    const res = await fetch("/api/chat-drafts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -101,8 +101,20 @@ async function autoSaveDraft(
         edge_count: edges.length,
       }),
     });
+    const env = await res.json().catch(() => ({}));
+    const row = (env?.data ?? env) as DraftCardData | null;
+    // 2026-07-13 mockup：完成卡 footer 要顯示「已自動存入草稿 (x/10)」。
+    let count = 0;
+    try {
+      const lr = await fetch("/api/chat-drafts", { cache: "no-store" });
+      const lj = await lr.json().catch(() => ({}));
+      const list = (lj?.data ?? lj) as unknown[];
+      count = Array.isArray(list) ? list.length : 0;
+    } catch { /* count best-effort */ }
+    return { draft: row && typeof row.id === "number" ? row : null, count };
   } catch {
     // ignore — draft staging is best-effort
+    return null;
   }
 }
 
@@ -2146,7 +2158,16 @@ export function AIAgentPanel({
                     lastChatColumnsRef.current,
                     (lastBuildGoalRef.current
                       || lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "")).trim(),
-                  );
+                  ).then((info) => {
+                    // 完成卡 footer：已自動存入草稿 (x/10) + 打開編輯
+                    if (!info) return;
+                    const doneId = currentBuildDoneIdRef.current;
+                    if (doneId == null) return;
+                    setChatHistory((prev) => prev.map((m) =>
+                      m.id === doneId && m.buildDone
+                        ? { ...m, buildDone: { ...m.buildDone, draftInfo: info } }
+                        : m));
+                  });
                 }
               }
             }
@@ -2673,6 +2694,18 @@ export function AIAgentPanel({
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <BuildDoneCard
                     state={msg.buildDone}
+                    onOpenDraftCard={(draftId) => {
+                      // 打開編輯 = 把草稿卡插進對話（Try Run/啟用/編輯/刪都在卡上）
+                      void fetch("/api/chat-drafts", { cache: "no-store" })
+                        .then((r) => (r.ok ? r.json() : null))
+                        .then((j) => {
+                          const list = (j?.data ?? j) as DraftCardData[] | null;
+                          const d = Array.isArray(list) ? list.find((x) => x.id === draftId) : null;
+                          if (d) setChatHistory((prev) => [...prev,
+                            { id: nextId(), role: "draft_card", content: "", draftCard: d }]);
+                        })
+                        .catch(() => { /* best-effort */ });
+                    }}
                     onExpand={onPbPipelineExpand && lastChatPipelineRef.current ? () => {
                       onPbPipelineExpand({
                         type: "pb_pipeline",

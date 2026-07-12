@@ -1510,6 +1510,41 @@ async def stream_agent_task(
     return EventSourceResponse(_with_keepalive(_gen()))
 
 
+@router.get("/tasks/recent")
+async def list_recent_tasks(
+    user_id: int, caller: CallerContext = ServiceAuth,
+) -> dict:
+    """ChatOps rail 最近運作 (2026-07-13)：本人跨對話近期背景工作。
+    記憶體 registry（running 即時）優先，Java 持久層補歷史；Java 標 running
+    但 registry 查無 = sidecar 重啟過 → interrupted。"""
+    from python_ai_sidecar import agent_tasks as _tasks
+
+    live = {t.task_id: t.public_dict() for t in _tasks._REGISTRY.values()
+            if t.user_id == user_id}
+    rows: list = []
+    try:
+        java = JavaAPIClient(CONFIG.java_api_url, CONFIG.java_internal_token,
+                             timeout_sec=CONFIG.java_timeout_sec)
+        persisted = await java._get_data(
+            "/internal/agent-tasks/recent", params={"user_id": user_id}) or []
+        for p in persisted:
+            tid = p.get("id")
+            if tid in live:
+                continue
+            status = p.get("status")
+            if status == "running":
+                status = "interrupted"
+            rows.append({"task_id": tid, "kind": p.get("kind"), "status": status,
+                         "goal": p.get("goal"), "created_at": p.get("created_at"),
+                         "finished_at": p.get("finished_at"),
+                         "chat_session_id": p.get("chat_session_id")})
+    except Exception as ex:  # noqa: BLE001
+        log.warning("agent-tasks recent java list failed: %s", ex)
+    out = list(live.values()) + rows
+    out.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return {"tasks": out[:8]}
+
+
 @router.get("/tasks/running")
 async def list_running_tasks(
     user_id: int, caller: CallerContext = ServiceAuth,
