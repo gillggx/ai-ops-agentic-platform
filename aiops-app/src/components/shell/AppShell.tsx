@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { ChatOpsAgentRail } from "@/components/chatops/ChatOpsAgentRail";
 import type { DraftCardData } from "@/components/chatops/DraftCard";
 import { MobileShell } from "@/components/mobile/MobileShell";
+import { applyTheme } from "@/lib/themes";
 import { Topbar } from "@/components/layout/Topbar";
 import HandoffListener from "@/components/shell/HandoffListener";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
@@ -260,6 +261,22 @@ function Shell({ children }: { children: React.ReactNode }) {
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
+  }, []);
+  // R1 (2026-07-12)：主題 hydration 移到殼層 — 手機殼不掛 Topbar，
+  // 沒有這段的話新裝置永遠拿不到 DB 的 ui_theme（QA-A 抓到的 gap）。
+  // localStorage 先撐首屏，profile 回來後以 DB 為準。
+  useEffect(() => {
+    const cached = (() => {
+      try { return localStorage.getItem("ui_theme"); } catch { return null; }
+    })();
+    if (cached) applyTheme(cached);
+    fetch("/api/me/profile", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        const pref = (j?.data ?? j)?.ui_theme as string | undefined;
+        if (pref) applyTheme(pref);
+      })
+      .catch(() => { /* 未登入等 — 維持預設 pine */ });
   }, []);
   const [chatOpsSess, setChatOpsSess] = useState<{
     id: string | null;
