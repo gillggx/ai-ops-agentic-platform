@@ -766,6 +766,9 @@ export function AIAgentPanel({
   // link can stash the just-built pipeline into sessionStorage for the
   // /new route to pick up.
   const lastBuiltPipelineRef = useRef<unknown | null>(null);
+  // 草稿描述修正 (2026-07-12)：build goal（pb_glass_start 帶入）— park 草稿的
+  // 描述來源，避免存到 build 期間的追問訊息。
+  const lastBuildGoalRef = useRef<string>("");
   // Bug 2 fix (2026-05-05): continuation SSE consumer used to ignore every
   // pb_glass_* event, leaving the chat panel stuck on the pre-pause state
   // even after the build resumed and finished. Park the main dispatcher
@@ -1749,6 +1752,10 @@ export function AIAgentPanel({
           // itself shows the agent's work (not just in the overlay).
           case "pb_glass_start": {
             const goal = ev.goal as string | undefined;
+            // 草稿描述修正 (2026-07-12)：park 草稿時用 build goal，不用
+            // lastUserPromptRef — build 期間使用者的追問（如「啟用成 skill」）
+            // 曾被誤存成草稿描述。
+            if (goal) lastBuildGoalRef.current = goal;
             onGlassStart?.({ session_id: ev.session_id as string, goal, base_pipeline: ev.base_pipeline });
             // 2026-07-05 — 新 build 只重置 plan-todo ref 與 done-card ref。
             // BUILD PLAN 卡 id 不清：resume（plan confirm）會再收到一次
@@ -2114,7 +2121,8 @@ export function AIAgentPanel({
                   void autoSaveDraft(
                     pjDone as unknown as Record<string, unknown>,
                     lastChatColumnsRef.current,
-                    lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "").trim(),
+                    (lastBuildGoalRef.current
+                      || lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "")).trim(),
                   );
                 }
               }

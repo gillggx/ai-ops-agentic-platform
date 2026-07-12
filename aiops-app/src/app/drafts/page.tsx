@@ -163,7 +163,9 @@ export default function DraftsPage() {
         id: d.id, name: d.name, nl: d.nl,
         pipeline_json: full.pipeline_json, columns: full.columns ?? {},
       }));
-      router.push("/");
+      // 2026-07-12 fix: V78 時代 "/" 是操作台；現在 "/" 重導 dashboard，
+      // co-design 流程落空（user 被丟去不相關頁）。操作台 = /chatops。
+      router.push("/chatops");
     } catch {
       alert("打開草稿失敗");
     }
