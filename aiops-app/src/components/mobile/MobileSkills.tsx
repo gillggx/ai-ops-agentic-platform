@@ -107,28 +107,19 @@ export function MobileSkills() {
             <div style={{ fontFamily: M.mono, fontSize: 10.5, color: M.faint, marginTop: 5 }}>
               in: {s.in_type || "—"} → out: {s.out_type || "—"}{trig ? ` ・ ${trig}` : ""}
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
-              <a href={`/skills/${encodeURIComponent(s.slug)}`} style={btn(false)}>編寫</a>
-              <a href={`/skills/${encodeURIComponent(s.slug)}/automate`} style={btn(true)}>
-                {s.role === "tool" ? "設定自動化" : "編輯自動化"}
-              </a>
-            </div>
+            {/* 2026-07-12 裁決：手機 Skills 純檢視 — 編寫/自動化編輯全在桌機，
+                要跑就到對話 tab 叫 agent（invoke_skill / 草稿 Try Run）。 */}
           </div>
         );
       })}
       {shown.length === 0 && (
         <div style={{ padding: 24, textAlign: "center", color: M.faint, fontSize: 12.5 }}>沒有符合的 Skill</div>
       )}
+      {shown.length > 0 && (
+        <div style={{ padding: "10px 4px 0", fontSize: 11.5, color: M.faint, lineHeight: 1.6 }}>
+          手機為檢視模式——要執行某個 skill 到「對話」直接跟 agent 說；編寫與自動化設定請用桌機。
+        </div>
+      )}
     </div>
   );
-}
-
-function btn(primary: boolean): React.CSSProperties {
-  return {
-    flex: 1, textAlign: "center", padding: "8px 0", borderRadius: 9,
-    fontSize: 12, fontWeight: 700, textDecoration: "none",
-    background: primary ? "var(--p, #1E5A44)" : "#fff",
-    color: primary ? "#fff" : M.sub,
-    boxShadow: primary ? "none" : `inset 0 0 0 1px ${M.line}`,
-  };
 }
