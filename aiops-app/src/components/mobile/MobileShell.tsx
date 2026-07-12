@@ -18,6 +18,7 @@ import { MobileAlarmDetail } from "./MobileAlarmDetail";
 import { MobileEqpDetail } from "./MobileEqpDetail";
 import { MobileSkills } from "./MobileSkills";
 import { MobileManual } from "./MobileManual";
+import { SessionList } from "@/components/chatops/SessionList";
 
 type Tab = "chat" | "overview" | "skills" | "manual";
 type Drill =
@@ -33,9 +34,22 @@ const TABS: Array<{ key: Tab; label: string; icon: string }> = [
   { key: "manual", label: "手冊", icon: "▤" },
 ];
 
-export function MobileShell({ agentPanel }: { agentPanel: React.ReactNode }) {
+export function MobileShell({
+  agentPanel, onNewChat, onOpenSession, activeSessionId,
+  runningTask, userName, onLogout,
+}: {
+  agentPanel: React.ReactNode;
+  /** Session 管理 (2026-07-12) — Gemini 式抽屜 + 預設開新。 */
+  onNewChat: () => void;
+  onOpenSession: (sessionId: string) => void;
+  activeSessionId: string | null;
+  runningTask: { chat_session_id: string; goal?: string } | null;
+  userName?: string | null;
+  onLogout: () => void;
+}) {
   const [tab, setTab] = useState<Tab>("chat");
   const [drill, setDrill] = useState<Drill>({ kind: "none" });
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => { ensurePlexFont(); }, []);
 
@@ -69,16 +83,35 @@ export function MobileShell({ agentPanel }: { agentPanel: React.ReactNode }) {
             padding: "10px 14px", borderBottom: `1px solid ${M.line}`,
             display: "flex", alignItems: "center", gap: 9, background: "var(--pn, #fff)",
           }}>
+            <button onClick={() => setDrawerOpen(true)} style={{
+              width: 34, height: 34, borderRadius: "50%", border: `1px solid ${M.line}`,
+              background: "#fff", color: M.ink, fontSize: 16, cursor: "pointer", flexShrink: 0,
+            }}>☰</button>
             <span style={{
               width: 30, height: 30, borderRadius: 9, background: "var(--p, #1E5A44)",
               color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
               fontWeight: 800, fontSize: 14,
             }}>A</span>
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 800, color: M.ink }}>AI Agent</div>
               <div style={{ fontSize: 10, color: M.ok }}>ChatOps ・ 線上</div>
             </div>
+            <button onClick={onNewChat} title="新對話" style={{
+              width: 34, height: 34, borderRadius: "50%", border: `1px solid ${M.line}`,
+              background: "#fff", color: "var(--p, #1E5A44)", fontSize: 18,
+              fontWeight: 700, cursor: "pointer", flexShrink: 0,
+            }}>＋</button>
           </div>
+          {/* 進行中背景工作 banner — 預設開新後回到進行中對話的入口 */}
+          {runningTask && runningTask.chat_session_id !== activeSessionId && (
+            <button onClick={() => onOpenSession(runningTask.chat_session_id)} style={{
+              margin: "8px 12px 0", padding: "9px 13px", borderRadius: 11,
+              border: "1px solid #d9c9a5", background: M.medBg, color: M.med,
+              fontSize: 12.5, fontWeight: 700, textAlign: "left", cursor: "pointer",
+            }}>
+              有進行中的建構{runningTask.goal ? `：${runningTask.goal.slice(0, 22)}…` : ""} — 點此回到該對話
+            </button>
+          )}
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             {agentPanel}
           </div>
@@ -92,6 +125,54 @@ export function MobileShell({ agentPanel }: { agentPanel: React.ReactNode }) {
         )}
         {tab === "manual" && (
           <div style={{ position: "absolute", inset: 0, overflowY: "auto" }}><MobileManual /></div>
+        )}
+
+        {/* 對話紀錄抽屜（Gemini 式）— 新對話 / 搜尋 / 近期 / 帳號列 */}
+        {drawerOpen && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 20, display: "flex" }}>
+            <div style={{
+              width: "82%", maxWidth: 340, background: M.bg, height: "100%",
+              display: "flex", flexDirection: "column",
+              boxShadow: "12px 0 34px -18px rgba(20,23,60,.5)",
+              padding: "14px 14px calc(10px + env(safe-area-inset-bottom, 0px))",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: M.ink }}>對話</span>
+                <span style={{ flex: 1 }} />
+                <button onClick={() => setDrawerOpen(false)} style={{
+                  width: 30, height: 30, borderRadius: "50%", border: `1px solid ${M.line}`,
+                  background: "#fff", color: M.ink, cursor: "pointer",
+                }}>✕</button>
+              </div>
+              <button onClick={() => { setDrawerOpen(false); onNewChat(); }} style={{
+                width: "100%", padding: "10px 0", borderRadius: 10, border: "none",
+                background: "var(--p, #1E5A44)", color: "#fff", fontSize: 13.5,
+                fontWeight: 700, cursor: "pointer", marginBottom: 10,
+              }}>＋ 新對話</button>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: M.faint, letterSpacing: ".05em", margin: "2px 0 6px" }}>近期</div>
+              <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                <SessionList activeId={activeSessionId}
+                  onOpen={(sid) => { setDrawerOpen(false); onOpenSession(sid); }} />
+              </div>
+              <div style={{
+                borderTop: `1px solid ${M.line}`, paddingTop: 10, marginTop: 8,
+                display: "flex", alignItems: "center", gap: 9,
+              }}>
+                <span style={{
+                  width: 30, height: 30, borderRadius: "50%", background: "var(--p, #1E5A44)",
+                  color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontWeight: 800, fontSize: 13,
+                }}>{(userName ?? "?").slice(0, 1).toUpperCase()}</span>
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: M.ink }}>{userName ?? "—"}</span>
+                <button onClick={onLogout} style={{
+                  border: `1px solid ${M.line}`, background: "#fff", color: M.sub,
+                  fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, cursor: "pointer",
+                }}>登出</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, background: "rgba(15,18,30,.42)" }}
+                 onClick={() => setDrawerOpen(false)} />
+          </div>
         )}
 
         {/* ✦ 問 agent 浮鈕（非對話 tab） */}

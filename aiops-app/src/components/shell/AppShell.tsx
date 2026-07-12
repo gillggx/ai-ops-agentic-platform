@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 // Resizable panel via native CSS resize
 import { ChatOpsAgentRail } from "@/components/chatops/ChatOpsAgentRail";
@@ -248,6 +248,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   // all Live-Canvas / glass wiring below keeps working unchanged.
   const pathname = usePathname() ?? "";
   const isChatOps = pathname === "/chatops";
+  // Session 管理 (2026-07-12)：手機抽屜帳號列要顯示使用者＋登出。
+  const { data: authSession } = useSession();
   // 手機版 (2026-07-11)：viewport ≤ 767px 自動切 MobileShell（底部 4 tab）。
   // SSR 先當桌機，client mount 後以 matchMedia 校正 — 手機首屏會有一次換版。
   const [isMobile, setIsMobile] = useState(false);
@@ -264,32 +266,20 @@ function Shell({ children }: { children: React.ReactNode }) {
     nonce: number;
   }>({ id: null, messages: [], nonce: 0 });
   const [sessionsTick, setSessionsTick] = useState(0);
-  // ChatOps continuity (2026-07-10): leaving /chatops unmounts the panel
-  // (its key flips to "dock"), which drops the in-memory conversation. The
-  // session itself is persisted server-side after every turn, so on re-entry
-  // we rehydrate the text turns from GET /api/agent/session/{id}. The panel
-  // is held behind a placeholder until hydration resolves — no race with a
-  // user typing into a soon-to-be-remounted panel.
+  // Session 管理 (2026-07-12)：預設開新 — 進 ChatOps／手機一律全新對話，
+  // 不再自動接回上一個 session。舊對話從「對話紀錄」（桌機左欄／手機抽屜）
+  // 或「進行中建構」banner 進：openChatSession(sid) 先併 server rich history
+  // （V85 跨裝置）再抓文字輪次，最後 nonce 重掛面板還原。
   const [chatOpsHydrating, setChatOpsHydrating] = useState(false);
-  useEffect(() => {
-    if (!isChatOps && !isMobile) return;
-    let sid = chatOpsSess.id;
-    if (!sid) {
-      try { sid = localStorage.getItem("chatops:session-id"); } catch { /* ignore */ }
-      if (!sid) return; // brand-new conversation — nothing to restore
-    }
-    const fixedSid = sid;
-    let cancelled = false;
+  const openChatSession = useCallback((sid: string) => {
     setChatOpsHydrating(true);
-    // V85 (2026-07-11): server rich history（跨裝置）— 比本機新就蓋進
-    // localStorage，AIAgentPanel 的還原邏輯會直接吃到含圖卡的完整版。
     const richMerge = fetch(
-      `/api/agent/session/${encodeURIComponent(fixedSid)}/rich-history`, { cache: "no-store" })
+      `/api/agent/session/${encodeURIComponent(sid)}/rich-history`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((env) => {
         const blob = (env?.data ?? env)?.rich_history as string | undefined;
         if (!blob) return;
-        const key = `chatops:history:${fixedSid}`;
+        const key = `chatops:history:${sid}`;
         const serverAt = (JSON.parse(blob) as { at?: number }).at ?? 0;
         let localAt = 0;
         try {
@@ -299,10 +289,9 @@ function Shell({ children }: { children: React.ReactNode }) {
       })
       .catch(() => { /* server 備份 best-effort */ });
     Promise.resolve(richMerge).then(() =>
-    fetch(`/api/agent/session/${encodeURIComponent(fixedSid)}`, { cache: "no-store" })
+    fetch(`/api/agent/session/${encodeURIComponent(sid)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((env) => {
-        if (cancelled) return;
         const row = (env?.data ?? env) as { messages?: unknown } | null;
         let msgs: Array<{ role: string; content: string }> = [];
         try {
@@ -312,18 +301,30 @@ function Shell({ children }: { children: React.ReactNode }) {
               !!m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"));
           }
         } catch { /* unparseable history — start visually empty, session id kept */ }
-        setChatOpsSess((prev) => ({ id: fixedSid, messages: msgs, nonce: prev.nonce + 1 }));
+        setChatOpsSess((prev) => ({ id: sid, messages: msgs, nonce: prev.nonce + 1 }));
       })
       .catch(() => {
-        // session gone (expired / deleted) — drop the stale pointer
-        if (cancelled) return;
-        try { localStorage.removeItem("chatops:session-id"); } catch { /* ignore */ }
+        // session gone (expired / deleted) — start fresh
         setChatOpsSess((prev) => (prev.id ? { id: null, messages: [], nonce: prev.nonce + 1 } : prev));
       })
-      .finally(() => { if (!cancelled) setChatOpsHydrating(false); }));
-    return () => { cancelled = true; };
-    // Run on ChatOps entry only — mid-conversation id changes must not remount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .finally(() => setChatOpsHydrating(false)));
+  }, []);
+  const newChatSession = useCallback(() => {
+    try { localStorage.removeItem("chatops:session-id"); } catch { /* ignore */ }
+    setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }));
+  }, []);
+  // 進行中背景工作（V85）— 預設開新後「回到進行中對話」的入口。
+  const [runningTask, setRunningTask] = useState<{ chat_session_id: string; goal?: string } | null>(null);
+  useEffect(() => {
+    if (!isChatOps && !isMobile) return;
+    let stop = false;
+    const poll = () => fetch("/api/agent/tasks/running", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!stop) setRunningTask((d?.tasks ?? [])[0] ?? null); })
+      .catch(() => { /* ambient */ });
+    poll();
+    const t = setInterval(poll, 30_000);
+    return () => { stop = true; clearInterval(t); };
   }, [isChatOps, isMobile]);
   // ChatOps (2026-07-10): builds render INLINE in the conversation; the Lite
   // Canvas overlay never auto-opens there (it hid the chat = user couldn't
@@ -518,7 +519,22 @@ function Shell({ children }: { children: React.ReactNode }) {
     return (
       <>
         <HandoffListener />
-        <MobileShell agentPanel={agentPanelEl} />
+        <MobileShell
+          agentPanel={chatOpsHydrating ? (
+            <div style={{
+              flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#94a3b8", fontSize: 13,
+            }}>
+              正在載入對話…
+            </div>
+          ) : agentPanelEl}
+          onNewChat={newChatSession}
+          onOpenSession={openChatSession}
+          activeSessionId={chatOpsSess.id}
+          runningTask={runningTask}
+          userName={authSession?.user?.name ?? null}
+          onLogout={() => void signOut({ callbackUrl: "/login" })}
+        />
         <div style={{ display: "none" }}>{children}</div>
       </>
     );
@@ -546,10 +562,9 @@ function Shell({ children }: { children: React.ReactNode }) {
                 runPhase={runPhase}
                 goal={lastGlassStartRef.current?.goal ?? null}
                 events={glassEvents}
-                onNew={() => {
-                  try { localStorage.removeItem("chatops:session-id"); } catch { /* ignore */ }
-                  setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }));
-                }}
+                onNew={newChatSession}
+                onOpenSession={openChatSession}
+                activeSessionId={chatOpsSess.id}
               />
               <div style={{
                 flex: 1, display: "flex", justifyContent: "center",
@@ -561,6 +576,15 @@ function Shell({ children }: { children: React.ReactNode }) {
                   background: "var(--pn, #ffffff)",
                   borderLeft: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0",
                 }}>
+                  {runningTask && runningTask.chat_session_id !== chatOpsSess.id && (
+                    <button onClick={() => openChatSession(runningTask.chat_session_id)} style={{
+                      margin: "10px 14px 0", padding: "9px 14px", borderRadius: 10,
+                      border: "1px solid #eadfc2", background: "#faf3df", color: "#8a6a1d",
+                      fontSize: 12.5, fontWeight: 700, textAlign: "left", cursor: "pointer",
+                    }}>
+                      有進行中的建構{runningTask.goal ? `：${runningTask.goal.slice(0, 40)}…` : ""} — 點此回到該對話
+                    </button>
+                  )}
                   {chatOpsHydrating ? (
                     <div style={{
                       flex: 1, display: "flex", alignItems: "center", justifyContent: "center",

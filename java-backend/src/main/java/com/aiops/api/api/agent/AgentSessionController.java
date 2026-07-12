@@ -55,6 +55,38 @@ public class AgentSessionController {
 				.orElseThrow(() -> ApiException.notFound("agent session")));
 	}
 
+	/** Session 管理 (2026-07-12) — 改名。僅本人的對話可改。 */
+	@PutMapping("/session/{sessionId}/title")
+	public ApiResponse<Void> rename(@PathVariable String sessionId,
+	                                @RequestBody Map<String, Object> body,
+	                                @AuthenticationPrincipal AuthPrincipal caller) {
+		AgentSessionEntity e = owned(sessionId, caller);
+		if (body.get("title") instanceof String t && !t.isBlank()) {
+			e.setTitle(t.length() > 200 ? t.substring(0, 200) : t);
+			repository.save(e);
+		}
+		return ApiResponse.ok(null);
+	}
+
+	/** Session 管理 (2026-07-12) — 刪除對話（含 rich history）。 */
+	@DeleteMapping("/session/{sessionId}")
+	public ApiResponse<Void> delete(@PathVariable String sessionId,
+	                                @AuthenticationPrincipal AuthPrincipal caller) {
+		repository.delete(owned(sessionId, caller));
+		return ApiResponse.ok(null);
+	}
+
+	private AgentSessionEntity owned(String sessionId, AuthPrincipal caller) {
+		AgentSessionEntity e = repository.findById(sessionId)
+				.orElseThrow(() -> ApiException.notFound("agent session"));
+		Long uid = caller != null ? caller.userId() : null;
+		if (uid != null && uid != 0L && e.getUserId() != null
+				&& !e.getUserId().equals(uid)) {
+			throw ApiException.notFound("agent session");  // 不洩漏他人 session 存在
+		}
+		return e;
+	}
+
 	/** V85 (2026-07-11) — 跨裝置 rich history（完整訊息串含圖卡，opaque JSON）。 */
 	@GetMapping("/session/{sessionId}/rich-history")
 	public ApiResponse<Map<String, Object>> getRichHistory(@PathVariable String sessionId) {

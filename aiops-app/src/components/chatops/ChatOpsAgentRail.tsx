@@ -10,6 +10,7 @@
  *   3. 最近運作 — the platform agent's recent episodes
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SessionList } from "./SessionList";
 
 interface RailGlassEvent {
   kind: "start" | "op" | "chat" | "error" | "done" | "user";
@@ -59,13 +60,17 @@ function lineFor(e: RailGlassEvent): { text: string; tone: "ok" | "err" | "info"
   return null;
 }
 
-export function ChatOpsAgentRail({ runPhase, goal, events, onNew }: {
+export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession, activeSessionId }: {
   runPhase: string;
   goal: string | null;
   events: RailGlassEvent[];
   onNew: () => void;
+  /** Session 管理 (2026-07-12)：預設開新 — 舊對話從「對話紀錄」進。 */
+  onOpenSession: (sessionId: string) => void;
+  activeSessionId: string | null;
 }) {
   const [rows, setRows] = useState<EpisodeRow[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
@@ -109,7 +114,24 @@ export function ChatOpsAgentRail({ runPhase, goal, events, onNew }: {
         }}>
           + 新對話
         </button>
+        <button onClick={() => setHistoryOpen((o) => !o)} style={{
+          width: "100%", marginTop: 6, padding: "7px 0", borderRadius: 9,
+          border: "1px solid #e2e8f0", background: "#fff", color: "#5b6070",
+          fontSize: 12, fontWeight: 700, cursor: "pointer",
+        }}>
+          對話紀錄 {historyOpen ? "▴" : "▾"}
+        </button>
       </div>
+      {historyOpen && (
+        <div style={{
+          margin: "0 10px 8px", padding: "10px 10px 6px", borderRadius: 12,
+          background: "#fff", border: "1px solid #e2e8f0", flexShrink: 0,
+          maxHeight: 300, display: "flex", flexDirection: "column",
+        }}>
+          <SessionList activeId={activeSessionId}
+            onOpen={(sid) => { setHistoryOpen(false); onOpenSession(sid); }} />
+        </div>
+      )}
 
       {/* Console — live step feed (design mockup: dark card, mono lines) */}
       <div style={{

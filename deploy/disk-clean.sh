@@ -53,6 +53,11 @@ if [[ -f "$ENV_FILE" ]]; then
      WHERE started_at < now() - interval '7 days' AND llm_readable_data IS NOT NULL;" \
     2>/dev/null || true
   psql -h localhost -U "$DBU" -d aiops_db -q -c "VACUUM execution_logs;" 2>/dev/null || true
+  # 7. 對話保留 30 天（session 管理裁決 2026-07-12）：連 rich_history blob 一起走
+  psql -h localhost -U "$DBU" -d aiops_db -q -c \
+    "DELETE FROM agent_tasks WHERE created_at < now() - interval '30 days';
+     DELETE FROM agent_sessions WHERE COALESCE(updated_at, created_at) < now() - interval '30 days';" \
+    2>/dev/null || true
   unset PGPASSWORD
 fi
 

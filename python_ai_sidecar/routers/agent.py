@@ -1479,3 +1479,18 @@ async def stream_agent_task(
                 {"status": row.get("status") or "unknown"})}
 
     return EventSourceResponse(_with_keepalive(_gen()))
+
+
+@router.get("/tasks/running")
+async def list_running_tasks(
+    user_id: int, caller: CallerContext = ServiceAuth,
+) -> dict:
+    """Session 管理 (2026-07-12)：這個使用者目前有沒有進行中的背景工作 —
+    「預設開新對話」後，前端用它顯示『回到進行中的對話』banner。
+    running task 只活在記憶體 registry（sidecar 重啟即死），不用查 Java。"""
+    from python_ai_sidecar import agent_tasks as _tasks
+
+    rows = [t.public_dict() for t in _tasks._REGISTRY.values()
+            if t.status == "running" and t.user_id == user_id]
+    rows.sort(key=lambda r: r["created_at"], reverse=True)
+    return {"tasks": rows[:5]}
