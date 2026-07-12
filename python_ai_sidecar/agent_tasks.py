@@ -47,10 +47,15 @@ class AgentTask:
     queues: List[asyncio.Queue] = field(default_factory=list)
 
     def public_dict(self) -> Dict[str, Any]:
+        import datetime as _dt
         return {
             "task_id": self.task_id, "kind": self.kind,
             "chat_session_id": self.chat_session_id, "status": self.status,
-            "goal": self.goal, "created_at": self.created_at,
+            "goal": self.goal,
+            # ISO 字串 — 跟 Java 持久列同型別才能排序。曾直接放 epoch float，
+            # 字串排序讓 "2026-…" 永遠贏 "1752…" → reattach 選到舊 task 回放。
+            "created_at": _dt.datetime.fromtimestamp(
+                self.created_at, tz=_dt.timezone.utc).isoformat(),
             "events_buffered": len(self.history),
         }
 
@@ -92,15 +97,20 @@ def _finish(task: AgentTask) -> None:
 
 
 def _terminal_events(task: AgentTask) -> List[Event]:
-    """收尾事件 = 最後一個 pb_glass_done 起（含圖卡/run 摘要/最終 done）。
-    單一事件 >300KB（通常是 pb_run_done 的完整 node_results）不進持久層 —
-    reattach 回放靠 done 卡與圖卡就夠。"""
+    """收尾事件 = phase 進度（小，供計畫卡補打勾）+ 最後一個 pb_glass_done 起
+    的尾段（done 卡/圖卡/run 摘要）。單一事件 >300KB（通常是 pb_run_done 的
+    完整 node_results）不進持久層。"""
     idx = 0
     for i, ev in enumerate(task.history):
         if ev.get("event") == "pb_glass_done":
             idx = i
-    return [ev for ev in task.history[idx:][:_TERMINAL_KEEP_EVENTS]
+    # 完成後回放要能把計畫卡打勾 — phase_update 事件每個 ~300B，全留。
+    phase_evs = [ev for ev in task.history[:idx]
+                 if ev.get("event") == "pb_glass_chat"
+                 and '"phase_update"' in (ev.get("data") or "")][:30]
+    tail = [ev for ev in task.history[idx:][:_TERMINAL_KEEP_EVENTS]
             if len(ev.get("data") or "") <= 300_000]
+    return phase_evs + tail
 
 
 async def _persist(task: AgentTask) -> None:

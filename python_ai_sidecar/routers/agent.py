@@ -363,6 +363,35 @@ class ChatIntentRespondRequest(BaseModel):
     plan_decision: Optional[dict] = None
 
 
+def _slim_chart_spec(spec: dict) -> dict:
+    """圖卡瘦身 (2026-07-12)：chart DSL 的 data rows 常帶完整 process 物件
+    （nested APC/DC/RECIPE…），一張圖可 >300KB — 塞爆 SSE、rich history、
+    task 收尾持久層（曾被 300KB 濾掉 → 離線完成後回放沒圖）。
+    只留渲染用得到的欄位，rows 上限 500。"""
+    try:
+        data = spec.get("data")
+        if not (isinstance(data, list) and data and isinstance(data[0], dict)):
+            return spec
+        keep: set = {"spc_status"}  # 告警 highlight 慣用欄
+        if isinstance(spec.get("x"), str):
+            keep.add(spec["x"])
+        for group in ("y", "y_secondary"):
+            for col in (spec.get(group) or []):
+                if isinstance(col, str):
+                    keep.add(col)
+        for k in ("series_field", "value_key"):
+            if isinstance(spec.get(k), str):
+                keep.add(spec[k])
+        hl = spec.get("highlight")
+        if isinstance(hl, dict) and isinstance(hl.get("field"), str):
+            keep.add(hl["field"])
+        slim_rows = [{k: r.get(k) for k in keep if k in r}
+                     for r in data[:500] if isinstance(r, dict)]
+        return {**spec, "data": slim_rows}
+    except Exception:  # noqa: BLE001 — 呈現最佳化，失敗回原樣
+        return spec
+
+
 def _spc_limits_to_rules(spec: dict) -> dict:
     """V85 fix (2026-07-11): list 形狀的 chart DSL 常把 ucl/lcl 常數欄放進 y
     序列 → 前端畫成整排 marker 圓點。轉成 DSL `rules`（虛線管制線），跟
@@ -465,7 +494,7 @@ async def _emit_pipeline_charts(
                         "session_id": session_id,
                         "node_id": nid,
                         "port": port_name,
-                        "chart_spec": snap,
+                        "chart_spec": _slim_chart_spec(snap),
                     }
                     yield {
                         "event": "pb_glass_chart",
@@ -486,7 +515,7 @@ async def _emit_pipeline_charts(
                             "session_id": session_id,
                             "node_id": f"{nid}#{ci}",
                             "port": port_name,
-                            "chart_spec": _spc_limits_to_rules(spec),
+                            "chart_spec": _slim_chart_spec(_spc_limits_to_rules(spec)),
                         }
                         yield {
                             "event": "pb_glass_chart",
