@@ -19,6 +19,8 @@ import { MobileEqpDetail } from "./MobileEqpDetail";
 import { MobileSkills } from "./MobileSkills";
 import { MobileManual } from "./MobileManual";
 import { SessionList } from "@/components/chatops/SessionList";
+import { DraftList } from "@/components/chatops/DraftList";
+import type { DraftCardData } from "@/components/chatops/DraftCard";
 
 type Tab = "chat" | "overview" | "skills" | "manual";
 type Drill =
@@ -35,13 +37,15 @@ const TABS: Array<{ key: Tab; label: string; icon: string }> = [
 ];
 
 export function MobileShell({
-  agentPanel, onNewChat, onOpenSession, activeSessionId,
+  agentPanel, onNewChat, onOpenSession, onOpenDraft, activeSessionId,
   runningTask, userName, onLogout,
 }: {
   agentPanel: React.ReactNode;
   /** Session 管理 (2026-07-12) — Gemini 式抽屜 + 預設開新。 */
   onNewChat: () => void;
   onOpenSession: (sessionId: string) => void;
+  /** My Drafts (2026-07-12)：點草稿 → 草稿卡插入對話（手機可 Try Run/啟用/刪，編輯卡關）。 */
+  onOpenDraft: (d: DraftCardData) => void;
   activeSessionId: string | null;
   runningTask: { chat_session_id: string; goal?: string } | null;
   userName?: string | null;
@@ -160,6 +164,15 @@ export function MobileShell({
               <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
                 <SessionList activeId={activeSessionId}
                   onOpen={(sid) => { setDrawerOpen(false); onOpenSession(sid); }} />
+              </div>
+              {/* My Drafts — 點了插入草稿卡回對話（手機 Try Run/啟用可用、編輯卡關） */}
+              <div style={{
+                borderTop: `1px solid ${M.line}`, marginTop: 8,
+                maxHeight: 200, display: "flex", flexDirection: "column",
+              }}>
+                <DraftList onOpenDraft={(d) => {
+                  setDrawerOpen(false); setTab("chat"); onOpenDraft(d);
+                }} />
               </div>
               <div style={{
                 borderTop: `1px solid ${M.line}`, paddingTop: 10, marginTop: 8,

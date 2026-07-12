@@ -9,8 +9,10 @@
  *      timestamped lines from the glass-event stream), agent-activity link
  *   3. 最近運作 — the platform agent's recent episodes
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SessionList } from "./SessionList";
+import { DraftList } from "./DraftList";
+import type { DraftCardData } from "./DraftCard";
 
 interface RailGlassEvent {
   kind: "start" | "op" | "chat" | "error" | "done" | "user";
@@ -20,24 +22,6 @@ interface RailGlassEvent {
   args?: Record<string, unknown>;
   message?: string;
   status?: string;
-}
-
-interface EpisodeRow {
-  episode_key: string;
-  instruction: string | null;
-  status: string | null;
-  step_count: number;
-  started_at: string | null;
-}
-
-function timeLabel(iso: string | null): string {
-  if (!iso) return "—";
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 90) return "剛剛";
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分鐘前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小時前`;
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 /** One compact console line per meaningful glass event. */
@@ -60,7 +44,7 @@ function lineFor(e: RailGlassEvent): { text: string; tone: "ok" | "err" | "info"
   return null;
 }
 
-export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession, activeSessionId }: {
+export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession, activeSessionId, onOpenDraft }: {
   runPhase: string;
   goal: string | null;
   events: RailGlassEvent[];
@@ -68,21 +52,11 @@ export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession,
   /** Session 管理 (2026-07-12)：預設開新 — 舊對話從「對話紀錄」進。 */
   onOpenSession: (sessionId: string) => void;
   activeSessionId: string | null;
+  /** My Drafts (2026-07-12)：點草稿 → 草稿卡插入當前對話（B 案）。 */
+  onOpenDraft: (d: DraftCardData) => void;
 }) {
-  const [rows, setRows] = useState<EpisodeRow[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
-
-  const load = useCallback(() => {
-    fetch("/api/agent-activity/episodes?limit=15", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((env) => {
-        const list = (env?.data ?? env) as EpisodeRow[];
-        setRows(Array.isArray(list) ? list : []);
-      })
-      .catch(() => { /* rail is ambient — fail silent */ });
-  }, []);
-  useEffect(() => { load(); const id = setInterval(load, 15_000); return () => clearInterval(id); }, [load]);
 
   const lines = useMemo(() => {
     const out: Array<{ ts?: string; text: string; tone: "ok" | "err" | "info" }> = [];
@@ -180,43 +154,9 @@ export function ChatOpsAgentRail({ runPhase, goal, events, onNew, onOpenSession,
         </div>
       )}
 
-      {/* 最近運作 — platform agent episodes */}
-      <div style={{ padding: "14px 12px 4px", fontSize: 10.5, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.5px" }}>
-        最近運作
-        <a href="/agent-activity" target="_blank" rel="noreferrer"
-           style={{ float: "right", fontWeight: 600, color: "var(--p, #1E5A44)", textDecoration: "none" }}>
-          全部 →
-        </a>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 16px" }}>
-        {rows.map((r) => {
-          const ok = (r.status ?? "").includes("finish") || r.status === "success";
-          const fail = (r.status ?? "").includes("fail") || (r.status ?? "").includes("error");
-          return (
-            <a key={r.episode_key} href={`/agent-activity`} target="_blank" rel="noreferrer" style={{
-              display: "block", padding: "8px 10px", marginBottom: 2, borderRadius: 8,
-              textDecoration: "none",
-            }}>
-              <div style={{
-                fontSize: 12, fontWeight: 500, color: "#334155",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {r.instruction || "(未記錄指令)"}
-              </div>
-              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2, display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{
-                  width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                  background: fail ? "#e5484d" : ok ? "#0f9d6a" : "#f5b942",
-                }} />
-                {timeLabel(r.started_at)} · {r.step_count} steps · {r.status ?? "?"}
-              </div>
-            </a>
-          );
-        })}
-        {rows.length === 0 && (
-          <div style={{ padding: "10px 10px", fontSize: 12, color: "#94a3b8" }}>還沒有運作紀錄</div>
-        )}
-      </div>
+      {/* My Drafts (2026-07-12) — 取代最近運作（episodes 從 Console 的
+          agent-activity 連結進）。點草稿 → 草稿卡插入對話。 */}
+      <DraftList onOpenDraft={onOpenDraft} />
     </div>
   );
 }

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 import time
 from typing import Any
 
@@ -511,3 +512,56 @@ async def export_csv(req: ExportCsvRequest, caller: CallerContext = ServiceAuth)
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{target}.csv"'},
     )
+
+
+class TryRunRequest(BaseModel):
+    pipeline_json: dict
+    inputs: dict | None = None
+
+
+@router.post("/tryrun")
+async def tryrun(req: TryRunRequest, caller: CallerContext = ServiceAuth) -> dict:
+    """My Drafts (2026-07-12)：草稿卡的 Try Run — 跑一次並回「瘦身」結果
+    （圖卡 + 節點摘要），手機/對話內直接渲染，不回完整 node_results。"""
+    import time as _time
+
+    from python_ai_sidecar.executor.real_executor import get_real_executor
+    from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
+    from python_ai_sidecar.routers.agent import _slim_chart_spec, _spc_limits_to_rules
+
+    executor = get_real_executor()
+    pj_model = PipelineJSON.model_validate(req.pipeline_json)
+    t0 = _time.perf_counter()
+    try:
+        result = await asyncio.wait_for(
+            executor.execute(pj_model, inputs=req.inputs or {}), timeout=45.0)
+    except asyncio.TimeoutError:
+        return {"status": "timeout", "error": "try run 超過 45 秒", "charts": [], "nodes": []}
+    duration_ms = int((_time.perf_counter() - t0) * 1000)
+
+    node_results = (result or {}).get("node_results") or {}
+    nodes = []
+    charts: list[dict] = []
+    for nid, info in node_results.items():
+        if not isinstance(info, dict):
+            continue
+        nodes.append({"id": nid, "status": info.get("status"),
+                      "rows": info.get("rows"),
+                      "error": (str(info.get("error"))[:200] if info.get("error") else None)})
+        ports = info.get("preview") or {}
+        for _port, blob in ports.items():
+            if not isinstance(blob, dict):
+                continue
+            snap = blob.get("snapshot")
+            if isinstance(snap, dict) and isinstance(snap.get("data"), list) and isinstance(snap.get("type"), str):
+                charts.append({"node_id": nid, "chart_spec": _slim_chart_spec(snap)})
+                continue
+            sample = blob.get("sample")
+            if blob.get("type") == "list" and isinstance(sample, list):
+                for ci, spec in enumerate(sample[:8]):
+                    if isinstance(spec, dict) and spec.get("__dsl"):
+                        charts.append({"node_id": f"{nid}#{ci}",
+                                       "chart_spec": _slim_chart_spec(_spc_limits_to_rules(spec))})
+    ok = all(n.get("status") == "success" for n in nodes) if nodes else False
+    return {"status": "success" if ok else "failed", "duration_ms": duration_ms,
+            "charts": charts[:10], "nodes": nodes}

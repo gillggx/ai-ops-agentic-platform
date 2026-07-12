@@ -14,6 +14,7 @@ import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
 import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "./AgentConsole";
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
+import { DraftCard, type DraftCardData, type TryRunChart } from "@/components/chatops/DraftCard";
 import { AutomationConfirmCard, type AutomationHandoffData } from "./AutomationConfirmCard";
 import { SkillActivateConfirmCard, type SkillActivateConfirmData } from "./SkillActivateConfirmCard";
 import { AlarmActionConfirmCard, type AlarmActionData } from "./AlarmActionConfirmCard";
@@ -160,7 +161,7 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate" | "alarm_action" | "skill_admin";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate" | "alarm_action" | "skill_admin" | "draft_card";
   content: string;
   /** 對話分頁重整（2026-07-05）— BUILD PLAN 卡單卡生命週期 state。 */
   buildPlan?: BuildPlanState;
@@ -200,6 +201,8 @@ interface ChatMessage {
   alarmAction?: AlarmActionData;
   /** Domain Skill 管理 (2026-07-10): deactivate/delete/rename confirm card. */
   skillAdmin?: SkillAdminData;
+  /** My Drafts (2026-07-12): 草稿卡（B 案）— Try Run / 啟用 / 刪除都在對話內。 */
+  draftCard?: DraftCardData;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -319,6 +322,8 @@ interface Props {
   /** ChatOps / 手機 (2026-07-11)：把完整訊息串（含圖卡）持久化到 localStorage，
    *  重載時整包還原 — server session 只存文字輪次，圖卡曾在重載後消失。 */
   persistHistory?: boolean;
+  /** My Drafts (2026-07-12): rail/抽屜點草稿 → 草稿卡插入對話（nonce 觸發）。 */
+  insertDraft?: { data: DraftCardData; nonce: number } | null;
   /** Fires when the backend resolves/creates the session id (done event) so
    *  the ChatOps sidebar can refresh + highlight the active conversation. */
   onSessionResolved?: (sessionId: string) => void;
@@ -703,6 +708,7 @@ export function AIAgentPanel({
   liteCanvasActive = false,
   initialMessages,
   persistHistory = false,
+  insertDraft = null,
   onSessionResolved,
 }: Props) {
   // Part B (SPEC_context_engineering): pull selected equipment from AppContext
@@ -1084,6 +1090,36 @@ export function AIAgentPanel({
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // My Drafts (2026-07-12)：rail/抽屜點草稿 → 插入草稿卡訊息（B 案）。
+  const lastDraftNonceRef = useRef(0);
+  useEffect(() => {
+    if (!insertDraft || insertDraft.nonce === lastDraftNonceRef.current) return;
+    lastDraftNonceRef.current = insertDraft.nonce;
+    setChatHistory((prev) => [...prev, {
+      id: nextId(), role: "draft_card", content: "", draftCard: insertDraft.data,
+    }]);
+  }, [insertDraft]);
+
+  // 草稿卡「啟用」→ 掃可變欄位候選後接既有 skill_activate 確認卡。
+  const enableDraft = useCallback(async (pj: Record<string, unknown>, name: string, nl: string) => {
+    let candidates: unknown[] = [];
+    try {
+      const r = await fetch("/api/pipeline/parameterize", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipeline_json: pj }),
+      });
+      if (r.ok) candidates = (await r.json())?.candidates ?? [];
+    } catch { /* scan best-effort */ }
+    setChatHistory((prev) => [...prev, {
+      id: nextId(), role: "skill_activate", content: "",
+      skillActivate: {
+        slug: null, suggested_name: name, suggested_description: nl,
+        pipeline_json: pj,
+        param_candidates: candidates as SkillActivateConfirmData["param_candidates"],
+      },
+    }]);
   }, []);
 
   // 還原後補回「畫面上這張圖」的 snapshot — 沒有它，重載後說「啟用／改圖」
@@ -2857,6 +2893,22 @@ export function AIAgentPanel({
                     onResolved={(st) => setChatHistory((prev) => prev.map((m) =>
                       m.id === msg.id && m.skillAdmin
                         ? { ...m, skillAdmin: { ...m.skillAdmin, resolved: st } } : m))} />
+                </div>
+              ) : msg.role === "draft_card" && msg.draftCard ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <DraftCard data={msg.draftCard}
+                    onPatch={(patch) => setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.draftCard
+                        ? { ...m, draftCard: { ...m.draftCard, ...patch } } : m))}
+                    onCharts={(charts: TryRunChart[], note: string) =>
+                      setChatHistory((prev) => [...prev,
+                        { id: nextId(), role: "agent" as const, content: note },
+                        ...charts.map((c) => ({
+                          id: nextId(), role: "chart_inline" as const, content: "",
+                          chartSpec: c.chart_spec, chartNodeId: c.node_id,
+                        })),
+                      ])}
+                    onEnable={(pj, name, nl) => void enableDraft(pj, name, nl)} />
                 </div>
               ) : msg.role === "chart_explorer" && msg.flatData && msg.flatMetadata ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>

@@ -8,6 +8,7 @@ import { signOut, useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 // Resizable panel via native CSS resize
 import { ChatOpsAgentRail } from "@/components/chatops/ChatOpsAgentRail";
+import type { DraftCardData } from "@/components/chatops/DraftCard";
 import { MobileShell } from "@/components/mobile/MobileShell";
 import { Topbar } from "@/components/layout/Topbar";
 import HandoffListener from "@/components/shell/HandoffListener";
@@ -313,6 +314,11 @@ function Shell({ children }: { children: React.ReactNode }) {
     try { localStorage.removeItem("chatops:session-id"); } catch { /* ignore */ }
     setChatOpsSess((prev) => ({ id: null, messages: [], nonce: prev.nonce + 1 }));
   }, []);
+  // My Drafts (2026-07-12)：rail/抽屜點草稿 → 草稿卡插入當前對話。
+  const [draftInsert, setDraftInsert] = useState<{ data: DraftCardData; nonce: number } | null>(null);
+  const openDraft = useCallback((d: DraftCardData) => {
+    setDraftInsert({ data: d, nonce: Date.now() });
+  }, []);
   // 進行中背景工作（V85）— 預設開新後「回到進行中對話」的入口。
   const [runningTask, setRunningTask] = useState<{ chat_session_id: string; goal?: string } | null>(null);
   useEffect(() => {
@@ -403,6 +409,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 sessionId={(isChatOps || isMobile) ? (chatOpsSess.id ?? undefined) : undefined}
                 initialMessages={(isChatOps || isMobile) ? chatOpsSess.messages : undefined}
                 persistHistory={isChatOps || isMobile}
+                insertDraft={(isChatOps || isMobile) ? draftInsert : null}
                 onSessionResolved={(sid) => {
                   if (!isChatOps && !isMobile) return;
                   try { localStorage.setItem("chatops:session-id", sid); } catch { /* ignore */ }
@@ -530,6 +537,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           ) : agentPanelEl}
           onNewChat={newChatSession}
           onOpenSession={openChatSession}
+          onOpenDraft={openDraft}
           activeSessionId={chatOpsSess.id}
           runningTask={runningTask}
           userName={authSession?.user?.name ?? null}
@@ -565,6 +573,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 onNew={newChatSession}
                 onOpenSession={openChatSession}
                 activeSessionId={chatOpsSess.id}
+                onOpenDraft={openDraft}
               />
               <div style={{
                 flex: 1, display: "flex", justifyContent: "center",
