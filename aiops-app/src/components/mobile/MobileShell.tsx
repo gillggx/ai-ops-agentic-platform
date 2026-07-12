@@ -50,6 +50,13 @@ export function MobileShell({
   const [tab, setTab] = useState<Tab>("chat");
   const [drill, setDrill] = useState<Drill>({ kind: "none" });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 新對話回饋（2026-07-12）：已在新對話時按下去畫面不變，沒回饋會以為壞了。
+  const [toast, setToast] = useState("");
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(""), 1800);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   useEffect(() => { ensurePlexFont(); }, []);
 
@@ -96,11 +103,11 @@ export function MobileShell({
               <div style={{ fontSize: 13.5, fontWeight: 800, color: M.ink }}>AI Agent</div>
               <div style={{ fontSize: 10, color: M.ok }}>ChatOps ・ 線上</div>
             </div>
-            <button onClick={onNewChat} title="新對話" style={{
-              width: 34, height: 34, borderRadius: "50%", border: `1px solid ${M.line}`,
-              background: "#fff", color: "var(--p, #1E5A44)", fontSize: 18,
-              fontWeight: 700, cursor: "pointer", flexShrink: 0,
-            }}>＋</button>
+            <button onClick={() => { onNewChat(); setToast("已開新對話"); }} title="新對話" style={{
+              padding: "7px 12px", borderRadius: 17, border: `1px solid ${M.line}`,
+              background: "#fff", color: "var(--p, #1E5A44)", fontSize: 12.5,
+              fontWeight: 700, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap",
+            }}>＋ 新對話</button>
           </div>
           {/* 進行中背景工作 banner — 預設開新後回到進行中對話的入口 */}
           {runningTask && runningTask.chat_session_id !== activeSessionId && (
@@ -173,6 +180,15 @@ export function MobileShell({
             <div style={{ flex: 1, background: "rgba(15,18,30,.42)" }}
                  onClick={() => setDrawerOpen(false)} />
           </div>
+        )}
+
+        {/* 短暫回饋 toast */}
+        {toast && (
+          <div style={{
+            position: "absolute", top: 64, left: "50%", transform: "translateX(-50%)",
+            zIndex: 25, background: "rgba(26,29,41,.88)", color: "#fff",
+            fontSize: 12.5, fontWeight: 600, padding: "7px 16px", borderRadius: 18,
+          }}>{toast}</div>
         )}
 
         {/* ✦ 問 agent 浮鈕（非對話 tab） */}
