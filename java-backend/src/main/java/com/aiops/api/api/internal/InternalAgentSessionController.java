@@ -6,6 +6,7 @@ import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.agent.AgentSessionEntity;
 import com.aiops.api.domain.agent.AgentSessionRepository;
 import jakarta.validation.constraints.NotNull;
+import java.util.Map;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
@@ -26,6 +27,41 @@ public class InternalAgentSessionController {
 
 	public InternalAgentSessionController(AgentSessionRepository repository) {
 		this.repository = repository;
+	}
+
+	/** 跨對話搜尋 (2026-07-12) — Coordinator 查同一使用者的歷史對話。
+	 *  q 比對 title 與 messages 內文（LIKE，夠用）；回摘要不回全文。 */
+	@GetMapping("/search")
+	public ApiResponse<java.util.List<Map<String, Object>>> search(
+			@org.springframework.web.bind.annotation.RequestParam("user_id") Long userId,
+			@org.springframework.web.bind.annotation.RequestParam(value = "q", required = false) String q) {
+		var rows = repository.findByUserIdOrderByUpdatedAtDesc(userId,
+				org.springframework.data.domain.PageRequest.of(0, 50));
+		java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+		String needle = q == null ? "" : q.toLowerCase();
+		for (AgentSessionEntity s : rows) {
+			if (s.getTitle() == null) continue;
+			String msgs = s.getMessages() == null ? "" : s.getMessages();
+			if (!needle.isBlank()
+					&& !s.getTitle().toLowerCase().contains(needle)
+					&& !msgs.toLowerCase().contains(needle)) continue;
+			Map<String, Object> m = new java.util.HashMap<>();
+			m.put("session_id", s.getSessionId());
+			m.put("title", s.getTitle());
+			m.put("updated_at", s.getUpdatedAt() != null ? s.getUpdatedAt() : s.getCreatedAt());
+			m.put("archived", s.getArchivedAt() != null);
+			// snippet：命中處前後 60 字（粗略但夠 agent 引述）
+			if (!needle.isBlank()) {
+				int i = msgs.toLowerCase().indexOf(needle);
+				if (i >= 0) {
+					m.put("snippet", msgs.substring(Math.max(0, i - 30),
+							Math.min(msgs.length(), i + 90)));
+				}
+			}
+			out.add(m);
+			if (out.size() >= 10) break;
+		}
+		return ApiResponse.ok(out);
 	}
 
 	@GetMapping("/{sessionId}")

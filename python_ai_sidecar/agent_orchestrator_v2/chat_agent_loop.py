@@ -67,9 +67,16 @@ _BUILTIN_READ: Dict[str, Dict[str, Any]] = {
         "path": "/internal/alarms/stats", "query": True, "required": [],
         "args": {"since_hours": {"type": "integer", "description": "往回看幾小時（預設 168 = 7 天）"}}},
     "list_agent_knowledge": {
-        "desc": "列出目前生效的 knowledge / directives——使用者交代過的規則、偏好都在這。"
-                "使用者問「我跟你說過什麼 / 有哪些 rules」時用。",
+        "desc": "列出目前生效的 knowledge / directives——使用者交代過的規則、偏好都在這（回傳含每筆 id）。"
+                "使用者問「我跟你說過什麼 / 有哪些 rules」時用。要刪除或停用某條用 manage_knowledge。",
         "path": "/internal/agent-knowledge/directives/active?user_id={user_id}", "args": {}},
+    # Chat 草稿暫存區 (2026-07-12)：使用者說「草稿」通常指這個（＝左欄 My
+    # Drafts，對話建圖自動暫存），不是 skills_v2 的 draft skill。
+    "list_chat_drafts": {
+        "desc": "列出使用者的 Chat 草稿暫存區（＝介面左欄的 My Drafts，對話建圖自動暫存的 pipeline，上限 10）。"
+                "使用者說「草稿」「我的草稿」通常指這個——不是 skills_v2 裡 status=draft 的 skill（那要用 list_skills_v2）。"
+                "要對某筆草稿操作（試跑/啟用/刪除）→ 用 show_chat_draft 出草稿卡讓使用者按。",
+        "path": "/internal/chat-drafts?user_id={user_id}", "args": {}},
     "list_supervisor_proposals": {
         "desc": "列 Supervisor 待人審核的策展提案（prune / promote / merge / correct）。核准在 /supervisor 頁做。",
         "path": "/internal/supervisor/proposals-open", "args": {}},
@@ -103,6 +110,28 @@ _BUILTIN_READ: Dict[str, Dict[str, Any]] = {
 
 # Alarm handling WRITES (2026-07-10). The agent NEVER executes these — each
 # emits an `alarm_action_confirm` card and the browser performs the POST under
+# 自訂 handler 的 builtin（2026-07-12）：spec 在這裡宣告、執行走 run_tool 的
+# 專屬分支（出卡 / 帶 ctx user_id 的查詢）。同樣吃 registry 的 對內 授權。
+_BUILTIN_CUSTOM: Dict[str, Dict[str, Any]] = {
+    "show_chat_draft": {
+        "desc": "把某筆 Chat 草稿以「草稿卡」形式放進對話——卡上有 Try Run / 啟用 / 刪除按鈕，"
+                "由使用者自己按（瀏覽器端執行）。使用者說「打開/看/試跑/刪 某個草稿」都用這個出卡，"
+                "**不要自己嘗試執行或刪除**。draft_id 從 list_chat_drafts 拿。",
+        "args": {"draft_id": {"type": "integer", "description": "草稿 id（list_chat_drafts 回傳的 id）"}}},
+    "search_past_conversations": {
+        "desc": "搜尋這位使用者自己的歷史對話（標題與內文）——使用者問「我之前是不是請你做過…」"
+                "「上次那個…在哪」時用。回傳對話標題/時間/命中片段；請使用者從「對話紀錄」開啟該對話。",
+        "args": {"query": {"type": "string", "description": "關鍵字（機台 id、skill 名、主題）"}}},
+    "manage_knowledge": {
+        "desc": "刪除或停用一條使用者交代過的規則/知識（list_agent_knowledge 的 id）。"
+                "會出確認卡，使用者按確認才執行（瀏覽器端以使用者身分）。"
+                "action ∈ delete（刪除）| deactivate（停用保留）。新增規則不用這個——直接說「幫我記住…」走既有記錄流程。",
+        "required": ["action", "knowledge_id"],
+        "args": {"action": {"type": "string", "description": "delete | deactivate"},
+                 "knowledge_id": {"type": "integer", "description": "規則 id"},
+                 "title": {"type": "string", "description": "該條規則的標題（給確認卡顯示用）"}}},
+}
+
 # the user's JWT after they press 確認 (role gates, e.g. resolve=ADMIN/PE,
 # apply as the user's own). Granted 對內 like the reads.
 _ALARM_WRITES: Dict[str, Dict[str, Any]] = {
@@ -607,6 +636,49 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                               "message": "管理動作確認卡已顯示，使用者按確認才會執行。只回一句『確認卡在上面了』。"})
             return
 
+        # ── 自訂 builtin (2026-07-12)：草稿卡 / 跨對話搜尋 / 知識管理 ──────
+        if name in _BUILTIN_CUSTOM and name in (ctx.get("granted_custom") or set()):
+            uid = ctx.get("user_id") or 0
+            if name == "show_chat_draft":
+                did = inp.get("draft_id")
+                if not did:
+                    yield ("result", {"status": "missing",
+                                      "message": "要哪一筆？先用 list_chat_drafts 拿 id。"})
+                    return
+                d = await java._get_data(f"/internal/chat-drafts/{int(did)}",
+                                         params={"user_id": uid})
+                if not d:
+                    yield ("result", {"status": "not_found", "message": "找不到這筆草稿（可能已被清掉）。"})
+                    return
+                card = {"type": "draft_card", "id": d.get("id"), "name": d.get("name"),
+                        "nl": d.get("nl"), "kind": d.get("kind"),
+                        "node_count": d.get("node_count"), "edge_count": d.get("edge_count"),
+                        "created_at": d.get("created_at")}
+                yield ("event", {"type": "tool_done", "tool": name, "render_card": card})
+                yield ("result", {"status": "card_shown",
+                                  "message": "草稿卡在上面了——Try Run / 啟用 / 刪除都在卡上由使用者按。只回一句話。"})
+                return
+            if name == "search_past_conversations":
+                data = await java._get_data("/internal/agent-sessions/search",
+                                            params={"user_id": uid,
+                                                    "q": str(inp.get("query") or "")})
+                yield ("result", {"status": "ok", "data": data,
+                                  "message": "找到的對話請使用者從「對話紀錄」（左欄/抽屜）開啟。"})
+                return
+            if name == "manage_knowledge":
+                action = str(inp.get("action") or "").lower()
+                kid = inp.get("knowledge_id")
+                if action not in ("delete", "deactivate") or not kid:
+                    yield ("result", {"status": "invalid",
+                                      "message": "action ∈ delete|deactivate 且要給 knowledge_id（list_agent_knowledge 拿）。"})
+                    return
+                card = {"type": "knowledge_admin_confirm", "action": action,
+                        "knowledge_id": int(kid), "title": str(inp.get("title") or "")}
+                yield ("event", {"type": "tool_done", "tool": name, "render_card": card})
+                yield ("result", {"status": "confirm_pending",
+                                  "message": "確認卡已顯示，使用者按確認才會執行。只回一句『確認卡在上面了』。"})
+                return
+
         # ── granted built-in READ tools (Phase 6 fast-follow) ──────────────
         if name in _BUILTIN_READ and name in (ctx.get("granted_reads") or set()):
             spec = _BUILTIN_READ[name]
@@ -742,10 +814,13 @@ async def run_chat_agent(
                      if g.get("kind") == "builtin" and g.get("key") in _BUILTIN_READ]
     granted_writes = [g["key"] for g in granted
                       if g.get("kind") == "builtin" and g.get("key") in _ALARM_WRITES]
+    granted_custom = [g["key"] for g in granted
+                      if g.get("kind") == "builtin" and g.get("key") in _BUILTIN_CUSTOM]
     ctx["granted_reads"] = set(granted_reads)
     ctx["granted_writes"] = set(granted_writes)
-    for key in granted_reads + granted_writes:
-        spec = _BUILTIN_READ.get(key) or _ALARM_WRITES[key]
+    ctx["granted_custom"] = set(granted_custom)
+    for key in granted_reads + granted_writes + granted_custom:
+        spec = _BUILTIN_READ.get(key) or _ALARM_WRITES.get(key) or _BUILTIN_CUSTOM[key]
         props = {a: {"type": v["type"], "description": v["description"]}
                  for a, v in spec["args"].items()}
         tools.append({

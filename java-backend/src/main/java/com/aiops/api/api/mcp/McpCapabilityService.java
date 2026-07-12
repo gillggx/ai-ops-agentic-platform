@@ -75,7 +75,11 @@ public class McpCapabilityService {
             // they emit a confirm card and the browser performs the POST under
             // the user's JWT (role gates like resolve=ADMIN_OR_PE apply as-is).
             "query_alarms", "get_alarm_stats",
-            "ack_alarm", "dispose_alarm", "resolve_alarm");
+            "ack_alarm", "dispose_alarm", "resolve_alarm",
+            // Chat 草稿暫存區 + 跨對話 + 知識管理 (2026-07-12)：list/show 為
+            // 讀；manage_knowledge 走確認卡（browser 端以使用者 JWT 執行）。
+            "list_chat_drafts", "show_chat_draft",
+            "search_past_conversations", "manage_knowledge");
 
     /** Whether a capability needs an explicit 對內 grant to reach the Coordinator.
      *  Platform-meta built-ins from the whitelist, plus (2026-07-10 決策)
