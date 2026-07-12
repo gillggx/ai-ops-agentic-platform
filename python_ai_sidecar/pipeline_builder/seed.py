@@ -2214,6 +2214,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "  e.g. ['ooc_count'] (asc) ；e.g. [{'column':'ooc_count','order':'desc'}] (desc)\n"
                 "  e.g. ['toolID', {'column':'eventTime','order':'desc'}]\n"
                 "limit   (integer, opt, >= 1) 保留前 N 列\n"
+                "逗號字串 'toolID,eventTime' 也接受 — 自動拆成多鍵 asc（GUI 手打友善，2026-07-13）\n"
                 "\n"
                 "== Output ==\n"
                 "port: data (dataframe) — 排序後的 df；欄位不變，有 limit 則保留前 N 列\n"

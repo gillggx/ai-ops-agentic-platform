@@ -1399,8 +1399,11 @@ class BuilderToolset:
             "_section": section,
         }
 
-    async def phase_complete(self, rationale: str) -> dict[str, Any]:
+    async def phase_complete(self, rationale: str = "") -> dict[str, Any]:
         """v30: sentinel tool. LLM calls this to declare a phase done.
+
+        rationale optional (2026-07-13): LLM 有時漏帶 — 之前直接炸 TypeError
+        洩進 tool_result，把 agent 打亂到亂刪節點（trace 20260712-230351）。
 
         Doesn't modify pipeline state — agentic_phase_loop picks up the
         rationale via dispatcher and runs deterministic phase verifier.

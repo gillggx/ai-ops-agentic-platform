@@ -2180,7 +2180,9 @@ export function AIAgentPanel({
             const cardId = currentBuildCardIdRef.current;
             const cardStatus: BuildPlanState["status"] =
               doneStatus === "refused" ? "cancelled"
-              : doneStatus === "failed" ? "error" : "done";
+              // 2026-07-13：sidecar 會回 failed_missing_output 等變體 —
+              // 只認全等 "failed" 讓失敗 build 出了「✓ 建構完成」卡（user 實測）。
+              : doneStatus.startsWith("failed") ? "error" : "done";
             if (cardId != null) {
               setChatHistory((prev) => prev.map((m) =>
                 m.id === cardId && m.buildPlan
@@ -2225,6 +2227,16 @@ export function AIAgentPanel({
                   buildDone: { text, learned: [...learned], rating: null },
                 }]);
               }
+            } else if (cardStatus === "error") {
+              // 2026-07-13（user：「builder 失敗了但 coordinator 沒介入」）
+              // 最小介入：失敗別只留中止 chip — 給一句人話 + 下一步引導。
+              // 完整的失敗→重規劃迴路是後續設計（graph-level failure hook）。
+              const reason = (summary || "").slice(0, 160);
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "agent",
+                content: `✕ 這次建構沒有完成${reason ? `：${reason}` : "。"}\n` +
+                         "直接跟我說「重試」，或告訴我要怎麼調整（例如換一種圖、改排序方式），我會接手處理。",
+              }]);
             }
             break;
           }

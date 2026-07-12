@@ -43,11 +43,23 @@ class SortBlockExecutor(BlockExecutor):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
 
         columns_spec = self.require(params, "columns")
+        # 2026-07-13 (user 實測)：GUI 直接打 "toolID,eventTime" 期待多鍵排序
+        # — 之前整串當一個欄名炸 COLUMN_NOT_FOUND。寬容解析：字串先按逗號
+        # 切開，每段再走既有的 flat-string 正規化（= asc）。
+        if isinstance(columns_spec, str):
+            columns_spec = [p.strip() for p in columns_spec.split(",") if p.strip()]
         if not isinstance(columns_spec, list) or not columns_spec:
             raise BlockExecutionError(
                 code="INVALID_PARAM",
                 message="columns must be a non-empty list of {column, order}",
             )
+        expanded: list[Any] = []
+        for entry in columns_spec:
+            if isinstance(entry, str) and "," in entry:
+                expanded.extend(p.strip() for p in entry.split(",") if p.strip())
+            else:
+                expanded.append(entry)
+        columns_spec = expanded
 
         # Path-aware sort: for nested columns we materialize a temporary
         # __sort_key_<i> column via get_column_series, sort by it, then drop.
