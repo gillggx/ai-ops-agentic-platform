@@ -105,11 +105,22 @@ public class McpCapabilityService {
         List<Capability> out = new ArrayList<>();
 
         // builtin — from the MCP server manifest
+        java.util.Set<String> seen = new java.util.HashSet<>();
         for (Map<String, Object> t : fetchBuiltinManifest()) {
             String key = String.valueOf(t.get("key"));
+            seen.add(key);
             out.add(row(key, String.valueOf(t.getOrDefault("name", key)),
                     String.valueOf(t.getOrDefault("description", "")), "builtin",
                     Boolean.TRUE.equals(t.get("is_write")), settings.get(key)));
+        }
+        // builtin — Coordinator 專屬（不在 MCP server manifest 上，2026-07-12）：
+        // 草稿卡/跨對話搜尋/知識管理只存在 sidecar chat loop，manifest 不會列。
+        // 白名單內且 manifest 缺席的 key 合成進 catalog，settings 才有掛載點。
+        for (String key : COORDINATOR_BUILTINS) {
+            if (!seen.contains(key)) {
+                out.add(row(key, key, "(Coordinator 內建工具)", "builtin",
+                        false, settings.get(key)));
+            }
         }
         // domain skills — invoke is read/compute
         for (SkillV2Entity sk : skillRepo.findAll()) {
