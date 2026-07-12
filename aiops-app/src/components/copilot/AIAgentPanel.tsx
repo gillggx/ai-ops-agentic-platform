@@ -108,8 +108,9 @@ async function autoSaveDraft(
     try {
       const lr = await fetch("/api/chat-drafts", { cache: "no-store" });
       const lj = await lr.json().catch(() => ({}));
-      const list = (lj?.data ?? lj) as unknown[];
-      count = Array.isArray(list) ? list.length : 0;
+      // list shape = {drafts:[...], used, limit}（同 DraftList）
+      const d = (lj?.data ?? lj) as { drafts?: unknown[]; used?: number } | null;
+      count = d?.used ?? (Array.isArray(d?.drafts) ? d.drafts.length : 0);
     } catch { /* count best-effort */ }
     return { draft: row && typeof row.id === "number" ? row : null, count };
   } catch {
