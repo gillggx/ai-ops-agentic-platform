@@ -251,11 +251,11 @@ function Shell({ children }: { children: React.ReactNode }) {
   const isChatOps = pathname === "/chatops";
   // Session 管理 (2026-07-12)：手機抽屜帳號列要顯示使用者＋登出。
   const { data: authSession } = useSession();
-  // 手機版 (2026-07-11)：viewport ≤ 767px 自動切 MobileShell（底部 4 tab）。
+  // 手機版 (2026-07-11)：viewport ≤ 899px 自動切 MobileShell（底部 4 tab）。
   // SSR 先當桌機，client mount 後以 matchMedia 校正 — 手機首屏會有一次換版。
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
+    const mq = window.matchMedia("(max-width: 899px)");
     const apply = () => setIsMobile(mq.matches);
     apply();
     mq.addEventListener("change", apply);

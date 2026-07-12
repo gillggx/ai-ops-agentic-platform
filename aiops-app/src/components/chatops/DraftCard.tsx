@@ -39,7 +39,7 @@ export function DraftCard({ data, onPatch, onCharts, onEnable }: {
   const [msg, setMsg] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    setIsMobile(window.matchMedia("(max-width: 767px)").matches);
+    setIsMobile(window.matchMedia("(max-width: 899px)").matches);
   }, []);
 
   const fetchPipeline = async (): Promise<Record<string, unknown> | null> => {

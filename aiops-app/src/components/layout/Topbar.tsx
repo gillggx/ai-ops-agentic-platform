@@ -6,7 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
 import { NotificationBell } from "./NotificationBell";
 import { SUPPORTED_LOCALES, LOCALE_LABELS } from "@/i18n/locales";
-import { THEMES, DEFAULT_THEME, applyTheme } from "@/lib/themes";
+import { THEMES, DEFAULT_THEME, applyTheme, normalizeTheme } from "@/lib/themes";
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   IT_ADMIN: { bg: "#fef2f2", color: "#991b1b" },
@@ -100,9 +100,12 @@ function UserMenu() {
       .then((r) => (r.ok ? r.json() : null))
       .then((p) => {
         const themePref = p?.ui_theme as string | undefined;
-        if (themePref && THEMES.some((th) => th.slug === themePref)) {
-          applyTheme(themePref);
-          setTheme(themePref);
+        if (themePref) {
+          // R1 (2026-07-12): applyTheme 內建 normalize — 舊 slug（oxblood 等）
+          // 自動映射到最接近的新主題。
+          const applied = normalizeTheme(themePref);
+          applyTheme(applied);
+          setTheme(applied);
         }
         const prof = p?.locale as string | undefined;
         if (prof && (SUPPORTED_LOCALES as readonly string[]).includes(prof) && prof !== locale) {

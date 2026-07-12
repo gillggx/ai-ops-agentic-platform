@@ -126,10 +126,10 @@ public class UserAccountService {
 		return userRepository.save(user);
 	}
 
-	/** Design v2: the 10 selectable UI themes (design_handoff_operation_platform_v2). */
+	/** R1 (design_handoff_aiops_platform, 2026-07-12): the 10 selectable UI themes. */
 	private static final java.util.Set<String> SUPPORTED_THEMES = java.util.Set.of(
-			"pine", "oxblood", "aubergine", "petrol", "olive",
-			"slate", "raspberry", "lime", "cocoa", "violet");
+			"pine", "indigo", "terra", "navy", "teal",
+			"plum", "graphite", "bordeaux", "olive", "lake");
 
 	@Transactional
 	public UserEntity updateUiTheme(Long userId, String theme) {

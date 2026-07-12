@@ -170,7 +170,7 @@ export function MobileAlarmDetail({ cluster, onBack }: {
         )}
         <button onClick={() => void ack()} disabled={acking || cluster.open_count === 0} style={{
           width: "100%", padding: "13px 0", borderRadius: 12, border: "none",
-          background: "#5C1F35", color: "#fff", fontSize: 15, fontWeight: 800,
+          background: "var(--p, #1E5A44)", color: "#fff", fontSize: 15, fontWeight: 800,
           cursor: "pointer", opacity: acking ? 0.6 : 1, boxShadow: M.shadow,
         }}>
           {acking ? "認領中…" : `✓ Acknowledge ・ ${cluster.open_count}`}

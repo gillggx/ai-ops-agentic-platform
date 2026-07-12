@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * MobileShell (2026-07-11) — 手機版殼層，viewport ≤ 767px 時由 AppShell 啟用。
+ * MobileShell (2026-07-11) — 手機版殼層，viewport ≤ 899px 時由 AppShell 啟用。
  *
  * 底部 4 tab：對話（agent 主畫面）/ 總覽 / Skills / 手冊。
  * 總覽可下鑽：全廠總覽 1c → 設備詳情 1d；Open alarms → 告警戰情 1a → 1b。
@@ -21,6 +21,7 @@ import { MobileManual } from "./MobileManual";
 import { SessionList } from "@/components/chatops/SessionList";
 import { DraftList } from "@/components/chatops/DraftList";
 import type { DraftCardData } from "@/components/chatops/DraftCard";
+import { THEMES, DEFAULT_THEME, applyTheme, normalizeTheme } from "@/lib/themes";
 
 type Tab = "chat" | "overview" | "skills" | "manual";
 type Drill =
@@ -54,6 +55,12 @@ export function MobileShell({
   const [tab, setTab] = useState<Tab>("chat");
   const [drill, setDrill] = useState<Drill>({ kind: "none" });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // R1 (2026-07-12)：手機也能換主題 — 抽屜帳號列上方的「外觀」色點列。
+  const [theme, setTheme] = useState(DEFAULT_THEME);
+  useEffect(() => {
+    setTheme(normalizeTheme(document.documentElement.dataset.theme
+      ?? localStorage.getItem("ui_theme")));
+  }, []);
   // 新對話回饋（2026-07-12）：已在新對話時按下去畫面不變，沒回饋會以為壞了。
   const [toast, setToast] = useState("");
   useEffect(() => {
@@ -174,6 +181,30 @@ export function MobileShell({
                   setDrawerOpen(false); setTab("chat"); onOpenDraft(d);
                 }} />
               </div>
+              {/* 外觀主題 — 即時切 CSS 變數 + DB 持久化（同 Topbar pattern） */}
+              <div style={{ borderTop: `1px solid ${M.line}`, paddingTop: 9, marginTop: 8 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: M.faint, letterSpacing: ".05em", marginBottom: 7 }}>外觀</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {THEMES.map((th) => (
+                    <button key={th.slug} title={th.label}
+                      onClick={() => {
+                        applyTheme(th.slug);
+                        setTheme(th.slug);
+                        void fetch("/api/me/theme", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ theme: th.slug }),
+                        }).catch(() => {});
+                      }}
+                      style={{
+                        width: 26, height: 26, borderRadius: "50%", cursor: "pointer",
+                        background: th.swatch, padding: 0,
+                        border: theme === th.slug ? "2px solid #fff" : "2px solid transparent",
+                        outline: theme === th.slug ? `2px solid ${th.swatch}` : "none",
+                      }} />
+                  ))}
+                </div>
+              </div>
               <div style={{
                 borderTop: `1px solid ${M.line}`, paddingTop: 10, marginTop: 8,
                 display: "flex", alignItems: "center", gap: 9,
@@ -209,7 +240,7 @@ export function MobileShell({
           <button onClick={() => setTab("chat")} style={{
             position: "absolute", right: 16, bottom: 18, width: 54, height: 54,
             borderRadius: "50%", border: "none", cursor: "pointer",
-            background: "#5C1F35", color: "#f5d9e6", fontSize: 22,
+            background: "var(--p, #1E5A44)", color: "#fff", fontSize: 22,
             boxShadow: "0 8px 22px -8px rgba(20,23,60,.45)",
           }}>✦</button>
         )}

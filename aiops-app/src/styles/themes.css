@@ -1,73 +1,77 @@
 /**
- * UI theme tokens (design_handoff_operation_platform_v2, Phase T).
+ * UI theme tokens (design_handoff_aiops_platform R1, 2026-07-12).
  *
  * 7 themeable variables × 10 themes. Switching = flip `data-theme` on <html>;
  * nothing re-renders, only variable values change. Values are FINAL from the
- * design handoff README — do not eyeball-adjust.
+ * R1 README token table — do not eyeball-adjust. --pn = #FFFFFF for ALL themes.
  *
- *   --p    primary（按鈕/連結/重點）      --pd  primary-dark（徽章文字/hover）
- *   --pl   primary-light（徽章/標籤底）   --nav 側邊 nav 底
- *   --navs nav 選中格底                   --ws  工作區底
- *   --pn   面板底（agent panel）
+ *   --p    primary（主按鈕/active tab/FAB/選中 chip/user 泡泡）
+ *   --pd   primary-dark（文字 accent/次要連結/深 pill 底/「檢視 →」）
+ *   --pl   primary-light（AI 卡頭/徽章底/agent 建議卡底/選中列底）
+ *   --nav  側欄底         --navs 側欄選中底
+ *   --ws   工作區底        --pn   面板/卡片底
  *
- * SEMANTIC colors are FIXED and must NOT be themed (they carry製程語意):
- *   SPC 管制線紅 #e5484d · 成功/運行中綠 #0f9d6a (淺底 #e7f7ef)
- *   draft/warning 橘 #c2410c (淺底 #fff7ed) · 圖表趨勢線綠 #0f9d6a
+ * AI 入口／agent 識別色一律跟 --p（FAB、✦、AI 卡左框）— 不再用固定洋紅。
+ *
+ * SEMANTIC colors are FIXED and must NOT be themed（製程語意）:
+ *   管制紅 #E5484D（淡底 #FDE8E9／深字 #B4232D）· 警示琥珀 #C8841A（淡底 #FBEECF）
+ *   成功綠 #0F9D6A（淡底 #E5F5EC）· 資訊藍 #2F6FB0（淡底 #E4EDF6）
+ *   TRANSFORM 紫 #8b6ecb
  */
 
-/* Pine + Sand 松砂 — platform default */
+/* 松砂 Pine+Sand — platform default */
 :root,
 [data-theme="pine"] {
   --p:   #1E5A44;
-  --pd:  #164436;
-  --pl:  #DCEBE3;
-  --nav: #14211C;
-  --navs:#274035;
-  --ws:  #F3F1EA;
-  --pn:  #F8F6F0;
+  --pd:  #14402F;
+  --pl:  #E4EEE7;
+  --nav: #12241C;
+  --navs:#24493A;
+  --ws:  #F4F2EC;
+  --pn:  #FFFFFF;
 }
 
-[data-theme="oxblood"] {   /* Oxblood 暗紅 */
-  --p: #8C2F39; --pd: #6E2129; --pl: #F4E0E1;
-  --nav: #241417; --navs: #40262A; --ws: #F4F0EF; --pn: #F9F5F4;
+[data-theme="indigo"] {   /* 靛霧 Indigo+Fog */
+  --p: #4F46E5; --pd: #3730A3; --pl: #E8E9FB;
+  --nav: #171A2E; --navs: #2E3252; --ws: #F2F3F7; --pn: #FFFFFF;
 }
 
-[data-theme="aubergine"] { /* Aubergine 茄紫 */
-  --p: #8A2C6B; --pd: #6C1F52; --pl: #F3E1EE;
-  --nav: #25162A; --navs: #3E2547; --ws: #F3F0F4; --pn: #F8F5F9;
+[data-theme="terra"] {    /* 赭陶 Terra+Cream */
+  --p: #B4552D; --pd: #8A3E1F; --pl: #F6E3D8;
+  --nav: #2B1A12; --navs: #543425; --ws: #F7F1E8; --pn: #FFFFFF;
 }
 
-[data-theme="petrol"] {    /* Petrol 石油藍綠 */
-  --p: #0C6473; --pd: #084C57; --pl: #D7ECEF;
-  --nav: #08313B; --navs: #155060; --ws: #EEF3F3; --pn: #F4F9F9;
+[data-theme="navy"] {     /* 海墨 Navy+Mist */
+  --p: #1F4E79; --pd: #163A5B; --pl: #DEE9F2;
+  --nav: #101C2A; --navs: #23405C; --ws: #F0F3F6; --pn: #FFFFFF;
 }
 
-[data-theme="olive"] {     /* Olive 橄欖 */
-  --p: #5F7137; --pd: #495824; --pl: #EAEFD9;
-  --nav: #20261A; --navs: #353F28; --ws: #F1F2EB; --pn: #F6F8F1;
+[data-theme="teal"] {     /* 蒼杉 Teal+Paper */
+  --p: #0F766E; --pd: #0B554F; --pl: #DCEEEC;
+  --nav: #0E2321; --navs: #1D4844; --ws: #F1F5F3; --pn: #FFFFFF;
 }
 
-[data-theme="slate"] {     /* Slate Steel 鋼灰藍 */
-  --p: #3E5C76; --pd: #2C4457; --pl: #E1E8EE;
-  --nav: #1B2530; --navs: #33475A; --ws: #F0F2F5; --pn: #F6F8FA;
+[data-theme="plum"] {     /* 梅紫 Plum+Blush */
+  --p: #8E3A76; --pd: #6B2B59; --pl: #F2E2ED;
+  --nav: #26121F; --navs: #4B2740; --ws: #F6F2F4; --pn: #FFFFFF;
 }
 
-[data-theme="raspberry"] { /* Raspberry 覆盆莓 */
-  --p: #B4326A; --pd: #8E2450; --pl: #F6E0EA;
-  --nav: #26161D; --navs: #402634; --ws: #F4F0F1; --pn: #F9F5F6;
+[data-theme="graphite"] { /* 石墨 Graphite */
+  --p: #374151; --pd: #1F2937; --pl: #E5E7EB;
+  --nav: #111827; --navs: #2A3446; --ws: #F3F4F6; --pn: #FFFFFF;
 }
 
-[data-theme="lime"] {      /* Graphite Lime 石墨萊姆 */
-  --p: #5E6E12; --pd: #495611; --pl: #EEF3C9;
-  --nav: #16181A; --navs: #2A2E30; --ws: #F1F2F0; --pn: #F6F7F5;
+[data-theme="bordeaux"] { /* 酒紅 Bordeaux */
+  --p: #8C2F39; --pd: #6A222B; --pl: #F3DEE0;
+  --nav: #26090D; --navs: #4B1D24; --ws: #F6F1F0; --pn: #FFFFFF;
 }
 
-[data-theme="cocoa"] {     /* Cocoa 可可 */
-  --p: #6B4A2E; --pd: #4F3620; --pl: #EFE6DB;
-  --nav: #211A14; --navs: #3A2E22; --ws: #F3F0EC; --pn: #F8F5F1;
+[data-theme="olive"] {    /* 苔金 Olive+Oat */
+  --p: #667032; --pd: #4A521F; --pl: #E9ECD9;
+  --nav: #1D2113; --navs: #3A4224; --ws: #F4F4EC; --pn: #FFFFFF;
 }
 
-[data-theme="violet"] {    /* Ink Violet 墨紫 */
-  --p: #6A3EA1; --pd: #513081; --pl: #EBE3F6;
-  --nav: #1E1830; --navs: #342A4E; --ws: #F2F0F6; --pn: #F7F5FA;
+[data-theme="lake"] {     /* 湖水 Lake+Ice */
+  --p: #0E7490; --pd: #0A5568; --pl: #DBEEF4;
+  --nav: #0C222B; --navs: #1C4552; --ws: #EFF5F6; --pn: #FFFFFF;
 }

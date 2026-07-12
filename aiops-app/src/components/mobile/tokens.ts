@@ -16,8 +16,9 @@ export const M = {
   medBg: "#F6ECD9",
   low: "#5b6070",
   lowBg: "#EEEFF2",
-  ai: "#A62360",
-  aiBg: "#FAEDF3",
+  // R1 (2026-07-12): AI 識別色一律跟主題 --p（不再固定洋紅）。
+  ai: "var(--p, #1E5A44)",
+  aiBg: "var(--pl, #E4EEE7)",
   ok: "#0f9d6a",
   okBg: "#e7f7ef",
   crit: "#e5484d",
