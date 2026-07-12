@@ -16,6 +16,7 @@ import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "./AgentCon
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
 import { DraftCard, type DraftCardData, type TryRunChart } from "@/components/chatops/DraftCard";
 import { KnowledgeAdminConfirmCard, type KnowledgeAdminData } from "./KnowledgeAdminConfirmCard";
+import { MemoryRememberConfirmCard, type MemoryRememberData } from "./MemoryRememberConfirmCard";
 import { AutomationConfirmCard, type AutomationHandoffData } from "./AutomationConfirmCard";
 import { SkillActivateConfirmCard, type SkillActivateConfirmData } from "./SkillActivateConfirmCard";
 import { AlarmActionConfirmCard, type AlarmActionData } from "./AlarmActionConfirmCard";
@@ -162,7 +163,7 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate" | "alarm_action" | "skill_admin" | "draft_card" | "knowledge_admin";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate" | "alarm_action" | "skill_admin" | "draft_card" | "knowledge_admin" | "memory_remember";
   content: string;
   /** 對話分頁重整（2026-07-05）— BUILD PLAN 卡單卡生命週期 state。 */
   buildPlan?: BuildPlanState;
@@ -206,6 +207,7 @@ interface ChatMessage {
   draftCard?: DraftCardData;
   /** 知識管理 (2026-07-12): 刪除/停用規則確認卡。 */
   knowledgeAdmin?: KnowledgeAdminData;
+  memoryRemember?: MemoryRememberData;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -1624,6 +1626,12 @@ export function AIAgentPanel({
                 id: nextId(), role: "knowledge_admin", content: "",
                 knowledgeAdmin: card as unknown as KnowledgeAdminData,
               }]);
+            } else if (card?.type === "memory_remember_confirm") {
+              // Memory v1 (2026-07-12): 記偏好 — 索引行可編，確認才寫入。
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "memory_remember", content: "",
+                memoryRemember: card as unknown as MemoryRememberData,
+              }]);
             } else if (card?.type === "draft_card") {
               // My Drafts (2026-07-12): agent 出草稿卡 — 動作全在卡上由使用者按。
               setChatHistory((prev) => [...prev, {
@@ -2923,6 +2931,13 @@ export function AIAgentPanel({
                     onResolved={(st) => setChatHistory((prev) => prev.map((m) =>
                       m.id === msg.id && m.knowledgeAdmin
                         ? { ...m, knowledgeAdmin: { ...m.knowledgeAdmin, resolved: st } } : m))} />
+                </div>
+              ) : msg.role === "memory_remember" && msg.memoryRemember ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <MemoryRememberConfirmCard data={msg.memoryRemember}
+                    onResolved={(st) => setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.memoryRemember
+                        ? { ...m, memoryRemember: { ...m.memoryRemember, resolved: st } } : m))} />
                 </div>
               ) : msg.role === "draft_card" && msg.draftCard ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>

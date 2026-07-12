@@ -9,6 +9,10 @@ import { useState } from "react";
 export interface KnowledgeAdminData {
   action: "delete" | "deactivate";
   knowledge_id: number;
+  /** Memory v1 (2026-07-12)：id 空間分兩表 — directive（agent_directives，
+   *  舊 list 只有這種）vs preference（agent_knowledge）。缺省=directive
+   *  以相容舊卡。 */
+  kind?: "preference" | "directive";
   title?: string | null;
   /** 跨裝置一致：處理結果隨 rich history 同步。 */
   resolved?: "done" | "cancelled";
@@ -25,7 +29,9 @@ export function KnowledgeAdminConfirmCard({ data, onResolved }: {
   const confirm = async () => {
     setState("working"); setMsg("");
     try {
-      const base = `/api/agent-knowledge/${data.knowledge_id}`;
+      const base = data.kind === "preference"
+        ? `/api/agent-knowledge/${data.knowledge_id}`
+        : `/api/agent-directives/${data.knowledge_id}`;
       const res = data.action === "delete"
         ? await fetch(base, { method: "DELETE" })
         : await fetch(base, {

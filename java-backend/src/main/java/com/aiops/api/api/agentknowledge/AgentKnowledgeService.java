@@ -175,10 +175,19 @@ public class AgentKnowledgeService {
 		e.setBody(req.body());
 		e.setPriority(req.priority() != null ? req.priority() : "med");
 		e.setWrittenBy("human");   // V71: manual UI create is human-authored
-		// V75 governance: ON_DUTY-only callers create DRAFTS (invisible to
-		// retrieval) — a PE / IT_ADMIN approves via approveKnowledge. Fail
-		// closed: null / empty roles are treated as ON_DUTY.
-		if (canPublishKnowledge(caller)) {
+		boolean isPreference = "preference".equals(req.memoClass());
+		if (isPreference) {
+			// Memory v1 (2026-07-12): 個人偏好只影響本人的對話注入，不走 V75
+			// draft 審核 — 寫入前已有瀏覽器確認卡把關。
+			e.setMemoClass("preference");
+			String appliesTo = req.appliesTo();
+			e.setAppliesTo(appliesTo != null && List.of("plan", "execute", "both").contains(appliesTo)
+					? appliesTo : "both");
+			e.setStatus("active");
+		} else if (canPublishKnowledge(caller)) {
+			// V75 governance: ON_DUTY-only callers create DRAFTS (invisible to
+			// retrieval) — a PE / IT_ADMIN approves via approveKnowledge. Fail
+			// closed: null / empty roles are treated as ON_DUTY.
 			e.setStatus("active");
 		} else {
 			e.setStatus("draft");

@@ -54,6 +54,21 @@ public class InternalAgentKnowledgeController {
 		return ApiResponse.ok(service.recordFire(directiveId, body.get("session_id"), body.get("context")));
 	}
 
+	// ── Memory v1 (2026-07-12): 兩層式記憶 — 索引 + 翻內文 ─────────────────
+
+	@GetMapping("/memory/index")
+	public ApiResponse<List<Map<String, Object>>> memoryIndex(@RequestParam("user_id") Long userId) {
+		return ApiResponse.ok(service.memoryIndex(userId));
+	}
+
+	@GetMapping("/memory/read")
+	public ApiResponse<Map<String, Object>> memoryRead(
+			@RequestParam("kind") String kind,
+			@RequestParam("id") Long id,
+			@RequestParam("user_id") Long userId) {
+		return ApiResponse.ok(service.memoryRead(kind, id, userId));
+	}
+
 	// ── Lexicon ───────────────────────────────────────────────────────────
 
 	@GetMapping("/lexicon")

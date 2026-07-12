@@ -67,9 +67,10 @@ _BUILTIN_READ: Dict[str, Dict[str, Any]] = {
         "path": "/internal/alarms/stats", "query": True, "required": [],
         "args": {"since_hours": {"type": "integer", "description": "往回看幾小時（預設 168 = 7 天）"}}},
     "list_agent_knowledge": {
-        "desc": "列出目前生效的 knowledge / directives——使用者交代過的規則、偏好都在這（回傳含每筆 id）。"
-                "使用者問「我跟你說過什麼 / 有哪些 rules」時用。要刪除或停用某條用 manage_knowledge。",
-        "path": "/internal/agent-knowledge/directives/active?user_id={user_id}", "args": {}},
+        "desc": "列出使用者交代過且生效中的規則(directive)與偏好(preference)——每筆含 id + kind + title"
+                "（同 [記憶索引] 的來源）。使用者問「你記得我什麼 / 有哪些 rules」時用。"
+                "看完整內文用 read_memory；刪除/停用用 manage_knowledge（要帶同一組 id + kind）。",
+        "path": "/internal/agent-knowledge/memory/index?user_id={user_id}", "args": {}},
     # Chat 草稿暫存區 (2026-07-12)：使用者說「草稿」通常指這個（＝左欄 My
     # Drafts，對話建圖自動暫存），不是 skills_v2 的 draft skill。
     "list_chat_drafts": {
@@ -123,13 +124,15 @@ _BUILTIN_CUSTOM: Dict[str, Dict[str, Any]] = {
                 "「上次那個…在哪」時用。回傳對話標題/時間/命中片段；請使用者從「對話紀錄」開啟該對話。",
         "args": {"query": {"type": "string", "description": "關鍵字（機台 id、skill 名、主題）"}}},
     "manage_knowledge": {
-        "desc": "刪除或停用一條使用者交代過的規則/知識（list_agent_knowledge 的 id）。"
+        "desc": "刪除或停用一條使用者交代過的規則/偏好（id + kind 來自 list_agent_knowledge 或 [記憶索引]，"
+                "如 preference#12 → knowledge_id=12, kind=preference）。"
                 "會出確認卡，使用者按確認才執行（瀏覽器端以使用者身分）。"
-                "action ∈ delete（刪除）| deactivate（停用保留）。新增規則不用這個——直接說「幫我記住…」走既有記錄流程。",
-        "required": ["action", "knowledge_id"],
+                "action ∈ delete（刪除）| deactivate（停用保留）。新增偏好用 remember_preference。",
+        "required": ["action", "knowledge_id", "kind"],
         "args": {"action": {"type": "string", "description": "delete | deactivate"},
-                 "knowledge_id": {"type": "integer", "description": "規則 id"},
-                 "title": {"type": "string", "description": "該條規則的標題（給確認卡顯示用）"}}},
+                 "knowledge_id": {"type": "integer", "description": "規則/偏好 id"},
+                 "kind": {"type": "string", "description": "preference | directive（[記憶索引] 行首標示）"},
+                 "title": {"type": "string", "description": "該條的標題（給確認卡顯示用）"}}},
 }
 
 # the user's JWT after they press 確認 (role gates, e.g. resolve=ADMIN/PE,
@@ -636,6 +639,43 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
                               "message": "管理動作確認卡已顯示，使用者按確認才會執行。只回一句『確認卡在上面了』。"})
             return
 
+        # ── Memory v1 (2026-07-12)：兩層式記憶 — 翻內文 / 記偏好（確認卡）──
+        if name == "read_memory":
+            kind = str(inp.get("kind") or "preference").strip()
+            mid = inp.get("id")
+            if kind not in ("preference", "directive") or not mid:
+                yield ("result", {"status": "bad_args",
+                                  "message": "要給 id 跟 kind（都在 [記憶索引] 的行內，如 preference#12）。"})
+                return
+            data = await java._get_data(
+                "/internal/agent-knowledge/memory/read",
+                params={"kind": kind, "id": int(mid),
+                        "user_id": ctx.get("user_id") or 0})
+            if not isinstance(data, dict) or not data.get("found"):
+                yield ("result", {"status": "not_found",
+                                  "message": "這條記憶不存在（可能已被刪除）——忽略該索引行即可。"})
+                return
+            yield ("result", {"status": "ok", "title": data.get("title"),
+                              "body": data.get("body")})
+            return
+
+        if name == "remember_preference":
+            index_line = str(inp.get("index_line") or "").strip()
+            body_text = str(inp.get("body") or "").strip()
+            if not index_line or not body_text:
+                yield ("result", {"status": "bad_args",
+                                  "message": "index_line（一行召回線索）跟 body（完整偏好）都要給。"})
+                return
+            applies_to = inp.get("applies_to")
+            card = {"type": "memory_remember_confirm",
+                    "index_line": index_line[:80], "body": body_text[:2000],
+                    "applies_to": applies_to if applies_to in ("plan", "execute", "both") else "both"}
+            yield ("event", {"type": "tool_done", "tool": name, "render_card": card})
+            yield ("result", {"status": "confirm_pending",
+                              "message": "記憶確認卡已顯示（索引行使用者可改），按確認才寫入。"
+                                         "只回一句『確認卡在上面了』。"})
+            return
+
         # ── 自訂 builtin (2026-07-12)：草稿卡 / 跨對話搜尋 / 知識管理 ──────
         if name in _BUILTIN_CUSTOM and name in (ctx.get("granted_custom") or set()):
             uid = ctx.get("user_id") or 0
@@ -668,12 +708,16 @@ async def _run_tool(name: str, inp: Dict[str, Any], ctx: Dict[str, Any]) -> Asyn
             if name == "manage_knowledge":
                 action = str(inp.get("action") or "").lower()
                 kid = inp.get("knowledge_id")
-                if action not in ("delete", "deactivate") or not kid:
+                kind = str(inp.get("kind") or "directive")
+                if action not in ("delete", "deactivate") or not kid \
+                        or kind not in ("preference", "directive"):
                     yield ("result", {"status": "invalid",
-                                      "message": "action ∈ delete|deactivate 且要給 knowledge_id（list_agent_knowledge 拿）。"})
+                                      "message": "action ∈ delete|deactivate，且要給 knowledge_id + kind"
+                                                 "（兩者都在 list_agent_knowledge / [記憶索引]，如 preference#12）。"})
                     return
                 card = {"type": "knowledge_admin_confirm", "action": action,
-                        "knowledge_id": int(kid), "title": str(inp.get("title") or "")}
+                        "knowledge_id": int(kid), "kind": kind,
+                        "title": str(inp.get("title") or "")}
                 yield ("event", {"type": "tool_done", "tool": name, "render_card": card})
                 yield ("result", {"status": "confirm_pending",
                                   "message": "確認卡已顯示，使用者按確認才會執行。只回一句『確認卡在上面了』。"})
@@ -889,6 +933,49 @@ async def run_chat_agent(
                           for s in skill_index[:20])
         system += ("\n\n[Skill 目錄]（命中使用時機 → 先用 load_skill 取全文說明書再動工；"
                    "只是閒聊或目錄沒命中就不用）\n" + lines)
+
+    # ── Memory v1 (2026-07-12): 兩層式記憶 — 索引全量注入 + 按需翻內文 ──────
+    # 偷 Claude Code 的形狀：每條記憶一行索引（召回線索）進 system prompt，
+    # 完整內文留在 DB，相關才用 read_memory 翻。偏好少所以全量塞，不用 RAG；
+    # 索引超過上限改提示使用者清理（同 session 5 則打包的手感）。
+    tools.append({
+        "name": "read_memory",
+        "description": "翻開 [記憶索引] 某一條的完整內文。索引行只有一句召回線索——"
+                       "當使用者的請求跟某條索引相關時，先翻內文再照著做。",
+        "input_schema": {"type": "object", "properties": {
+            "id": {"type": "integer", "description": "[記憶索引] 行內的 #id"},
+            "kind": {"type": "string", "description": "preference | directive（索引行開頭標示）"},
+        }, "required": ["id", "kind"]},
+    })
+    tools.append({
+        "name": "remember_preference",
+        "description": "把使用者表達的長期偏好記下來（訊號：「記住」「以後都」「我習慣」「預設用」）。"
+                       "會出確認卡，使用者按確認才寫入。index_line 是這條記憶未來唯一的召回線索——"
+                       "寫「什麼情境該想起這件事」，不是內容摘要（例：「畫趨勢圖時——預設看 7 天」）。"
+                       "body 寫完整偏好與怎麼套用。只記長期偏好；單次請求的條件（這次查 EQP-07）不要記。",
+        "input_schema": {"type": "object", "properties": {
+            "index_line": {"type": "string", "description": "一行召回線索（40 字內）"},
+            "body": {"type": "string", "description": "完整偏好內容 + 什麼時候怎麼套用"},
+            "applies_to": {"type": "string", "description": "plan(建圖時) | execute(回答呈現) | both（預設）"},
+        }, "required": ["index_line", "body"]},
+    })
+    _MEM_INDEX_CAP = 20
+    try:
+        mem_index = await java._get_data(
+            f"/internal/agent-knowledge/memory/index?user_id={ctx.get('user_id') or 0}") or []
+    except Exception:  # noqa: BLE001 — memory fail-open：索引拿不到不擋對話
+        logger.warning("memory index fetch failed", exc_info=True)
+        mem_index = []
+    if mem_index:
+        mem_lines = "\n".join(
+            f"- {m.get('kind')}#{m.get('id')}：{m.get('title')}"
+            for m in mem_index[:_MEM_INDEX_CAP])
+        mem_over = (f"\n（另有 {len(mem_index) - _MEM_INDEX_CAP} 條超出索引上限未列——"
+                    "請主動提醒使用者用 manage_knowledge 清理舊的）"
+                    if len(mem_index) > _MEM_INDEX_CAP else "")
+        system += ("\n\n[記憶索引]（跨對話記住的使用者規則與偏好。回答/建圖前掃一眼，"
+                   "有相關的先 read_memory(id, kind) 翻內文並照著做；沒相關就忽略）\n"
+                   + mem_lines + mem_over)
 
     for _round in range(MAX_TOOL_ROUNDS):
         resp = await client.create(system=system, messages=messages,

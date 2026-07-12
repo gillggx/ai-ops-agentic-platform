@@ -73,7 +73,10 @@ public final class Dtos {
 
     public record CreateKnowledgeRequest(
             String scopeType, String scopeValue,
-            String title, String body, String priority
+            String title, String body, String priority,
+            /** Memory v1 (2026-07-12): preference 由確認卡寫入 — memoClass
+             *  ='preference' 時本人即刻生效（不進 V75 draft 審核，只影響自己）。 */
+            String memoClass, String appliesTo
     ) {}
 
     public record PatchKnowledgeRequest(

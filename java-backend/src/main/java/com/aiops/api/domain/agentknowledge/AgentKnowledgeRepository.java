@@ -35,6 +35,10 @@ public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEn
 	java.util.Optional<AgentKnowledgeEntity> findFirstByUserIdAndMemoClassAndTitle(
 			Long userId, String memoClass, String title);
 
+	/** Memory v1 (2026-07-12): 記憶索引 — 本人生效中的某類記憶（preference）。 */
+	List<AgentKnowledgeEntity> findByUserIdAndMemoClassAndStatusOrderByCreatedAtDesc(
+			Long userId, String memoClass, String status);
+
     /** Native update for the embedding column. JPA's auto-generated UPDATE
      *  sends the embedding as VARCHAR, which PostgreSQL refuses to implicitly
      *  cast to `vector`. Use ?::vector here so the embedding string literal

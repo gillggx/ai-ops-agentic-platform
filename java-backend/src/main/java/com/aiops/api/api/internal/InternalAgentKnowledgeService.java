@@ -73,6 +73,44 @@ public class InternalAgentKnowledgeService {
 		return directiveRepo.findActiveForScope(userId, skillSlug, toolId, recipeId, limit);
 	}
 
+	// ══════════════════════════════════════════════════════════════════════
+	// Memory v1 (2026-07-12) — Coordinator 兩層式記憶：索引全量注入 + 按需翻內文
+	// ══════════════════════════════════════════════════════════════════════
+
+	/** 記憶索引：本人 active 偏好（agent_knowledge memo_class='preference'）
+	 *  + 全域生效 directives。每條一行 {id, kind, title} — 內文不出去，
+	 *  sidecar 注入 system prompt 當索引，相關才用 memoryRead 翻。 */
+	public List<Map<String, Object>> memoryIndex(Long userId) {
+		List<Map<String, Object>> out = new ArrayList<>();
+		for (AgentKnowledgeEntity e : knowledgeRepo
+				.findByUserIdAndMemoClassAndStatusOrderByCreatedAtDesc(userId, "preference", "active")) {
+			out.add(Map.of("id", e.getId(), "kind", "preference", "title", e.getTitle()));
+		}
+		for (AgentDirectiveEntity d : directiveRepo.findActiveForScope(userId, null, null, null, 20)) {
+			out.add(Map.of("id", d.getId(), "kind", "directive", "title", d.getTitle()));
+		}
+		return out;
+	}
+
+	/** 翻內文：回傳完整 body；preference 順手 bump uses（V75 治理的 180 天
+	 *  零召回靠這個計數）。directive 不記 fire — fires 語義是注入命中，
+	 *  翻閱不算。ownership check：只能翻自己的。 */
+	@Transactional
+	public Map<String, Object> memoryRead(String kind, Long id, Long userId) {
+		if ("directive".equals(kind)) {
+			AgentDirectiveEntity d = directiveRepo.findById(id).orElse(null);
+			if (d == null || !userId.equals(d.getUserId())) return Map.of("found", false);
+			return Map.of("found", true, "id", d.getId(), "kind", "directive",
+					"title", d.getTitle(), "body", d.getBody() == null ? "" : d.getBody());
+		}
+		AgentKnowledgeEntity e = knowledgeRepo.findById(id).orElse(null);
+		if (e == null || !userId.equals(e.getUserId())) return Map.of("found", false);
+		e.setUses(e.getUses() + 1);
+		e.setLastUsedAt(OffsetDateTime.now());
+		return Map.of("found", true, "id", e.getId(), "kind", "preference",
+				"title", e.getTitle(), "body", e.getBody() == null ? "" : e.getBody());
+	}
+
 	@Transactional
 	public Map<String, Object> recordFire(Long directiveId, String sessionId, String context) {
 		if (!directiveRepo.existsById(directiveId)) {
