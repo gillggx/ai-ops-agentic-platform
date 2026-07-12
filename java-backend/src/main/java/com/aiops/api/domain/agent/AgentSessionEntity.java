@@ -54,6 +54,10 @@ public class AgentSessionEntity {
 	@Column(name = "rich_history", columnDefinition = "text")
 	private String richHistory;
 
+	/** V86 (2026-07-12): 打包時間 — 非 NULL = 已打包（近期 5 則之外的歷史）。 */
+	@Column(name = "archived_at", columnDefinition = "timestamp with time zone")
+	private OffsetDateTime archivedAt;
+
 	@UpdateTimestamp
 	@Column(name = "updated_at", columnDefinition = "timestamp with time zone")
 	private OffsetDateTime updatedAt;

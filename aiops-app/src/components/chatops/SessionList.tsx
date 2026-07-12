@@ -12,6 +12,8 @@ export interface SessionRow {
   title: string | null;
   updated_at: string | null;
   has_pipeline: boolean;
+  /** V86 (2026-07-12): 打包歷史（近期 5 則之外，只留文字、圖卡已清）。 */
+  archived?: boolean;
 }
 
 function timeLabel(iso: string | null): string {
@@ -63,18 +65,13 @@ export function SessionList({ onOpen, activeId, dark = false }: {
   };
 
   const shown = rows.filter((r) => !q || (r.title ?? "").toLowerCase().includes(q.toLowerCase()));
+  const recent = shown.filter((r) => !r.archived);
+  const packed = shown.filter((r) => r.archived);
+  const recentTotal = rows.filter((r) => !r.archived).length;
   const ink = dark ? "#e6eaee" : "#1a1d29";
   const sub = dark ? "#9aa1b5" : "#8b90a7";
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋對話…" style={{
-        margin: "2px 0 8px", padding: "8px 11px", borderRadius: 10,
-        border: "1px solid #e2e0d8", background: "#fff", fontSize: 16,
-        color: "#1a1d29", outline: "none", width: "100%", boxSizing: "border-box",
-      }} />
-      <div style={{ overflowY: "auto", minHeight: 0 }}>
-        {shown.map((r) => (
+  const renderRow = (r: SessionRow) => (
           <div key={r.session_id} style={{
             display: "flex", alignItems: "center", borderRadius: 9,
             background: r.session_id === activeId ? "rgba(30,90,68,0.08)" : "transparent",
@@ -90,7 +87,8 @@ export function SessionList({ onOpen, activeId, dark = false }: {
                 {r.title || "(未命名對話)"}
               </div>
               <div style={{ fontSize: 10.5, color: sub, marginTop: 1 }}>
-                {timeLabel(r.updated_at)}{r.has_pipeline ? " ・ 有圖" : ""}
+                {timeLabel(r.updated_at)}
+                {r.archived ? " ・ 已打包（僅文字）" : r.has_pipeline ? " ・ 有圖" : ""}
               </div>
             </button>
             <div style={{ position: "relative", flexShrink: 0 }}>
@@ -110,11 +108,40 @@ export function SessionList({ onOpen, activeId, dark = false }: {
               )}
             </div>
           </div>
-        ))}
-        {shown.length === 0 && (
-          <div style={{ padding: "14px 10px", fontSize: 12, color: sub }}>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋對話…" style={{
+        margin: "2px 0 8px", padding: "8px 11px", borderRadius: 10,
+        border: "1px solid #e2e0d8", background: "#fff", fontSize: 16,
+        color: "#1a1d29", outline: "none", width: "100%", boxSizing: "border-box",
+      }} />
+      <div style={{ overflowY: "auto", minHeight: 0 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: sub, letterSpacing: ".05em", padding: "2px 10px 4px" }}>
+          近期 {recentTotal}/5
+        </div>
+        {recentTotal >= 5 && (
+          <div style={{ padding: "0 10px 6px", fontSize: 11, color: "#B45309", lineHeight: 1.5 }}>
+            已達 5 則上限 — 開新對話會自動把最舊的打包（只留文字）
+          </div>
+        )}
+        {recent.map(renderRow)}
+        {recent.length === 0 && (
+          <div style={{ padding: "4px 10px 10px", fontSize: 12, color: sub }}>
             {q ? "沒有符合的對話" : "還沒有對話紀錄"}
           </div>
+        )}
+        {packed.length > 0 && (
+          <>
+            <div style={{
+              fontSize: 10.5, fontWeight: 700, color: sub, letterSpacing: ".05em",
+              padding: "10px 10px 4px", borderTop: "1px solid #e9e6dd", marginTop: 6,
+            }}>
+              打包歷史 {packed.length}/10
+            </div>
+            <div style={{ opacity: 0.75 }}>{packed.map(renderRow)}</div>
+          </>
         )}
       </div>
     </div>

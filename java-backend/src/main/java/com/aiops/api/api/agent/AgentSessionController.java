@@ -44,6 +44,8 @@ public class AgentSessionController {
 			m.put("updated_at", s.getUpdatedAt() != null ? s.getUpdatedAt() : s.getCreatedAt());
 			m.put("has_pipeline", s.getLastPipelineJson() != null);
 			m.put("cumulative_tokens", s.getCumulativeTokens());
+			// V86: 打包標記 — 前端分「近期 / 打包歷史」兩區
+			m.put("archived", s.getArchivedAt() != null);
 			return m;
 		}).toList();
 		return ApiResponse.ok(out);

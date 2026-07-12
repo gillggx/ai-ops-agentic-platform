@@ -49,7 +49,28 @@ public class InternalAgentSessionController {
 		if (req.cumulativeTokens() != null) e.setCumulativeTokens(req.cumulativeTokens());
 		if (req.title() != null) e.setTitle(req.title());
 		if (req.expiresAt() != null) e.setExpiresAt(req.expiresAt());
-		return ApiResponse.ok(Dto.of(repository.save(e)));
+		Dto out = Dto.of(repository.save(e));
+		// V86 (2026-07-12) 對話保留政策：近期 >5 則 → 最舊打包（清 rich_history
+		// 只留文字）；打包歷史 >10 則 → 最舊刪除。在對話成形（有 title）的
+		// 寫入點強制，正在寫入的這筆是最新的，不會被打包到。
+		if (e.getTitle() != null) {
+			enforceRetention(req.userId());
+		}
+		return ApiResponse.ok(out);
+	}
+
+	private void enforceRetention(Long userId) {
+		var active = repository.findActiveTitledByUserOldestFirst(userId);
+		for (int i = 0; i < active.size() - 5; i++) {
+			var s = active.get(i);
+			s.setArchivedAt(OffsetDateTime.now());
+			s.setRichHistory(null);
+			repository.save(s);
+		}
+		var archived = repository.findByUserIdAndArchivedAtIsNotNullOrderByArchivedAtAsc(userId);
+		for (int i = 0; i < archived.size() - 10; i++) {
+			repository.delete(archived.get(i));
+		}
 	}
 
 	// `messages` is intentionally not @NotBlank: partial upserts (e.g. just
