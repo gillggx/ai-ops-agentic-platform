@@ -2837,15 +2837,26 @@ export function AIAgentPanel({
                 </div>
               ) : msg.role === "skill_activate" && msg.skillActivate ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <SkillActivateConfirmCard data={msg.skillActivate} />
+                  {/* 跨裝置一致 (2026-07-12)：處理結果寫回訊息資料 → 隨 rich
+                      history 同步 → 別台裝置還原時卡片顯示已處理不可再按。 */}
+                  <SkillActivateConfirmCard data={msg.skillActivate}
+                    onResolved={(patch) => setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.skillActivate
+                        ? { ...m, skillActivate: { ...m.skillActivate, ...patch } } : m))} />
                 </div>
               ) : msg.role === "alarm_action" && msg.alarmAction ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <AlarmActionConfirmCard data={msg.alarmAction} />
+                  <AlarmActionConfirmCard data={msg.alarmAction}
+                    onResolved={(st) => setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.alarmAction
+                        ? { ...m, alarmAction: { ...m.alarmAction, resolved: st } } : m))} />
                 </div>
               ) : msg.role === "skill_admin" && msg.skillAdmin ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <SkillAdminConfirmCard data={msg.skillAdmin} />
+                  <SkillAdminConfirmCard data={msg.skillAdmin}
+                    onResolved={(st) => setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.skillAdmin
+                        ? { ...m, skillAdmin: { ...m.skillAdmin, resolved: st } } : m))} />
                 </div>
               ) : msg.role === "chart_explorer" && msg.flatData && msg.flatMetadata ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>

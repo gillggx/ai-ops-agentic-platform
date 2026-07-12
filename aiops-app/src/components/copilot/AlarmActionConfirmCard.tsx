@@ -16,6 +16,8 @@ export interface AlarmActionData {
   equipment_id?: string | null;
   disposition?: string | null;
   reason?: string | null;
+  /** 跨裝置一致 (2026-07-12)：處理結果隨 rich history 同步，別台裝置不能再按。 */
+  resolved?: "done" | "cancelled";
 }
 
 const ACTION_LABEL: Record<AlarmActionData["action"], string> = {
@@ -24,9 +26,12 @@ const ACTION_LABEL: Record<AlarmActionData["action"], string> = {
   resolve_alarm: "結案告警",
 };
 
-export function AlarmActionConfirmCard({ data }: { data: AlarmActionData }) {
+export function AlarmActionConfirmCard({ data, onResolved }: {
+  data: AlarmActionData;
+  onResolved?: (state: "done" | "cancelled") => void;
+}) {
   const [reason, setReason] = useState(data.reason ?? "");
-  const [state, setState] = useState<"idle" | "working" | "done" | "cancelled" | "error">("idle");
+  const [state, setState] = useState<"idle" | "working" | "done" | "cancelled" | "error">(data.resolved ?? "idle");
   const [msg, setMsg] = useState("");
 
   const target = data.alarm_id
@@ -59,6 +64,7 @@ export function AlarmActionConfirmCard({ data }: { data: AlarmActionData }) {
         throw new Error(env?.error?.message || `HTTP ${res.status}${res.status === 403 ? "（權限不足）" : ""}`);
       }
       setState("done");
+      onResolved?.("done");
     } catch (e) {
       setState("error");
       setMsg(e instanceof Error ? e.message : "失敗");
@@ -104,7 +110,7 @@ export function AlarmActionConfirmCard({ data }: { data: AlarmActionData }) {
       </div>
       {msg && <div style={{ padding: "0 15px 8px", fontSize: 12, color: "#B91C1C" }}>{msg}</div>}
       <div style={{ padding: "10px 15px", borderTop: "1px solid #EEF2F6", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button onClick={() => setState("cancelled")} disabled={state === "working"}
+        <button onClick={() => { setState("cancelled"); onResolved?.("cancelled"); }} disabled={state === "working"}
           style={{ fontSize: 12.5, padding: "7px 14px", borderRadius: 8, border: "1px solid #E2E8F0",
             background: "#fff", color: "#475569", cursor: "pointer" }}>取消</button>
         <button onClick={confirm} disabled={state === "working" || (isDispose && !reason.trim())}

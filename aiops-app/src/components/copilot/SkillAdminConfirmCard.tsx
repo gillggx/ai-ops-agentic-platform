@@ -12,6 +12,9 @@ export interface SkillAdminData {
   slug: string;
   new_name?: string | null;
   new_description?: string | null;
+  /** 跨裝置一致 (2026-07-12)：處理結果寫回訊息資料，隨 rich history 同步 —
+   *  另一台裝置還原時卡片顯示已處理，不會再被按一次（刪除類不可逆）。 */
+  resolved?: "done" | "cancelled";
 }
 
 const LABEL: Record<SkillAdminData["action"], string> = {
@@ -20,11 +23,15 @@ const LABEL: Record<SkillAdminData["action"], string> = {
   rename: "修改 Domain Skill 名稱/描述",
 };
 
-export function SkillAdminConfirmCard({ data }: { data: SkillAdminData }) {
+export function SkillAdminConfirmCard({ data, onResolved }: {
+  data: SkillAdminData;
+  onResolved?: (state: "done" | "cancelled") => void;
+}) {
   const [name, setName] = useState(data.new_name ?? "");
   const [desc, setDesc] = useState(data.new_description ?? "");
-  const [state, setState] = useState<"idle" | "working" | "done" | "cancelled" | "error">("idle");
+  const [state, setState] = useState<"idle" | "working" | "done" | "cancelled" | "error">(data.resolved ?? "idle");
   const [msg, setMsg] = useState("");
+  const resolve = (s: "done" | "cancelled") => { setState(s); onResolved?.(s); };
 
   const confirm = async () => {
     setState("working"); setMsg("");
@@ -49,7 +56,7 @@ export function SkillAdminConfirmCard({ data }: { data: SkillAdminData }) {
         const env = await res.json().catch(() => ({}));
         throw new Error(env?.error?.message || `HTTP ${res.status}`);
       }
-      setState("done");
+      resolve("done");
     } catch (e) {
       setState("error"); setMsg(e instanceof Error ? e.message : "失敗");
     }
@@ -84,7 +91,7 @@ export function SkillAdminConfirmCard({ data }: { data: SkillAdminData }) {
       )}
       {msg && <div style={{ padding: "8px 15px 0", fontSize: 12, color: "#B91C1C" }}>{msg}</div>}
       <div style={{ padding: "10px 15px", borderTop: "1px solid #EEF2F6", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button onClick={() => setState("cancelled")} disabled={state === "working"}
+        <button onClick={() => resolve("cancelled")} disabled={state === "working"}
           style={{ fontSize: 12.5, padding: "7px 14px", borderRadius: 8, border: "1px solid #E2E8F0",
                    background: "#fff", color: "#475569", cursor: "pointer" }}>取消</button>
         <button onClick={confirm} disabled={state === "working"}

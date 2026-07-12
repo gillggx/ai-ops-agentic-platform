@@ -33,15 +33,22 @@ export interface SkillActivateConfirmData {
   param_candidates?: SkillParamCandidate[];
   /** AIAgentPanel threads the user's original prompt as a description fallback. */
   goal?: string;
+  /** 跨裝置一致 (2026-07-12)：處理結果隨 rich history 同步，別台裝置不能再按。 */
+  resolved?: "done" | "cancelled";
+  resolvedSlug?: string;
+  resolvedName?: string;
 }
 
-export function SkillActivateConfirmCard({ data }: { data: SkillActivateConfirmData }) {
+export function SkillActivateConfirmCard({ data, onResolved }: {
+  data: SkillActivateConfirmData;
+  onResolved?: (patch: { resolved: "done" | "cancelled"; resolvedSlug?: string; resolvedName?: string }) => void;
+}) {
   const [name, setName] = useState(
-    data.suggested_name || (data.pipeline_json?.name as string) || "");
+    data.resolvedName || data.suggested_name || (data.pipeline_json?.name as string) || "");
   const [desc, setDesc] = useState(data.suggested_description || data.goal || "");
-  const [state, setState] = useState<"idle" | "working" | "done" | "cancelled" | "error">("idle");
+  const [state, setState] = useState<"idle" | "working" | "done" | "cancelled" | "error">(data.resolved ?? "idle");
   const [msg, setMsg] = useState("");
-  const [doneSlug, setDoneSlug] = useState("");
+  const [doneSlug, setDoneSlug] = useState(data.resolvedSlug ?? "");
   const candidates = data.param_candidates ?? [];
   // 裁決 (2026-07-10): 無衝突的預設全勾（有預設值，行為不變）；同 key 不同值
   // 的衝突候選預設不勾，勾了就統一成一個欄位。
@@ -111,6 +118,7 @@ export function SkillActivateConfirmCard({ data }: { data: SkillActivateConfirmD
       }
       setDoneSlug(slug);
       setState("done");
+      onResolved?.({ resolved: "done", resolvedSlug: slug, resolvedName: finalName });
     } catch (e) {
       setState("error");
       setMsg(e instanceof Error ? e.message : "失敗");
@@ -196,7 +204,7 @@ export function SkillActivateConfirmCard({ data }: { data: SkillActivateConfirmD
       </div>
       {msg && <div style={{ padding: "0 15px 8px", fontSize: 12, color: "#B91C1C" }}>{msg}</div>}
       <div style={{ padding: "11px 15px", borderTop: "1px solid #EEF2F6", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button onClick={() => setState("cancelled")} disabled={state === "working"}
+        <button onClick={() => { setState("cancelled"); onResolved?.({ resolved: "cancelled" }); }} disabled={state === "working"}
           style={{ fontSize: 12.5, padding: "7px 14px", borderRadius: 8,
             border: "1px solid #E2E8F0", background: "#fff", color: "#475569", cursor: "pointer" }}>
           取消
