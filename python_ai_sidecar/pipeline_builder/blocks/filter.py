@@ -16,7 +16,7 @@ from python_ai_sidecar.pipeline_builder.path import get_column_series
 
 # 2026-05-13: accept `=` as an alias of `==`. LLMs trained on SQL use `=`;
 # trained on Python/JS use `==`. Same semantics either way.
-_OPERATORS = {"==", "=", "!=", ">", "<", ">=", "<=", "contains", "in"}
+_OPERATORS = {"==", "=", "!=", ">", "<", ">=", "<=", "contains", "in", "not_in"}
 
 
 def _apply_op(series: pd.Series, op: str, value: Any) -> pd.Series:
@@ -34,13 +34,17 @@ def _apply_op(series: pd.Series, op: str, value: Any) -> pd.Series:
         return pd.to_numeric(series, errors="coerce") <= value
     if op == "contains":
         return series.astype(str).str.contains(str(value), na=False)
-    if op == "in":
+    if op in ("in", "not_in"):
+        # 逗號字串寬容（同 sort 慣例）："A, B" → ["A", "B"]
+        if isinstance(value, str) and "," in value:
+            value = [v.strip() for v in value.split(",") if v.strip()]
         if not isinstance(value, (list, tuple)):
             raise BlockExecutionError(
                 code="INVALID_PARAM",
-                message="'in' operator requires a list value",
+                message=f"'{op}' operator requires a list value（或逗號分隔字串）",
             )
-        return series.isin(value)
+        mask = series.isin(value)
+        return ~mask if op == "not_in" else mask
     raise BlockExecutionError(code="INVALID_PARAM", message=f"Unsupported operator: {op}")
 
 

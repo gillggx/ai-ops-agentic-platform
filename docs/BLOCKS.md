@@ -2256,7 +2256,7 @@ expression  (object, 必填) expression tree，節點三種：
 Comparison: eq ne gt gte lt lte
 Logical:    and or not
 Set:        in not_in     (第二參數為 list)
-Arithmetic: add sub mul div abs（abs 單一 operand）
+Arithmetic: add sub mul div abs round（abs 單元；round 為 [值, 小數位數(選填)]，例 {op:'round', operands:[{column:'v'}, 2]}）
 Cast:       as_int as_float as_str as_bool
 Null:       coalesce is_null is_not_null
 String:     concat（operands 逐個轉字串相接，例 {op:'concat', operands:[{column:'toolID'}, '-', {column:'step'}]}）
@@ -2449,7 +2449,7 @@ port: data (dataframe) — 原 df 加 `<value_column>_ewma` 欄位
 
 == Params ==
 column   (string, required) 要比較的欄位
-operator (string, required) == (or =), !=, >, <, >=, <=, contains, in (`=` is alias for `==`)
+operator (string, required) == (or =), !=, >, <, >=, <=, contains, in, not_in (`=` alias `==`；in/not_in 吃 list 或逗號字串)
 value    (any, required) 比較值；operator='in' 時必須是 list；'contains' 作 substring 比對（string only）
 conditions (array, opt) 多條件一顆搞定：[{column, operator, value}, ...] + logic='and'|'or'（預設 and）。
            給了 conditions 就忽略單數參數。例：EQP-02 且 OOC → conditions=[{column:'toolID',operator:'==',value:'EQP-02'},{column:'spc_status',operator:'==',value:'OOC'}]
@@ -2485,7 +2485,7 @@ set_param 寫錯會丟 COLUMN_NOT_IN_UPSTREAM；hint 會列真實 columns。
 | `column` | string |  |  |
 | `conditions` | array |  | 多條件（給了就忽略單數參數） |
 | `logic` | string |  | 可選：and, or |
-| `operator` | string |  | 可選：==, =, !=, >, <, >=, <=, contains, in |
+| `operator` | string |  | 可選：==, =, !=, >, <, >=, <=, contains, in, not_in |
 | `value` | any |  |  |
 
 ## block_find

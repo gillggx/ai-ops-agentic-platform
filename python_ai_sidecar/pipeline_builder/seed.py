@@ -421,7 +421,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Params ==\n"
                 "column   (string, required) 要比較的欄位\n"
-                "operator (string, required) == (or =), !=, >, <, >=, <=, contains, in (`=` is alias for `==`)\n"
+                "operator (string, required) == (or =), !=, >, <, >=, <=, contains, in, not_in (`=` alias `==`；in/not_in 吃 list 或逗號字串)\n"
                 "value    (any, required) 比較值；operator='in' 時必須是 list；'contains' 作 substring 比對（string only）\n"
                 "conditions (array, opt) 多條件一顆搞定：[{column, operator, value}, ...] + logic='and'|'or'（預設 and）。\n"
                 "           給了 conditions 就忽略單數參數。例：EQP-02 且 OOC → conditions=[{column:'toolID',operator:'==',value:'EQP-02'},{column:'spc_status',operator:'==',value:'OOC'}]\n"
@@ -464,7 +464,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "logic": {"type": "string", "enum": ["and", "or"], "default": "and"},
                     "operator": {
                         "type": "string",
-                        "enum": ["==", "=", "!=", ">", "<", ">=", "<=", "contains", "in"],
+                        "enum": ["==", "=", "!=", ">", "<", ">=", "<=", "contains", "in", "not_in"],
                     },
                     "value":    {},
                 },

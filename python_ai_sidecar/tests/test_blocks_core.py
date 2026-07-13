@@ -112,6 +112,19 @@ async def test_filter_multi_conditions_and_or(df):
 
 
 @pytest.mark.asyncio
+async def test_filter_not_in(df):
+    out = (await run(FilterBlockExecutor(),
+                     {"column": "toolID", "operator": "not_in", "value": ["EQP-01"]}, df))["data"]
+    assert set(out.toolID) == {"EQP-02"} and len(out) == 3
+    # 逗號字串寬容 + 多條件裡用 not_in
+    out = (await run(FilterBlockExecutor(), {"conditions": [
+        {"column": "toolID", "operator": "not_in", "value": "EQP-01, EQP-99"},
+        {"column": "spc_status", "operator": "==", "value": "OOC"},
+    ], "logic": "and"}, df))["data"]
+    assert len(out) == 2
+
+
+@pytest.mark.asyncio
 async def test_filter_single_condition_backcompat(df):
     out = (await run(FilterBlockExecutor(),
                      {"column": "spc_status", "operator": "==", "value": "OOC"}, df))["data"]

@@ -51,7 +51,7 @@ const xBtnStyle: React.CSSProperties = {
 const rowStyle: React.CSSProperties = { display: "flex", gap: 4, alignItems: "center" };
 
 // ── filter.conditions ────────────────────────────────────────────────────
-const FILTER_OPS = ["==", "!=", ">", "<", ">=", "<=", "contains", "in"];
+const FILTER_OPS = ["==", "!=", ">", "<", ">=", "<=", "contains", "in", "not_in"];
 
 type Cond = { column: string; operator: string; value: string };
 
@@ -70,7 +70,7 @@ export function ConditionsEditor(p: EditorProps) {
     setRows(next.length ? next : [{ column: "", operator: "==", value: "" }]);
     const out = next.filter((r) => r.column.trim()).map((r) => ({
       column: r.column.trim(), operator: r.operator,
-      value: r.operator === "in"
+      value: (r.operator === "in" || r.operator === "not_in")
         ? (() => { try { return JSON.parse(r.value); } catch { return r.value.split(",").map((s) => coerceLit(s)); } })()
         : coerceLit(r.value),
     }));
@@ -90,7 +90,7 @@ export function ConditionsEditor(p: EditorProps) {
             {FILTER_OPS.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
           <input type="text" value={r.value} disabled={p.disabled}
-            placeholder={r.operator === "in" ? "值1, 值2, …" : "值"}
+            placeholder={(r.operator === "in" || r.operator === "not_in") ? "值1, 值2, …" : "值"}
             onChange={(e) => sync(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
             style={{ ...p.commonStyle, borderColor: p.borderColor, flex: 1 }} />
           <button type="button" style={xBtnStyle} disabled={p.disabled || rows.length <= 1}
