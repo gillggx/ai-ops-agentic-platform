@@ -33,7 +33,7 @@ await page.keyboard.press("Enter");
 log("build request sent, waiting for plan card…");
 
 // wait for plan confirm button
-const confirmBtn = page.locator('button:has-text("確認，開始建構"), button:has-text("開始建構")').first();
+const confirmBtn = page.locator('button:has-text("確認，開始建構"), button:has-text("開始建構"), button:has-text("確認してビルド開始")').first();
 await confirmBtn.waitFor({ timeout: 180000 });
 await page.screenshot({ path: `${OUT}/qa_p2_plan.png` });
 await confirmBtn.click();

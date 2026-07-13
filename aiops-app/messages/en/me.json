@@ -8,5 +8,27 @@
   "deleteConfirm": "Delete this preference?",
   "learnedAt": "Learned",
   "active": "Active",
-  "disabled": "Disabled"
+  "disabled": "Disabled",
+  "prefs": {
+    "pageTitle": "My Preferences",
+    "pageSubtitle": "The agent carries these preferences into every conversation (the index line is its recall cue). Saying “remember: …” in chat adds one here after you confirm; ask “what do you remember about me” anytime to audit.",
+    "loading": "Loading…",
+    "loadFail": "Failed to load",
+    "saveFail": "Failed to save",
+    "emptyHint": "No preferences yet — try telling the agent “remember: I always look at 7 days”, or add one below.",
+    "applyBoth": "Both",
+    "applyPlan": "When building",
+    "applyExecute": "When answering",
+    "usedTimes": "Recalled {n} times",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this preference? The agent will stop applying it.",
+    "addNew": "＋ Add preference",
+    "indexLabel": "Index line (when should the agent recall this)",
+    "bodyLabel": "Full content",
+    "applyLabel": "Applies to",
+    "cancel": "Cancel",
+    "save": "Save",
+    "validate": "Index line and content are both required"
+  }
 }

@@ -8,5 +8,27 @@
   "deleteConfirm": "删除这条偏好？",
   "learnedAt": "学到于",
   "active": "生效中",
-  "disabled": "已停用"
+  "disabled": "已停用",
+  "prefs": {
+    "pageTitle": "我的偏好",
+    "pageSubtitle": "Agent 每次对话都会带着这些偏好（索引行是它想起这件事的线索）。在对话里说“记住：…”确认后也会加到这里；直接问它“你记得我什么”可以随时对账。",
+    "loading": "加载中…",
+    "loadFail": "加载失败",
+    "saveFail": "保存失败",
+    "emptyHint": "还没有偏好——在对话说“记住：我都看 7 天”试试，或按下面“新增偏好”。",
+    "applyBoth": "都适用",
+    "applyPlan": "建图时",
+    "applyExecute": "回答呈现",
+    "usedTimes": "被想起 {n} 次",
+    "edit": "编辑",
+    "delete": "删除",
+    "deleteConfirm": "删除这条偏好？agent 之后不会再套用它。",
+    "addNew": "＋ 新增偏好",
+    "indexLabel": "索引行（什么情境该想起这件事）",
+    "bodyLabel": "完整内容",
+    "applyLabel": "适用",
+    "cancel": "取消",
+    "save": "保存",
+    "validate": "索引行与内文都不能空白"
+  }
 }

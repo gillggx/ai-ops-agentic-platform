@@ -8,5 +8,27 @@
   "deleteConfirm": "刪除這筆偏好？",
   "learnedAt": "學到於",
   "active": "生效中",
-  "disabled": "已停用"
+  "disabled": "已停用",
+  "prefs": {
+    "pageTitle": "我的偏好",
+    "pageSubtitle": "Agent 每次對話都會帶著這些偏好（索引行是它想起這件事的線索）。在對話裡說「記住：…」確認後也會加到這裡；直接問它「你記得我什麼」可以隨時對帳。",
+    "loading": "載入中…",
+    "loadFail": "載入失敗",
+    "saveFail": "儲存失敗",
+    "emptyHint": "還沒有偏好——在對話說「記住：我都看 7 天」試試，或按下面「新增偏好」。",
+    "applyBoth": "都適用",
+    "applyPlan": "建圖時",
+    "applyExecute": "回答呈現",
+    "usedTimes": "被想起 {n} 次",
+    "edit": "編輯",
+    "delete": "刪除",
+    "deleteConfirm": "刪除這條偏好？agent 之後不會再套用它。",
+    "addNew": "＋ 新增偏好",
+    "indexLabel": "索引行（什麼情境該想起這件事）",
+    "bodyLabel": "完整內容",
+    "applyLabel": "適用",
+    "cancel": "取消",
+    "save": "儲存",
+    "validate": "索引行與內文都不能空白"
+  }
 }
