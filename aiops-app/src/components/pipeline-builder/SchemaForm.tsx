@@ -18,6 +18,9 @@ import type { ColumnsByPort } from "@/context/pipeline-builder/useUpstreamColumn
 import { FieldsEditor } from "@/components/pipeline-builder/FieldsEditor";
 import { SortColumnsEditor } from "@/components/pipeline-builder/SortColumnsEditor";
 import { ComputeExpressionEditor } from "@/components/pipeline-builder/ComputeExpressionEditor";
+import {
+  AggregationsEditor, ConditionsEditor, JsonFallbackEditor, KeyValueEditor, RulesEditor,
+} from "@/components/pipeline-builder/GuidedParamEditors";
 
 
 /** Module-level cache so we don't re-fetch suggestions for every keystroke */
@@ -469,6 +472,32 @@ function renderWidget({
         upstreamColumns={upstreamColumns}
       />
     );
+  }
+
+  // 2026-07-13（user：「積木不該讓人寫 code/編 JSON」）— 全平台掃描 20 個
+  // JSON-hostile 參數的引導式編輯器。觸發全 shape/name-based：
+  const editorProps = { name, value, onChange, disabled, borderColor, commonStyle, upstreamColumns };
+  if (name === "conditions" && prop.type === "array") {
+    return <ConditionsEditor {...editorProps} />;
+  }
+  if (name === "aggregations" && prop.type === "array") {
+    return <AggregationsEditor {...editorProps} />;
+  }
+  if (name === "rules" && prop.type === "array") {
+    return <RulesEditor {...editorProps} />;
+  }
+  if (prop.type === "object" && ["args", "args_template", "style"].includes(name)) {
+    return <KeyValueEditor {...editorProps}
+      hint={name === "style" ? "chart 樣式細項（一般由 agent 設；鍵名見 block 文件）"
+            : "MCP 呼叫參數（鍵名見該 MCP 的 input schema）"} />;
+  }
+  if (prop.type === "object") {
+    // 其餘 object 參數：誠實 JSON 編輯器（之前掉到字串框連格式都會壞）
+    return <JsonFallbackEditor {...editorProps} />;
+  }
+  if (prop.type === "array" && ["values", "subgroups", "matrix", "maps"].includes(name)) {
+    return <JsonFallbackEditor {...editorProps}
+      hint="此參數通常由上游資料供給 — 手填僅供測試" />;
   }
 
   switch (prop.type) {
