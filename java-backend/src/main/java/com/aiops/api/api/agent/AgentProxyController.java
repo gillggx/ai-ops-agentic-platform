@@ -84,8 +84,11 @@ public class AgentProxyController {
 		// 2026-07-08 modify-mode: forward per-node output columns so the
 		// sidecar Coordinator can build a column-aware situation report.
 		Map<String, Object> pipelineColumns = pickMapAlias(body, "pipelineColumns", "pipeline_columns");
+		@SuppressWarnings("unchecked")
+		java.util.List<String> images = body.get("images") instanceof java.util.List<?> l
+				? (java.util.List<String>) l : null;
 		AgentProxyDtos.ChatRequest req = new AgentProxyDtos.ChatRequest(
-				message, sessionId, clientContext, mode, pipelineSnapshot, pipelineColumns);
+				message, sessionId, clientContext, mode, pipelineSnapshot, pipelineColumns, images);
 		return sseBridge.bridge(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
 	}
 

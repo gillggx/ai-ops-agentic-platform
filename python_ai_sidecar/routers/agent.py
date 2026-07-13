@@ -50,6 +50,9 @@ class ChatRequest(BaseModel):
     # opening message — same context the Glass Box subsession used to get
     # via /agent/build's pipelineSnapshot param.
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
+    # P3 (2026-07-13) 貼圖溝通：data URL 圖片（前端已縮到 ≤1280px JPEG）。
+    # 只當輪送模型判讀，不落庫（Q2 裁決）；縮圖另存前端 rich history。
+    images: list[str] | None = Field(default=None)
     # 2026-07-08 modify-mode: per-node output columns of the on-screen
     # pipeline (from the last card's node_results), so the Coordinator
     # situation report knows what a tooltip/field can resolve to without a
@@ -167,6 +170,7 @@ async def _chat_stream_agent_loop(req: ChatRequest, caller: CallerContext) -> As
             session_id=sid,
             pipeline_snapshot=req.pipeline_snapshot,
             pipeline_columns=req.pipeline_columns,
+            images=req.images,
         ):
             if v1_event.get("type") == "synthesis":
                 final_text = str(v1_event.get("text") or final_text)

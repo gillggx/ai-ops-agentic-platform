@@ -807,6 +807,7 @@ async def run_chat_agent(
     *, message: str, history: List[Dict[str, Any]], java: Any, user_id: int,
     session_id: str = "", pipeline_snapshot: Dict[str, Any] | None = None,
     pipeline_columns: Dict[str, Any] | None = None,
+    images: List[str] | None = None,
 ) -> AsyncIterator[Dict[str, Any]]:
     """Anthropic tool-use loop. Yields v1-style SSE events; a tool may stream
     its own events (e.g. a pb_pipeline card) before returning its result. The
@@ -815,7 +816,23 @@ async def run_chat_agent(
     client = get_llm_client()
     ctx = {"java": java, "user_id": user_id, "session_id": session_id or "chat",
            "pipeline_snapshot": pipeline_snapshot, "pipeline_columns": pipeline_columns}
-    messages: List[Dict[str, Any]] = list(history) + [{"role": "user", "content": message}]
+    # P3 (2026-07-13) 貼圖：把 data URL 轉成 Anthropic image block，跟文字
+    # 同一則 user message。上限 3 張防 context 爆量；壞格式靜默略過（文字照送）。
+    user_content: Any = message
+    if images:
+        import re as _re
+        blocks: List[Dict[str, Any]] = []
+        for img in images[:3]:
+            m = _re.match(r"data:(image/(?:png|jpeg|jpg|webp|gif));base64,(.+)$",
+                          img or "", _re.DOTALL)
+            if m:
+                media = "image/jpeg" if m.group(1) == "image/jpg" else m.group(1)
+                blocks.append({"type": "image", "source": {
+                    "type": "base64", "media_type": media, "data": m.group(2)}})
+        if blocks:
+            blocks.append({"type": "text", "text": message})
+            user_content = blocks
+    messages: List[Dict[str, Any]] = list(history) + [{"role": "user", "content": user_content}]
 
     # Make the model AWARE of the on-screen pipeline — without this it doesn't
     # know a chart exists, so「設自動化」/「改一下」get a "先建一張" instead of a

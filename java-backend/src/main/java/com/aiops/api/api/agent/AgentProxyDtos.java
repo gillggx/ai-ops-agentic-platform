@@ -24,7 +24,9 @@ public final class AgentProxyDtos {
 	                          // node_results) — lets the sidecar Coordinator build
 	                          // a column-aware situation report without a harvest
 	                          // re-execute. {node_id: [col, ...]}.
-	                          Map<String, Object> pipelineColumns) {}
+	                          Map<String, Object> pipelineColumns,
+	                          // P3 (2026-07-13) 貼圖：data URL 圖片，透傳 sidecar。
+	                          java.util.List<String> images) {}
 
 	public record BuildRequest(@NotBlank String instruction,
 	                           Long pipelineId,

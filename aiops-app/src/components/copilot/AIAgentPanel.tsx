@@ -76,6 +76,30 @@ function deriveDraftKind(pj: { nodes?: Array<{ block_id?: string }> } | undefine
   return "";
 }
 
+/** P3 貼圖 (2026-07-13)：canvas 縮圖。send ≤1280px（送模型判讀，不落庫）、
+ *  thumb ≤320px（進對話紀錄，跨裝置可見）。非圖片回 null。 */
+async function downscaleImage(file: Blob): Promise<{ send: string; thumb: string } | null> {
+  if (!file.type.startsWith("image/")) return null;
+  try {
+    const bmp = await createImageBitmap(file);
+    const enc = (maxDim: number, q: number): string => {
+      const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(bmp.width * scale));
+      c.height = Math.max(1, Math.round(bmp.height * scale));
+      const g = c.getContext("2d");
+      if (!g) throw new Error("canvas 2d unavailable");
+      g.drawImage(bmp, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", q);
+    };
+    const out = { send: enc(1280, 0.82), thumb: enc(320, 0.72) };
+    bmp.close();
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /** 草稿暫存區 (V78): auto-park a chat-built pipeline. Fire-and-forget —
  *  a draft-save failure must never disrupt the chat. Dedupe by node signature
  *  so the same pipeline re-rendering doesn't create duplicate drafts. */
@@ -222,6 +246,8 @@ interface ChatMessage {
   knowledgeAdmin?: KnowledgeAdminData;
   memoryRemember?: MemoryRememberData;
   buildFailed?: BuildFailedState;
+  /** P3 貼圖：使用者訊息附的縮圖（隨 rich history 跨裝置）。 */
+  imageThumbs?: string[];
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -737,6 +763,17 @@ export function AIAgentPanel({
   // (useCallback closures) can compose translated agent messages.
   const t = useTranslations("agentPanel");
   const [input, setInput]           = useState("");
+  // P3 貼圖 (2026-07-13)：待送圖片（send=給模型的 1280px；thumb=進紀錄的 320px）
+  const [pendingImages, setPendingImages] = useState<Array<{ send: string; thumb: string }>>([]);
+  const pendingImagesRef = useRef<Array<{ send: string; thumb: string }>>([]);
+  useEffect(() => { pendingImagesRef.current = pendingImages; }, [pendingImages]);
+  const addImageFiles = useCallback(async (files: Iterable<File | Blob>) => {
+    for (const f of files) {
+      if (pendingImagesRef.current.length >= 3) break;
+      const img = await downscaleImage(f);
+      if (img) setPendingImages((prev) => (prev.length >= 3 ? prev : [...prev, img]));
+    }
+  }, []);
   const [loading, setLoading]       = useState(false);
   const [stages, setStages]         = useState<StageState[]>([]);
   // Live role banner (Director / Planner / Builder) while the agent-loop
@@ -1267,7 +1304,9 @@ export function AIAgentPanel({
     message: string,
     extraContext?: Record<string, unknown>,
   ) => {
-    if (!message.trim() || loading) return;
+    const imagesToSend = pendingImagesRef.current;
+    if ((!message.trim() && imagesToSend.length === 0) || loading) return;
+    if (!message.trim()) message = "請看這張圖";
 
     // Phase 5-UX-5: prepend focus context so LLM knows which node the
     // user's question targets. Focus persists across turns until cleared.
@@ -1284,6 +1323,7 @@ export function AIAgentPanel({
     if (!isInternalFollowUp) lastUserPromptRef.current = message;
 
     setLoading(true);
+    if (imagesToSend.length) setPendingImages([]);
     setStages([]);
     setLogs([]);
     setHitl(null);
@@ -1301,7 +1341,10 @@ export function AIAgentPanel({
     setActiveTab("chat");
 
     if (!isInternalFollowUp) {
-      setChatHistory((prev) => [...prev, { id: nextId(), role: "user", content: message }]);
+      setChatHistory((prev) => [...prev, {
+        id: nextId(), role: "user", content: message,
+        ...(imagesToSend.length ? { imageThumbs: imagesToSend.map((i) => i.thumb) } : {}),
+      }]);
     }
     onUserMessageSent?.(message);
 
@@ -1341,6 +1384,7 @@ export function AIAgentPanel({
         body: JSON.stringify({
           message: messageToSend,
           session_id: sessionIdRef.current,
+          ...(imagesToSend.length ? { images: imagesToSend.map((i) => i.send) } : {}),
           ...(Object.keys(clientContext).length > 0 ? { client_context: clientContext } : {}),
           // Phase E2: tell backend whether we're in chat or builder context
           // so the orchestrator's mode-aware system prompt section kicks in.
@@ -3041,6 +3085,16 @@ export function AIAgentPanel({
                   {msg.role === "user" ? (
                     /* §3.1 — 淡色泡 + context tag chip；內部 tag 不顯示 */
                     <div style={userBubbleStyle}>
+                      {msg.imageThumbs && msg.imageThumbs.length > 0 && (
+                        <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                          {msg.imageThumbs.map((t, i) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img key={i} src={t} alt="attached"
+                              style={{ maxWidth: 180, maxHeight: 130, borderRadius: 8,
+                                       border: "1px solid rgba(0,0,0,0.12)" }} />
+                          ))}
+                        </div>
+                      )}
                       {renderUserContent(msg.content)}
                     </div>
                   ) : (
@@ -3207,9 +3261,54 @@ export function AIAgentPanel({
           onClose={() => setSlashOpen(false)}
           registerKeyHandler={(h) => { slashKeyHandlerRef.current = h; }}
         />
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        {pendingImages.length > 0 && (
+          <div style={{ display: "flex", gap: 6, padding: "4px 0 6px", flexWrap: "wrap" }}>
+            {pendingImages.map((img, i) => (
+              <span key={i} style={{ position: "relative", display: "inline-block" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img.thumb} alt="pending"
+                  style={{ height: 52, borderRadius: 7, border: "1px solid #e2e8f0", display: "block" }} />
+                <button onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                  title="移除" style={{
+                    position: "absolute", top: -6, right: -6, width: 18, height: 18,
+                    borderRadius: "50%", border: "none", cursor: "pointer",
+                    background: "#1a1d29", color: "#fff", fontSize: 10, lineHeight: "18px", padding: 0,
+                  }}>✕</button>
+              </span>
+            ))}
+            <span style={{ fontSize: 10.5, color: "#8b90a7", alignSelf: "center" }}>
+              圖片只在這一輪給 agent 看（對話紀錄留縮圖）
+            </span>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
+             onDragOver={(e) => { e.preventDefault(); }}
+             onDrop={(e) => {
+               e.preventDefault();
+               const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+               if (files.length) void addImageFiles(files);
+             }}>
+          <label title="附加圖片（也可直接貼上/拖放）" style={{
+            alignSelf: "center", cursor: "pointer", flexShrink: 0,
+            width: 34, height: 34, borderRadius: 8, border: "1px solid #e2e8f0",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#5b6070", fontSize: 15, background: "#fff",
+          }}>▣
+            <input type="file" accept="image/*" multiple style={{ display: "none" }}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                if (files.length) void addImageFiles(files);
+                e.target.value = "";
+              }} />
+          </label>
           <textarea
             ref={inputRef}
+            onPaste={(e) => {
+              const items = Array.from(e.clipboardData?.items ?? [])
+                .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+                .map((it) => it.getAsFile()).filter(Boolean) as File[];
+              if (items.length) { e.preventDefault(); void addImageFiles(items); }
+            }}
             value={input}
             onChange={(e) => {
               const v = e.target.value;
@@ -3249,10 +3348,10 @@ export function AIAgentPanel({
           />
           <button
             onClick={() => sendMessage(input)}
-            disabled={loading || !input.trim()}
+            disabled={loading || (!input.trim() && pendingImages.length === 0)}
             style={{
-              background: loading || !input.trim() ? "#e2e8f0" : "var(--p, #2b6cb0)",
-              color: loading || !input.trim() ? "#a0aec0" : "#fff",
+              background: loading || (!input.trim() && pendingImages.length === 0) ? "#e2e8f0" : "var(--p, #2b6cb0)",
+              color: loading || (!input.trim() && pendingImages.length === 0) ? "#a0aec0" : "#fff",
               border: "none",
               borderRadius: 8,
               padding: "9px 16px",
