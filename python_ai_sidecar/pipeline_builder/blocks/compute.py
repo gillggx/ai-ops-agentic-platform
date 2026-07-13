@@ -135,6 +135,13 @@ def _dispatch(op: str, args: list[Any]) -> Any:
         v = args[0]
         return v.notna() if isinstance(v, pd.Series) else v is not None
 
+    if op == "round":
+        if len(args) not in (1, 2):
+            raise BlockExecutionError(
+                code="INVALID_PARAM", message="round 需要 1-2 個 operands：[值, 小數位數(選填，預設 0)]")
+        digits = int(args[1]) if len(args) == 2 else 0
+        v = _numeric(args[0])
+        return v.round(digits) if isinstance(v, pd.Series) else round(v, digits)
     if op == "abs":
         if len(args) != 1:
             raise BlockExecutionError(code="INVALID_PARAM", message="abs 需要 1 個 operand")

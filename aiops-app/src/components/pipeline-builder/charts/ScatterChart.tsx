@@ -190,10 +190,13 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
         x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1],
         stroke: '#8b6ecb', 'stroke-width': 1.8, 'stroke-dasharray': '7 4',
       }, svg);
+      // user 需求 (2026-07-13)：slope 也要顯示在圖上（不只 R²）
+      const slopeTxt = Math.abs(reg.slope) >= 100 ? reg.slope.toFixed(0)
+        : Math.abs(reg.slope) >= 1 ? reg.slope.toFixed(2) : reg.slope.toFixed(4);
       el('text', {
         x: pts[1][0] - 4, y: pts[1][1] - 6, 'text-anchor': 'end',
         class: 'axis-label', fill: '#8b6ecb',
-        text: `R²=${reg.r2.toFixed(3)}`,
+        text: `slope=${slopeTxt} ・ R²=${reg.r2.toFixed(3)}`,
       }, svg);
     }
   }
