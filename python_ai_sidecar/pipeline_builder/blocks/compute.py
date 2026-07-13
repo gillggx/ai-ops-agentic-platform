@@ -135,6 +135,29 @@ def _dispatch(op: str, args: list[Any]) -> Any:
         v = args[0]
         return v.notna() if isinstance(v, pd.Series) else v is not None
 
+    # B1 (2026-07-13, user 回報)：concat / if 是常見需求但一直缺席。
+    if op == "concat":
+        parts = [a.astype(str) if isinstance(a, pd.Series) else str(a) for a in args]
+        if not parts:
+            raise BlockExecutionError(code="INVALID_PARAM", message="concat 需要至少 1 個 operand")
+        out = parts[0]
+        for nxt in parts[1:]:
+            out = out + nxt
+        return out
+    if op == "if":
+        if len(args) != 3:
+            raise BlockExecutionError(
+                code="INVALID_PARAM",
+                message="if 需要 3 個 operands：[條件, 成立值, 不成立值]")
+        cond, then_v, else_v = args
+        n = next((len(a) for a in args if isinstance(a, pd.Series)), None)
+        if n is None:
+            return then_v if _asbool(cond) else else_v
+        import numpy as np
+        c = _asbool(cond) if isinstance(cond, pd.Series) else pd.Series([bool(cond)] * n)
+        t = then_v if isinstance(then_v, pd.Series) else pd.Series([then_v] * n)
+        e = else_v if isinstance(else_v, pd.Series) else pd.Series([else_v] * n)
+        return pd.Series(np.where(c.values, t.values, e.values))
     raise BlockExecutionError(code="UNSUPPORTED_OP", message=f"Unknown op '{op}'")
 
 
@@ -183,7 +206,12 @@ class ComputeBlockExecutor(BlockExecutor):
                 code="INVALID_INPUT",
                 message="'data' input must be a DataFrame",
             )
-        column = self.require(params, "column")
+        if not params.get("column"):
+            raise BlockExecutionError(
+                code="PARAM_MISSING",
+                message="缺 'column' — 注意：這是「產出的新欄位名稱」（不是來源欄位）。"
+                        "來源欄位寫在 expression 的 {column: '...'} 節點裡。")
+        column = params["column"]
         expression = self.require(params, "expression")
 
         result = _eval(expression, df)

@@ -44,6 +44,17 @@ def _apply_op(series: pd.Series, op: str, value: Any) -> pd.Series:
     raise BlockExecutionError(code="INVALID_PARAM", message=f"Unsupported operator: {op}")
 
 
+def _series_for(df: pd.DataFrame, column: str) -> pd.Series:
+    try:
+        return get_column_series(df, column)
+    except KeyError:
+        raise BlockExecutionError(
+            code="COLUMN_NOT_FOUND",
+            message=f"Column path '{column}' not found",
+            hint=f"Available top-level columns: {list(df.columns)[:10]}",
+        ) from None
+
+
 class FilterBlockExecutor(BlockExecutor):
     block_id = "block_filter"
 
@@ -60,6 +71,27 @@ class FilterBlockExecutor(BlockExecutor):
                 code="INVALID_INPUT",
                 message="'data' input must be a DataFrame",
             )
+
+        # B2 (2026-07-13, user 回報)：多條件過濾 — 之前一顆 block 一個條件，
+        # 兩個條件要串兩顆。conditions=[{column,operator,value},...] + logic
+        # (and|or)。給了 conditions 就忽略單數參數；單數形式照舊（向下相容）。
+        conditions = params.get("conditions")
+        if isinstance(conditions, list) and conditions:
+            logic = str(params.get("logic") or "and").lower()
+            if logic not in ("and", "or"):
+                raise BlockExecutionError(
+                    code="INVALID_PARAM", message="logic must be 'and' or 'or'")
+            mask = None
+            for i, cond in enumerate(conditions):
+                if not isinstance(cond, dict) or not cond.get("column") or not cond.get("operator"):
+                    raise BlockExecutionError(
+                        code="INVALID_PARAM",
+                        message=f"conditions[{i}] 需要 {{column, operator, value}}")
+                m = _apply_op(
+                    _series_for(df, str(cond["column"])),
+                    str(cond["operator"]), cond.get("value"))
+                mask = m if mask is None else (mask & m if logic == "and" else mask | m)
+            return {"data": df[mask].reset_index(drop=True)}
 
         column = self.require(params, "column")
         op = self.require(params, "operator")

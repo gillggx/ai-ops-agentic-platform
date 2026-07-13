@@ -423,6 +423,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "column   (string, required) 要比較的欄位\n"
                 "operator (string, required) == (or =), !=, >, <, >=, <=, contains, in (`=` is alias for `==`)\n"
                 "value    (any, required) 比較值；operator='in' 時必須是 list；'contains' 作 substring 比對（string only）\n"
+                "conditions (array, opt) 多條件一顆搞定：[{column, operator, value}, ...] + logic='and'|'or'（預設 and）。\n"
+                "           給了 conditions 就忽略單數參數。例：EQP-02 且 OOC → conditions=[{column:'toolID',operator:'==',value:'EQP-02'},{column:'spc_status',operator:'==',value:'OOC'}]\n"
                 "\n"
                 "== Output ==\n"
                 "port: data (dataframe) — 只保留符合條件的 rows，欄位不變\n"
@@ -451,9 +453,15 @@ def _blocks() -> list[dict[str, Any]]:
             "output_schema": [{"port": "data", "type": "dataframe"}],
             "param_schema": {
                 "type": "object",
-                "required": ["column", "operator"],
+                "required": [],
                 "properties": {
                     "column":   {"type": "string", "x-column-source": "input.data"},
+                    "conditions": {"type": "array", "title": "多條件（給了就忽略單數參數）",
+                                   "items": {"type": "object", "properties": {
+                                       "column": {"type": "string"},
+                                       "operator": {"type": "string"},
+                                       "value": {}}}},
+                    "logic": {"type": "string", "enum": ["and", "or"], "default": "and"},
                     "operator": {
                         "type": "string",
                         "enum": ["==", "=", "!=", ">", "<", ">=", "<=", "contains", "in"],
@@ -968,6 +976,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Params ==\n"
                 "group_by   (string | list[string], required) 分組欄位\n"
+                "aggregations (array, opt) **多重聚合一顆搞定**：[{column, func, as?}, ...]，"
+                "例 [{column:'value',func:'mean'},{column:'value',func:'count'}] → 輸出 value_mean + value_count。"
+                "給了就忽略下面的 column/aggregate\n"
                 "           ✅ 單欄 string:  'toolID'\n"
                 "           ✅ 多欄 list:    ['toolID','step','chart_name']  ← 推薦\n"
                 "           ⚠ 不要用逗號分隔字串 'toolID,step'（會被當成單一欄名 'toolID,step' 找不到）\n"
@@ -1004,6 +1015,12 @@ def _blocks() -> list[dict[str, Any]]:
                 # back-compat pipelines don't C6_PARAM_MISSING.
                 "required": ["group_by"],
                 "properties": {
+                    "aggregations": {"type": "array",
+                                     "title": "多重聚合 [{column, func, as?}]（給了就忽略 column/aggregate）",
+                                     "items": {"type": "object", "properties": {
+                                         "column": {"type": "string"},
+                                         "func": {"type": "string", "enum": ["mean", "sum", "count", "min", "max", "median", "std"]},
+                                         "as": {"type": "string"}}}},
                     "group_by":  {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "title": "Group by column(s) — string for single, list for multi", "x-column-source": "input.data"},
                     "column":    {"type": "string", "title": "Aggregation target column", "x-column-source": "input.data"},
                     "aggregate": {
@@ -2473,7 +2490,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 複雜 regex / apply → 超出本 block 能力\n"
                 "\n"
                 "== Params ==\n"
-                "column      (string, 必填) 新欄位名稱\n"
+                "column      (string, 必填) **產出的新欄位名稱**（不是來源欄位；來源寫在 expression 的 {column} 節點）\n"
                 "expression  (object, 必填) expression tree，節點三種：\n"
                 "  literal            42, 'PASS', true, null, [..]\n"
                 "  column ref         {column: 'spc_status'}\n"
@@ -2486,6 +2503,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "Arithmetic: add sub mul div\n"
                 "Cast:       as_int as_float as_str as_bool\n"
                 "Null:       coalesce is_null is_not_null\n"
+                "String:     concat（operands 逐個轉字串相接，例 {op:'concat', operands:[{column:'toolID'}, '-', {column:'step'}]}）\n"
+                "Cond:       if（3 個 operands：[條件, 成立值, 不成立值]，例 {op:'if', operands:[{op:'eq',operands:[{column:'spc_status'},'OOC']}, 1, 0]}）\n"
                 "\n"
                 "== Output ==\n"
                 "port: data (dataframe)    原 df + 一個新 column\n"
@@ -2575,7 +2594,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 純值分佈 → 用 block_histogram_chart\n"
                 "\n"
                 "== Params ==\n"
-                "x:                 string, required — x 軸欄位（time / index / category）。**必須是 input dataframe 真實欄位名**\n"
+                "x:                 string, opt — x 軸欄位（time / index / category）。**省略或填 'sequence' = 照資料順序 1..N 當 x**（資料沒有時間欄時用這個，不要硬湊）。給欄位名時必須是 input dataframe 真實欄位名\n"
                 "y:                 string | string[], required — y series 欄位。**必須是 input dataframe 真實欄位名**\n"
                 "y_secondary:       string[], opt — 右側 y 軸 series\n"
                 "series_field:      string, opt — group rows 出多條 color trace。**必須是 input dataframe 真實欄位名**\n"
@@ -2619,9 +2638,9 @@ def _blocks() -> list[dict[str, Any]]:
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
             "param_schema": {
                 "type": "object",
-                "required": ["x", "y"],
+                "required": ["y"],
                 "properties": {
-                    "x": {"type": "string"},
+                    "x": {"type": "string", "title": "x 欄位；省略或填 'sequence' = 照資料順序 1..N（不需要時間欄）"},
                     "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
                     "y_secondary": {"type": "array", "items": {"type": "string"}},
                     "series_field": {"type": "string"},

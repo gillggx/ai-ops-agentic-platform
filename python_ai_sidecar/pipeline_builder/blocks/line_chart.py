@@ -113,7 +113,12 @@ class LineChartBlockExecutor(BlockExecutor):
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be a DataFrame")
 
-        x = self.require(params, "x")
+        # B3 (2026-07-13, user 回報)：x 支援「照資料順序」模式 — 不給 x、或
+        # 給 "sequence"/"order"，就以列序 1..N 當 x（不需要時間欄）。
+        x = params.get("x")
+        use_sequence = (not x) or str(x).strip().lower() in ("sequence", "__sequence__", "order", "順序")
+        if use_sequence:
+            x = "__seq"
         y = _normalize_y(params.get("y"))
         if not y:
             raise BlockExecutionError(code="MISSING_PARAM", message="'y' must be a non-empty string or list")
@@ -132,6 +137,9 @@ class LineChartBlockExecutor(BlockExecutor):
                 }
             }
 
+        if use_sequence:
+            df = df.copy()
+            df["__seq"] = range(1, len(df) + 1)
         cols = [x, *y, *y_secondary]
         if series_field:
             cols.append(series_field)

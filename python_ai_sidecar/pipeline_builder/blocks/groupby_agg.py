@@ -50,18 +50,21 @@ class GroupByAggBlockExecutor(BlockExecutor):
             if params.get("aggregate") is not None
             else params.get("agg_func")
         )
-        if agg_column is None:
+        # B2：有 aggregations（多重聚合）時單數參數全免（見下方分支）。
+        has_multi = isinstance(params.get("aggregations"), list) and bool(params.get("aggregations"))
+        if agg_column is None and not has_multi:
             raise BlockExecutionError(
                 code="PARAM_MISSING",
-                message="missing required param 'column' (or legacy 'agg_column')",
+                message="missing required param 'column' (or legacy 'agg_column'; "
+                        "多重聚合請用 aggregations=[{column, func}, ...])",
             )
-        if agg_func is None:
+        if agg_func is None and not has_multi:
             raise BlockExecutionError(
                 code="PARAM_MISSING",
                 message="missing required param 'aggregate' (or legacy 'agg_func')",
             )
 
-        if agg_func not in _AGG_FUNCS:
+        if agg_func is not None and agg_func not in _AGG_FUNCS:
             raise BlockExecutionError(
                 code="INVALID_PARAM", message=f"agg_func must be one of {_AGG_FUNCS}"
             )
@@ -109,6 +112,49 @@ class GroupByAggBlockExecutor(BlockExecutor):
                     )
                 group_cols.append(path)
                 group_pretty[path] = path
+
+        # B2 (2026-07-13, user 回報)：多重聚合 — aggregations=[{column, func}, ...]
+        # 一顆 block 同時算 count+mean+max。給了就忽略單數參數（向下相容）。
+        aggregations = params.get("aggregations")
+        if isinstance(aggregations, list) and aggregations:
+            named: dict[str, tuple] = {}
+            for i, spec_a in enumerate(aggregations):
+                if not isinstance(spec_a, dict) or not spec_a.get("column") or not spec_a.get("func"):
+                    raise BlockExecutionError(
+                        code="INVALID_PARAM",
+                        message=f"aggregations[{i}] 需要 {{column, func}}（func ∈ {sorted(_AGG_FUNCS)}）")
+                fn = str(spec_a["func"])
+                if fn not in _AGG_FUNCS:
+                    raise BlockExecutionError(
+                        code="INVALID_PARAM", message=f"aggregations[{i}].func 必須是 {sorted(_AGG_FUNCS)}")
+                col_path = str(spec_a["column"])
+                if "." in col_path or "[]" in col_path:
+                    key = f"__agg_src_{i}__"
+                    try:
+                        df_work[key] = get_column_series(df_work, col_path).values
+                    except KeyError:
+                        raise BlockExecutionError(
+                            code="COLUMN_NOT_FOUND",
+                            message=f"aggregations[{i}].column path '{col_path}' not in data") from None
+                    internal = key
+                    pretty_a = col_path.rsplit(".", 1)[-1].replace("[]", "")
+                else:
+                    if col_path not in df_work.columns:
+                        raise BlockExecutionError(
+                            code="COLUMN_NOT_FOUND",
+                            message=f"aggregations[{i}].column '{col_path}' not in data",
+                            hint=f"Available: {list(df_work.columns)[:10]}")
+                    internal = col_path
+                    pretty_a = col_path
+                out_name = str(spec_a.get("as") or f"{pretty_a}_{fn}")
+                named[out_name] = (internal, "size" if fn == "count" else fn)
+            grouped = (df_work.groupby(group_cols, dropna=False)
+                       .agg(**{k: pd.NamedAgg(column=c, aggfunc=f) for k, (c, f) in named.items()})
+                       .reset_index())
+            rename_map = {k: v for k, v in group_pretty.items() if k != v}
+            if rename_map:
+                grouped = grouped.rename(columns=rename_map)
+            return {"data": grouped}
 
         # agg_column also path-aware
         if "." in agg_column or "[]" in agg_column:
