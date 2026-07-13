@@ -2719,6 +2719,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Params ==\n"
                 "同 block_line_chart 但無 y_secondary。\n"
+                "regression (boolean, opt) — true 時疊線性迴歸線 + R² 標註（x/y 需為數值欄；\n"
+                "  非數值 fail-soft 略過並在 spec.regression_note 註記）。「含迴歸線/趨勢線/R²」需求必開。\n"
                 "x / y / series_field 都**必須是 input dataframe 真實欄位名**（看 UPSTREAM TRACE）。\n"
                 "SPC unnest 後常用 series_field='name' (chart 名稱)。⚠ 不是 'spc_name'/'chart_name'。\n"
                 "\n== Keywords ==\n"
@@ -2737,6 +2739,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "rules": {"type": "array"},
                     "highlight_field": {"type": "string"},
                     "highlight_eq": {},
+                    "regression": {"type": "boolean"},
                     "title": {"type": "string"},
                 },
             },

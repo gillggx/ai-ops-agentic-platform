@@ -174,6 +174,30 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
     }, svg);
   }
 
+  // P2b (2026-07-13): 迴歸線 + R² 標註（block regression=true 時 spec 帶）
+  const reg = (spec as unknown as { regression?: {
+    slope: number; intercept: number; r2: number; x_min: number; x_max: number;
+  } }).regression;
+  if (reg && x.kind !== 'category') {
+    const pts: Array<[number, number]> = [];
+    for (const xv of [reg.x_min, reg.x_max]) {
+      const px = x.scale(xv);
+      const yv = reg.slope * xv + reg.intercept;
+      pts.push([px, y(yv)]);
+    }
+    if (pts.every((p) => p.every(Number.isFinite))) {
+      el('line', {
+        x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1],
+        stroke: '#8b6ecb', 'stroke-width': 1.8, 'stroke-dasharray': '7 4',
+      }, svg);
+      el('text', {
+        x: pts[1][0] - 4, y: pts[1][1] - 6, 'text-anchor': 'end',
+        class: 'axis-label', fill: '#8b6ecb',
+        text: `R²=${reg.r2.toFixed(3)}`,
+      }, svg);
+    }
+  }
+
   // Markers
   for (const tr of traces) {
     for (const [px, py, row] of tr.points) {

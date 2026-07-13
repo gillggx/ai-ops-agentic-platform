@@ -265,6 +265,31 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 ],
                 would_have_passed_with=would_pass,
             )
+        # P2a (2026-07-13) 視覺編碼閘：phase 語意要求「分組上色」而 chart
+        # block 支援 series_field 卻沒設 → 打回。deterministic graph 檢查，
+        # 不是 prompt rule；上限 2 次退回，之後放行（避免語意誤判卡死）。
+        # 對應 user 實案：「用顏色區分機台」出來卻是單色一條線，verifier 放行。
+        if ph_expected == "chart":
+            enc_missing = _chart_encoding_gap(
+                state=state, phase=phase, block_spec=block_spec, real_id=real_id,
+            )
+            enc_rejects = state.get("v30_chart_encoding_rejects") or 0
+            if enc_missing and enc_rejects < 2:
+                logger.info(
+                    "phase_verifier: chart-encoding reject #%d — %s",
+                    enc_rejects + 1, enc_missing,
+                )
+                rej = _emit_reject(
+                    state=state,
+                    cur_phase=cur_phase,
+                    block_id=block_id or "(unknown)",
+                    covers=list(covers_output),
+                    rows=rows,
+                    result="chart encoding mismatch",
+                    missing_for_phase=[enc_missing],
+                )
+                rej["v30_chart_encoding_rejects"] = enc_rejects + 1
+                return rej
         outcome = _extract_outcome(phase, snapshot, preview_blob, extractors, block_id)
         advanced.append({
             "id": phase["id"],
@@ -435,6 +460,38 @@ def _synthesize_failure_reason(
             "請 inspect 上游 node 的輸出欄位，或改用相容的 block。"
         )
     return "".join(parts)[:400]
+
+
+_GROUP_COLOR_MARKERS = (
+    # 分組上色的視覺編碼詞彙（zh + en）— 描述「同一張圖上多 series 分色」的意圖
+    "顏色區分", "不同顏色", "分色", "不同色", "顏色分", "各自顏色",
+    "color by", "colored by", "per series", "multi-series",
+)
+
+
+def _chart_encoding_gap(
+    *, state: BuildGraphState, phase: dict, block_spec: dict, real_id: str,
+) -> str | None:
+    """P2a: phase 語意要求分組上色，chart block 有 series_field 能力卻沒設
+    → 回一句 actionable 缺口說明；沒缺口回 None。純資料比對，無 LLM。"""
+    goal_text = f"{phase.get('goal') or ''} {phase.get('value_desc') or ''}"
+    if not any(m in goal_text for m in _GROUP_COLOR_MARKERS):
+        return None
+    props = ((block_spec.get("param_schema") or {}).get("properties") or {})
+    if "series_field" not in props:
+        return None  # block 沒這能力 — 不是參數缺口（能力缺口由 plan 層處理）
+    nodes = (state.get("pipeline_json") or {}).get("nodes") or []
+    node = next((n for n in nodes if n.get("id") == real_id), None)
+    if node is None:
+        return None
+    if (node.get("params") or {}).get("series_field"):
+        return None
+    return (
+        f"phase 要求分組上色（{next(m for m in _GROUP_COLOR_MARKERS if m in goal_text)}）"
+        f"但 {node.get('block_id')} 沒設 series_field — 出來會是單色一條線。"
+        f"set_param('{real_id}', 'series_field', '<分組欄位名，如 toolID>') 後再宣告完成；"
+        f"欄位名不確定先 inspect_node_output 上游。"
+    )
 
 
 def _emit_reject(

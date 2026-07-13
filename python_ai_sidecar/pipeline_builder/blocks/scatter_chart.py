@@ -82,4 +82,33 @@ class ScatterChartBlockExecutor(BlockExecutor):
             spec["highlight"] = highlight
         if series_field:
             spec["series_field"] = series_field
+        # P2b (2026-07-13): optional 線性迴歸線 + R² 標註（舊帳 D6 — plan 常寫
+        # 「含迴歸線與 R²」但 block 畫不出來）。x 或 y 非數值就 fail-soft 略過
+        # 並在 spec 註記，不炸 build。
+        if params.get("regression"):
+            reg = _linear_regression(df, x, y[0])
+            if isinstance(reg, str):
+                spec["regression_note"] = reg
+            else:
+                spec["regression"] = reg
         return {"chart_spec": spec}
+
+
+def _linear_regression(df: pd.DataFrame, x: str, y: str) -> dict[str, Any] | str:
+    """最小平方直線 + R²。回 dict（可畫）或 str（略過原因）。"""
+    xs = pd.to_numeric(df[x], errors="coerce")
+    ys = pd.to_numeric(df[y], errors="coerce")
+    ok = xs.notna() & ys.notna()
+    xs, ys = xs[ok], ys[ok]
+    if len(xs) < 3:
+        return "有效數值點 < 3，略過迴歸線"
+    if float(xs.std()) == 0.0:
+        return f"x 欄 '{x}' 無變異，略過迴歸線"
+    import numpy as np
+    slope, intercept = np.polyfit(xs, ys, 1)
+    pred = slope * xs + intercept
+    ss_res = float(((ys - pred) ** 2).sum())
+    ss_tot = float(((ys - ys.mean()) ** 2).sum())
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    return {"slope": round(float(slope), 6), "intercept": round(float(intercept), 6),
+            "r2": round(r2, 4), "x_min": float(xs.min()), "x_max": float(xs.max())}
