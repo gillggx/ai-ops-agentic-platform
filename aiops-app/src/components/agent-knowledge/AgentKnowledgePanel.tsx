@@ -265,7 +265,10 @@ export function AgentKnowledgePanel() {
         // W2 — cross-user drafts（PE/IT_ADMIN 收件匣）；ON_DUTY 403 → fail-open。
         api<Knowledge[]>("/api/agent-knowledge/drafts").catch(() => [] as Knowledge[]),
       ]);
-      setKnowledge(ks); setLexicon(ls); setExamples(es); setDocMemos(dm);
+      // 2026-07-13 user 裁決：偏好（memo_class=preference）歸戶 /me/preferences，
+      // 不再混在手冊 Knowledge 表。
+      setKnowledge(ks.filter((k) => k.memo_class !== "preference"));
+      setLexicon(ls); setExamples(es); setDocMemos(dm);
       setSupProposals(Array.isArray(sp) ? sp.filter(isPeProposal) : []);
       setCrossDrafts(Array.isArray(dr) ? dr : []);
     } finally { setLoading(false); }

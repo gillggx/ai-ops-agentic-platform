@@ -114,8 +114,9 @@ public class AgentKnowledgeController {
 	/** V75 review queue: ALL users' drafts (cross-user by design — the PE /
 	 *  IT_ADMIN reviewer is not the ON_DUTY submitter). DTO carries user_id
 	 *  so the frontend can show who submitted. */
+	/** 2026-07-13 user 裁決：repair 自動草稿的審核收斂到 IT_ADMIN（PE 不再看到）。 */
 	@GetMapping("/agent-knowledge/drafts")
-	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	@PreAuthorize(Authorities.ADMIN)
 	public ApiResponse<List<Dtos.KnowledgeDto>> listDraftKnowledge(@AuthenticationPrincipal AuthPrincipal caller) {
 		return ApiResponse.ok(service.listDrafts(caller));
 	}
@@ -130,7 +131,7 @@ public class AgentKnowledgeController {
 	/** V75 governance: draft → active. Same ADMIN_OR_PE tier as the
 	 *  Supervisor curation surface — ON_DUTY creates drafts, PE approves. */
 	@PostMapping("/agent-knowledge/{id}/approve")
-	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	@PreAuthorize(Authorities.ADMIN)
 	public ApiResponse<Dtos.KnowledgeDto> approveKnowledge(@PathVariable Long id,
 	                                                        @AuthenticationPrincipal AuthPrincipal caller) {
 		return ApiResponse.ok(service.approveKnowledge(id, caller));

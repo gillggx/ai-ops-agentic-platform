@@ -328,8 +328,10 @@ public class AgentKnowledgeService {
 	 *  authority as publishing — defense-in-depth behind the controller's
 	 *  ADMIN_OR_PE @PreAuthorize, and fail-closed on null / empty roles. */
 	private static void requireReviewerRole(AuthPrincipal caller) {
-		if (!canPublishKnowledge(caller)) {
-			throw ApiException.forbidden("PE or IT_ADMIN role required to review knowledge drafts");
+		// 2026-07-13 user 裁決：repair 草稿審核收斂到 IT_ADMIN。
+		if (caller == null || caller.roles() == null
+				|| !caller.roles().contains(Role.IT_ADMIN)) {
+			throw ApiException.forbidden("IT_ADMIN role required to review knowledge drafts");
 		}
 	}
 
