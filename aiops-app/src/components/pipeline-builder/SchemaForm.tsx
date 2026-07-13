@@ -17,6 +17,7 @@ import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { ColumnsByPort } from "@/context/pipeline-builder/useUpstreamColumns";
 import { FieldsEditor } from "@/components/pipeline-builder/FieldsEditor";
 import { SortColumnsEditor } from "@/components/pipeline-builder/SortColumnsEditor";
+import { ComputeExpressionEditor } from "@/components/pipeline-builder/ComputeExpressionEditor";
 
 
 /** Module-level cache so we don't re-fetch suggestions for every keystroke */
@@ -419,6 +420,23 @@ function renderWidget({
   if (prop["x-fields-editor"] || isPathFieldsArray) {
     return (
       <FieldsEditor
+        name={name}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        borderColor={borderColor}
+        commonStyle={commonStyle}
+        upstreamColumns={upstreamColumns}
+      />
+    );
+  }
+
+  // block_compute expression (2026-07-13, user 回報「不要像在寫 code」)：
+  // 引導式表達式編輯器 — 條件/串接/算術/轉型用表單，複合邏輯落進階 JSON。
+  // 觸發：名為 expression 的 object 參數（目前只有 block_compute 這個 shape）。
+  if (name === "expression" && prop.type === "object") {
+    return (
+      <ComputeExpressionEditor
         name={name}
         value={value}
         onChange={onChange}
