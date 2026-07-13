@@ -218,7 +218,7 @@ export function MobileShell({
                   fontWeight: 800, fontSize: 13,
                 }}>{(userName ?? "?").slice(0, 1).toUpperCase()}</span>
                 <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: M.ink }}>{userName ?? "—"}</span>
-                <button onClick={() => { setDrawerOpen(false); setPrefsOpen(true); }} style={{
+                <button title="我的偏好" onClick={() => { setDrawerOpen(false); setPrefsOpen(true); }} style={{
                   border: `1px solid ${M.line}`, background: "#fff", color: M.sub,
                   fontSize: 12, fontWeight: 700, padding: "6px 10px", borderRadius: 8,
                   cursor: "pointer", marginRight: 6,
