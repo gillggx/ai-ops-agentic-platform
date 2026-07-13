@@ -969,6 +969,11 @@ export function AIAgentPanel({
   // build re-rendering doesn't create duplicate drafts.
   const lastSavedDraftSigRef = useRef<string>("");
 
+  // P3 fix (2026-07-13)：新 session 第一輪 — synthesis 時 sessionIdRef 還是
+  // null（effect 空跑），done 才有 id 但 ref 不觸發 effect → 首輪永遠沒存
+  // （V85 既有縫，純問答輪全中）。done handler bump 這個 state 重踢兩個
+  // 持久化 effect。
+  const [persistTick, setPersistTick] = useState(0);
   // rich-history 持久化 (2026-07-11)：debounce 存檔（streaming 期間變動頻繁）。
   useEffect(() => {
     if (!persistHistory) return;
@@ -976,7 +981,7 @@ export function AIAgentPanel({
     if (!sid || chatHistory.length === 0) return;
     const timer = setTimeout(() => savePersistedHistory(sid, chatHistory), 800);
     return () => clearTimeout(timer);
-  }, [chatHistory, persistHistory]);
+  }, [chatHistory, persistHistory, persistTick]);
 
   // V85 (2026-07-11) — rich history 的 server 備份（跨裝置）。3s debounce：
   // streaming 期間不打；停下來才 PUT 最終狀態。失敗靜默（本機 localStorage 仍在）。
@@ -997,7 +1002,7 @@ export function AIAgentPanel({
       } catch { /* ignore */ }
     }, 3000);
     return () => clearTimeout(timer);
-  }, [chatHistory, persistHistory]);
+  }, [chatHistory, persistHistory, persistTick]);
 
   // V85 (2026-07-11) — 工作與畫面非同步：重載後查此對話的背景工作。
   // running → 重新接上事件流（回放緩衝+即時）；離線期間完成 → 回放收尾事件
@@ -2449,6 +2454,8 @@ export function AIAgentPanel({
 
           case "done":
             sessionIdRef.current = ev.session_id as string;
+            // P3 fix：首輪拿到 session id 後重踢持久化（見 persistTick）。
+            setPersistTick((n) => n + 1);
             if (ev.session_id) onSessionResolved?.(ev.session_id as string);
             break;
 
