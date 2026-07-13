@@ -2500,7 +2500,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "Comparison: eq ne gt gte lt lte\n"
                 "Logical:    and or not\n"
                 "Set:        in not_in     (第二參數為 list)\n"
-                "Arithmetic: add sub mul div\n"
+                "Arithmetic: add sub mul div abs（abs 單一 operand）\n"
                 "Cast:       as_int as_float as_str as_bool\n"
                 "Null:       coalesce is_null is_not_null\n"
                 "String:     concat（operands 逐個轉字串相接，例 {op:'concat', operands:[{column:'toolID'}, '-', {column:'step'}]}）\n"

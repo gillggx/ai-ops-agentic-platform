@@ -135,6 +135,10 @@ def _dispatch(op: str, args: list[Any]) -> Any:
         v = args[0]
         return v.notna() if isinstance(v, pd.Series) else v is not None
 
+    if op == "abs":
+        if len(args) != 1:
+            raise BlockExecutionError(code="INVALID_PARAM", message="abs 需要 1 個 operand")
+        return _numeric(args[0]).abs() if isinstance(args[0], pd.Series) else abs(_numeric(args[0]))
     # B1 (2026-07-13, user 回報)：concat / if 是常見需求但一直缺席。
     if op == "concat":
         parts = [a.astype(str) if isinstance(a, pd.Series) else str(a) for a in args]
