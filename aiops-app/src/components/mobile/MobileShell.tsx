@@ -22,6 +22,7 @@ import { SessionList } from "@/components/chatops/SessionList";
 import { DraftList } from "@/components/chatops/DraftList";
 import type { DraftCardData } from "@/components/chatops/DraftCard";
 import { THEMES, DEFAULT_THEME, applyTheme, normalizeTheme } from "@/lib/themes";
+import MyPreferencesPage from "@/app/me/preferences/page";
 
 type Tab = "chat" | "overview" | "skills" | "manual";
 type Drill =
@@ -55,6 +56,8 @@ export function MobileShell({
   const [tab, setTab] = useState<Tab>("chat");
   const [drill, setDrill] = useState<Drill>({ kind: "none" });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // P4 (2026-07-13)：我的偏好 — 手機入口（複用 /me/preferences 頁元件）
+  const [prefsOpen, setPrefsOpen] = useState(false);
   // R1 (2026-07-12)：手機也能換主題 — 抽屜帳號列上方的「外觀」色點列。
   const [theme, setTheme] = useState(DEFAULT_THEME);
   useEffect(() => {
@@ -215,6 +218,11 @@ export function MobileShell({
                   fontWeight: 800, fontSize: 13,
                 }}>{(userName ?? "?").slice(0, 1).toUpperCase()}</span>
                 <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: M.ink }}>{userName ?? "—"}</span>
+                <button onClick={() => { setDrawerOpen(false); setPrefsOpen(true); }} style={{
+                  border: `1px solid ${M.line}`, background: "#fff", color: M.sub,
+                  fontSize: 12, fontWeight: 700, padding: "6px 10px", borderRadius: 8,
+                  cursor: "pointer", marginRight: 6,
+                }}>偏好</button>
                 <button onClick={onLogout} style={{
                   border: `1px solid ${M.line}`, background: "#fff", color: M.sub,
                   fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, cursor: "pointer",
@@ -223,6 +231,25 @@ export function MobileShell({
             </div>
             <div style={{ flex: 1, background: "rgba(15,18,30,.42)" }}
                  onClick={() => setDrawerOpen(false)} />
+          </div>
+        )}
+
+        {/* 我的偏好 overlay（P4）— agent 跨對話記住的偏好，同 /me/preferences */}
+        {prefsOpen && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 22, background: M.bg,
+                        display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "10px 14px", borderBottom: `1px solid ${M.line}`,
+                          display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
+                          background: "var(--pn, #fff)" }}>
+              <button onClick={() => setPrefsOpen(false)} style={{
+                width: 34, height: 34, borderRadius: "50%", border: `1px solid ${M.line}`,
+                background: "#fff", fontSize: 16, cursor: "pointer", color: M.ink,
+              }}>‹</button>
+              <span style={{ fontSize: 14, fontWeight: 800, color: M.ink }}>我的偏好</span>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              <MyPreferencesPage />
+            </div>
           </div>
         )}
 

@@ -58,23 +58,38 @@ export function DraftList({ onOpenDraft }: {
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 14px" }}>
         {rows.map((d) => (
-          <button key={d.id} onClick={() => onOpenDraft({
-            id: d.id, name: d.name, nl: d.nl, kind: d.kind,
-            node_count: d.node_count, edge_count: d.edge_count, created_at: d.created_at,
-          })} style={{
-            display: "block", width: "100%", textAlign: "left", border: "none",
-            background: "none", padding: "8px 10px", cursor: "pointer", borderRadius: 8,
-          }}>
-            <div style={{
-              fontSize: 12, fontWeight: 600, color: "#334155",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          <div key={d.id} style={{ display: "flex", alignItems: "flex-start", borderRadius: 8 }}>
+            <button onClick={() => onOpenDraft({
+              id: d.id, name: d.name, nl: d.nl, kind: d.kind,
+              node_count: d.node_count, edge_count: d.edge_count, created_at: d.created_at,
+            })} style={{
+              display: "block", flex: 1, minWidth: 0, textAlign: "left", border: "none",
+              background: "none", padding: "8px 4px 8px 10px", cursor: "pointer", borderRadius: 8,
             }}>
-              {d.marked ? "◆ " : ""}{d.name || d.nl || "(未命名草稿)"}
-            </div>
-            <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2, fontFamily: "ui-monospace, monospace" }}>
-              {d.node_count} nodes ・ {timeLabel(d.created_at)}
-            </div>
-          </button>
+              <div style={{
+                fontSize: 12, fontWeight: 600, color: "#334155",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {d.name || d.nl || "(未命名草稿)"}
+              </div>
+              <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2, fontFamily: "ui-monospace, monospace" }}>
+                {d.node_count} nodes ・ {timeLabel(d.created_at)}
+              </div>
+            </button>
+            {/* P4-4b (2026-07-13)：保留標記 — 有 ◆ 的滿了也不會被自動讓位 */}
+            <button title={d.marked ? "取消保留（滿了可被自動讓位）" : "保留（滿了也不會被自動讓位）"}
+              onClick={() => {
+                void fetch(`/api/chat-drafts/${d.id}/mark`, {
+                  method: "PATCH", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ marked: !d.marked }),
+                }).then(() => load());
+              }}
+              style={{
+                border: "none", background: "none", cursor: "pointer", flexShrink: 0,
+                padding: "8px 8px 0 2px", fontSize: 13,
+                color: d.marked ? "var(--p, #1E5A44)" : "#c4c9d4",
+              }}>{d.marked ? "◆" : "◇"}</button>
+          </div>
         ))}
         {rows.length === 0 && (
           <div style={{ padding: "8px 10px", fontSize: 12, color: "#94a3b8" }}>

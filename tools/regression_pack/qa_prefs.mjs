@@ -1,0 +1,22 @@
+import { chromium } from "playwright";
+const BASE = process.env.AIOPS_BASE ?? "https://aiops-gill.com";
+const OUT = process.env.REG_OUT ?? "/tmp/aiops-regression";
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+await page.waitForTimeout(1000);
+await page.fill('input[type="text"]', "admin");
+await page.fill('input[type="password"]', "admin");
+await page.click('button[type="submit"]');
+await page.waitForURL((u) => !u.pathname.includes("login"), { timeout: 20000 });
+await page.goto(`${BASE}/me/preferences`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(2500);
+const rows = await page.locator('text=/#\\d+ ・ 被想起/').count();
+console.log(`prefs page rows: ${rows} ${rows >= 2 ? "PASS" : "FAIL"}`);
+await page.screenshot({ path: `${OUT}/qa_prefs_page.png` });
+// 手冊表不再出現 preference
+await page.goto(`${BASE}/agent-knowledge`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(2500);
+const prefChips = await page.locator('text=preference').count();
+console.log(`knowledge page preference rows: ${prefChips} ${prefChips === 0 ? "PASS" : "FAIL"}`);
+await browser.close();

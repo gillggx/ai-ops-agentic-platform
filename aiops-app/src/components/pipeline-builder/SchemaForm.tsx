@@ -16,6 +16,7 @@ import type { JsonSchemaProperty, ParamSchema } from "@/lib/pipeline-builder/typ
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { ColumnsByPort } from "@/context/pipeline-builder/useUpstreamColumns";
 import { FieldsEditor } from "@/components/pipeline-builder/FieldsEditor";
+import { SortColumnsEditor } from "@/components/pipeline-builder/SortColumnsEditor";
 
 
 /** Module-level cache so we don't re-fetch suggestions for every keystroke */
@@ -418,6 +419,29 @@ function renderWidget({
   if (prop["x-fields-editor"] || isPathFieldsArray) {
     return (
       <FieldsEditor
+        name={name}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        borderColor={borderColor}
+        commonStyle={commonStyle}
+        upstreamColumns={upstreamColumns}
+      />
+    );
+  }
+
+  // P4-4a (2026-07-13): 多鍵排序編輯器 — array items.oneOf 含 {column, order}
+  // 物件（block_sort.columns 的 shape）。generic array widget 只能打逗號字串，
+  // 方向沒法指定（user 實測痛點）。
+  const itemsOneOf = (prop.items as { oneOf?: unknown } | undefined)?.oneOf;
+  const isSortColumnsArray =
+    prop.type === "array" &&
+    Array.isArray(itemsOneOf) &&
+    (itemsOneOf as Array<{ type?: string; properties?: Record<string, unknown> }>)
+      .some((o) => o?.type === "object" && !!o?.properties?.column && !!o?.properties?.order);
+  if (isSortColumnsArray) {
+    return (
+      <SortColumnsEditor
         name={name}
         value={value}
         onChange={onChange}
