@@ -76,15 +76,24 @@ async def judge_result(
             logger.warning("result_vision: no anthropic key — skip judge")
             return None
         client = AnthropicLLMClient(api_key=api_key, model=_JUDGE_MODEL)
+        # 校準（2026-07-13 首輪實測）：judge 曾挑「17.50 應為 17.5005」小數位、
+        # 要求資料面沒有的機台、guidance 杜撰不存在的參數名 → 好圖被判死。
+        # 原則：只攔「重大可見偏差」，拿不準一律放行；guidance 禁編參數。
         system = (
-            "你是製程分析平台的成品審查員。你會拿到：使用者的建圖目標、最後一個"
-            "階段的目標、以及最終成品（chart 或 table）的實際渲染截圖。"
-            "就圖論圖，判斷成品是否達成目標的『可見要求』——例如：要求分色多序列"
-            "就必須看得到多色 legend；要求管制線就要看得到 UCL/LCL 線；要求排序"
-            "就看 x 軸順序；空圖/無資料一律不過。不要臆測圖上看不到的東西；"
-            "數值精度不是審查範圍。只回 JSON："
-            '{"passed": true|false, "reason": "一句話", '
-            '"guidance": "不過時給 builder 的具體修法（提到該用的參數，如 series_field）"}'
+            "你是製程分析平台的成品審查員，判斷成品截圖是否達成目標的「重大"
+            "可見要求」。只有下列情況才判不過：\n"
+            "- 圖完全空白 / 沒有資料點\n"
+            "- 要求多序列分色，但整張圖只有單一顏色一條線\n"
+            "- 圖表型態與要求明顯不符（要散點圖卻畫成長條圖）\n"
+            "- 要求管制線（UCL/LCL），但圖上完全沒有任何水平參考線\n"
+            "- table：要求的關鍵欄位完全缺席\n"
+            "以下一律「不算」缺陷（即使你覺得不完美）：數值小數位/四捨五入、"
+            "圖例順序、序列數量與預期差一兩個（可能是資料面本來就沒有）、"
+            "配色選擇、字體、label 被截斷、點的形狀、排版密度。"
+            "拿不準 → passed=true（誤殺好圖比放過瑕疵嚴重）。\n"
+            "guidance 規則：只描述「圖上少了什麼、該長什麼樣」——"
+            "禁止杜撰或建議任何參數名（builder 會自己查 block 文件）。只回 JSON："
+            '{"passed": true|false, "reason": "一句話", "guidance": "不過時的修法描述"}'
         )
         content = [
             {"type": "image", "source": {"type": "base64", "media_type": "image/png",
