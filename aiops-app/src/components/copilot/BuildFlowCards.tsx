@@ -573,6 +573,61 @@ export interface BuildDoneState {
   draftInfo?: { draft: { id: number } | null; count: number } | null;
 }
 
+// ── 失敗選項卡（P1-1a, 2026-07-13）— build 失敗不再只留中止 chip ─────────
+export interface BuildFailedState {
+  reason: string;                     // 與 plan 卡 errorReason 同一句（1c 一致性）
+  goal: string;                       // 原始建圖目標 — 重試/調整用
+  resolved?: "retried" | "edited" | "dismissed";
+}
+
+export function BuildFailedCard({ state, onRetry, onEdit, onResolved }: {
+  state: BuildFailedState;
+  /** 重試 — 以原目標重走 plan → 確認 → 建構（會再出計畫卡給你確認）。 */
+  onRetry: () => void;
+  /** 調整說法 — 把原目標放進輸入框讓使用者改。 */
+  onEdit: () => void;
+  onResolved: (r: "retried" | "edited" | "dismissed") => void;
+}) {
+  const locked = state.resolved != null;
+  const note =
+    state.resolved === "retried" ? "已重試 — 新的計畫卡在下面"
+    : state.resolved === "edited" ? "原目標已放進輸入框，改完送出即可"
+    : state.resolved === "dismissed" ? "已放棄這次建構" : null;
+  return (
+    <div style={{
+      ...cardStyle(locked),
+      borderColor: CHAT_T.amberBorder, background: locked ? CHAT_T.lockedCard : CHAT_T.amberBg,
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: CHAT_T.amberDeep }}>
+        ✕ 建構未完成
+      </div>
+      <div style={{ fontSize: 11, color: CHAT_T.sub, lineHeight: 1.6, marginTop: 4 }}>
+        {state.reason.slice(0, 200)}
+      </div>
+      {note ? (
+        <div style={{ fontSize: 10.5, color: CHAT_T.weak, marginTop: 8 }}>{note}</div>
+      ) : (
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button onClick={() => { onRetry(); onResolved("retried"); }} style={{
+            border: `1px solid ${CHAT_T.ink}`, background: CHAT_T.ink, color: "#fff",
+            fontSize: 11, fontWeight: 600, padding: "6px 16px", borderRadius: 7,
+            cursor: "pointer", fontFamily: "inherit",
+          }}>重試</button>
+          <button onClick={() => { onEdit(); onResolved("edited"); }} style={{
+            border: `1px solid ${CHAT_T.chipBorder}`, background: "#fff", color: CHAT_T.sub,
+            fontSize: 11, padding: "6px 14px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
+          }}>調整說法</button>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => onResolved("dismissed")} style={{
+            border: "none", background: "transparent", color: CHAT_T.weak,
+            fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+          }}>放棄</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function BuildDoneCard({
   state, onRate, onExpand, onOpenDraftCard,
 }: {

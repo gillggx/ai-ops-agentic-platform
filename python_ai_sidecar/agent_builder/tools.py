@@ -1071,6 +1071,15 @@ class BuilderToolset:
                 code="PARAM_ENUM_VIOLATION",
                 message=f"Value {value!r} not in allowed enum for '{key}': {enum}",
             )
+        # P1-1b (2026-07-13): None = 「取消這個參數」— 之前 None 會存進
+        # params，optional string 參數帶著 null 過 C6_PARAM_SCHEMA 直接
+        # failed_structural（trace 20260712-232934: ucl_column=None ×3）。
+        if value is None:
+            params = dict(node.params)
+            params.pop(key, None)
+            node.params = params
+            return {"node_id": node_id, "params": dict(node.params),
+                    "note": f"'{key}' unset（None 視為移除參數）"}
         node.params = {**node.params, key: value}
         return {"node_id": node_id, "params": dict(node.params)}
 

@@ -347,6 +347,38 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     structural_issues = [i for i in issues if i.get("rule") in _STRUCTURAL_RULES]
     advisory_issues = [i for i in issues if i.get("rule") not in _STRUCTURAL_RULES]
 
+    # P1-1b (2026-07-13) 殘料自動剪枝：結構錯誤全部集中在「葉節點」且剪掉
+    # 之後 canvas 仍有其他終端節點時，deterministic 移除壞葉再驗一次 —
+    # 別讓一顆 agent 半途棄置的節點拖垮整個 build（trace 20260712-232934：
+    # n4 line_chart 帶三個 null 參數，健康的 n5 同時存在卻整包 failed）。
+    pruned_note = ""
+    if structural_issues:
+        bad_ids = {str(i.get("node") or i.get("node_id") or "") for i in structural_issues}
+        bad_ids.discard("")
+        has_downstream = {e.from_.node for e in pipeline.edges}
+        leaf_bad = {n.id for n in pipeline.nodes
+                    if n.id in bad_ids and n.id not in has_downstream}
+        healthy_terminals = [n.id for n in pipeline.nodes
+                             if n.id not in has_downstream and n.id not in leaf_bad]
+        # 只有「所有結構錯誤都在可剪的壞葉上」且剪後仍有健康終端才動手
+        if leaf_bad and bad_ids == leaf_bad and healthy_terminals and len(leaf_bad) <= 3:
+            pipeline.nodes = [n for n in pipeline.nodes if n.id not in leaf_bad]
+            pipeline.edges = [e for e in pipeline.edges
+                              if e.from_.node not in leaf_bad and e.to.node not in leaf_bad]
+            final_dict = pipeline.model_dump(by_alias=True)
+            state["final_pipeline"] = final_dict
+            reissues = validator.validate(pipeline)
+            structural_issues = [i for i in reissues if i.get("rule") in _STRUCTURAL_RULES]
+            advisory_issues = [i for i in reissues if i.get("rule") not in _STRUCTURAL_RULES]
+            pruned_note = f"（已自動清理 {len(leaf_bad)} 個殘缺節點：{', '.join(sorted(leaf_bad))}）"
+            removal_events.append(_event("nodes_removed", {
+                "removed": sorted(leaf_bad), "skipped": [],
+                "reason": "finalize_auto_prune_broken_leaf",
+            }))
+            logger.info("finalize_node: auto-pruned broken leaf node(s) %s — "
+                        "structural issues %d → %d",
+                        sorted(leaf_bad), len(bad_ids), len(structural_issues))
+
     n_ok_ops = sum(1 for op in plan if op.get("result_status") == "ok")
     n_failed_ops = sum(1 for op in plan if op.get("result_status") == "error")
 
@@ -423,7 +455,7 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         issue_summary = ""
     summary = (
         f"Built {len(pipeline.nodes)} node(s), {len(pipeline.edges)} edge(s); "
-        f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}"
+        f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}{pruned_note}"
     )
     logger.info("finalize_node: status=%s | %s", status, summary)
 

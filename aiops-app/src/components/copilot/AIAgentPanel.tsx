@@ -31,9 +31,9 @@ import { type GoalPhase, type PlanRemoval } from "@/components/pipeline-builder/
 import { type PhaseRuntime } from "@/components/pipeline-builder/v30/PhaseTimeline";
 import { type PlanPhase } from "@/components/chat/PlanConfirmCard";
 import {
-  IntentCard, BuildPlanCard, BuildDoneCard,
+  IntentCard, BuildPlanCard, BuildDoneCard, BuildFailedCard,
   renderUserContent, userBubbleStyle,
-  type BuildPlanState, type BuildDoneState, type PhaseRuntimeUI,
+  type BuildPlanState, type BuildDoneState, type BuildFailedState, type PhaseRuntimeUI,
 } from "./BuildFlowCards";
 import {
   JudgeClarifyCard,
@@ -176,7 +176,7 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate" | "alarm_action" | "skill_admin" | "draft_card" | "knowledge_admin" | "memory_remember";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify" | "automation_confirm" | "skill_activate" | "alarm_action" | "skill_admin" | "draft_card" | "knowledge_admin" | "memory_remember" | "build_failed";
   content: string;
   /** 對話分頁重整（2026-07-05）— BUILD PLAN 卡單卡生命週期 state。 */
   buildPlan?: BuildPlanState;
@@ -221,6 +221,7 @@ interface ChatMessage {
   /** 知識管理 (2026-07-12): 刪除/停用規則確認卡。 */
   knowledgeAdmin?: KnowledgeAdminData;
   memoryRemember?: MemoryRememberData;
+  buildFailed?: BuildFailedState;
   pbProposal?: PbPatchProposalData;
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
@@ -2229,14 +2230,15 @@ export function AIAgentPanel({
                 }]);
               }
             } else if (cardStatus === "error") {
-              // 2026-07-13（user：「builder 失敗了但 coordinator 沒介入」）
-              // 最小介入：失敗別只留中止 chip — 給一句人話 + 下一步引導。
-              // 完整的失敗→重規劃迴路是後續設計（graph-level failure hook）。
-              const reason = (summary || "").slice(0, 160);
+              // P1-1a (2026-07-13)：失敗選項卡 — 重試 / 調整說法 / 放棄。
+              // reason 與 plan 卡 errorReason 同一句（1c 一致性）。
               setChatHistory((prev) => [...prev, {
-                id: nextId(), role: "agent",
-                content: `✕ 這次建構沒有完成${reason ? `：${reason}` : "。"}\n` +
-                         "直接跟我說「重試」，或告訴我要怎麼調整（例如換一種圖、改排序方式），我會接手處理。",
+                id: nextId(), role: "build_failed", content: "",
+                buildFailed: {
+                  reason: (summary || "建構失敗").slice(0, 200),
+                  goal: (lastBuildGoalRef.current
+                    || lastUserPromptRef.current.replace(/^\s*\[[^\]]*\]\s*/, "")).trim(),
+                },
               }]);
             }
             break;
@@ -2977,6 +2979,15 @@ export function AIAgentPanel({
                     onResolved={(st) => setChatHistory((prev) => prev.map((m) =>
                       m.id === msg.id && m.knowledgeAdmin
                         ? { ...m, knowledgeAdmin: { ...m.knowledgeAdmin, resolved: st } } : m))} />
+                </div>
+              ) : msg.role === "build_failed" && msg.buildFailed ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <BuildFailedCard state={msg.buildFailed}
+                    onRetry={() => sendMessage(`重試剛才的建構：${msg.buildFailed!.goal}`)}
+                    onEdit={() => setInput(msg.buildFailed!.goal)}
+                    onResolved={(r) => setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.buildFailed
+                        ? { ...m, buildFailed: { ...m.buildFailed, resolved: r } } : m))} />
                 </div>
               ) : msg.role === "memory_remember" && msg.memoryRemember ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
