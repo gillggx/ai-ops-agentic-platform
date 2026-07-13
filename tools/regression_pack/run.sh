@@ -27,6 +27,13 @@ run_case() {
   else FAIL=$((FAIL+1)); RESULTS+=("FAIL  $name"); fi
 }
 
+# 0. Block 核心行為測試套件（deterministic、免 LLM — 本機跑）
+blocks_pytest() {
+  cd ../.. && python3 -m pytest python_ai_sidecar/tests/test_blocks_core.py -q; local rc=$?
+  cd tools/regression_pack; return $rc
+}
+run_case "block 測試套件（22 案例）" blocks_pytest
+
 # 1. block_sort 多鍵/逗號解析（deterministic 單測，EC2 sidecar venv）
 sort_unit() {
   ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_HOST" 'cd /opt/aiops && sudo -u ubuntu venv_sidecar/bin/python - <<PYEOF

@@ -22,6 +22,7 @@ const CMP_OPS = [
 const ARITH_OPS = [
   { v: "add", label: "＋" }, { v: "sub", label: "－" },
   { v: "mul", label: "×" }, { v: "div", label: "÷" },
+  { v: "abs", label: "|絕對值|" },  // 單元 — 只用左運算元
 ];
 const CAST_OPS = [
   { v: "as_int", label: "整數 int" }, { v: "as_float", label: "小數 float" },
@@ -88,6 +89,11 @@ function parseExpr(v: unknown): Parsed {
     if (parts.every(Boolean)) return { mode: "concat", concatS: parts as Operand[] };
     return { mode: "json" };
   }
+  if (node.op === "abs" && ops.length === 1) {
+    const a = nodeToOperand(ops[0]);
+    if (a) return { mode: "arith", arithS: { a, op: "abs", b: { kind: "value", text: "" } } };
+    return { mode: "json" };
+  }
   if (node.op && ARITH_OPS.some((a) => a.v === node.op) && ops.length === 2) {
     const a = nodeToOperand(ops[0]); const b = nodeToOperand(ops[1]);
     if (a && b) return { mode: "arith", arithS: { a, op: node.op, b } };
@@ -151,7 +157,12 @@ export function ComputeExpressionEditor({
       onChange({ op: "concat", operands: parts.map(operandToNode) });
     } else if (m === "arith") {
       const s = st.arithS!;
-      if (!s.a.text.trim() || !s.b.text.trim()) return;
+      if (!s.a.text.trim()) return;
+      if (s.op === "abs") {
+        onChange({ op: "abs", operands: [operandToNode(s.a)] });
+        return;
+      }
+      if (!s.b.text.trim()) return;
       onChange({ op: s.op, operands: [operandToNode(s.a), operandToNode(s.b)] });
     } else if (m === "cast") {
       const s = st.castS!;
@@ -259,7 +270,9 @@ export function ComputeExpressionEditor({
             style={{ ...commonStyle, borderColor, width: 52, flexShrink: 0 }}>
             {ARITH_OPS.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
           </select>
-          <OperandInput v={arithS.b} onV={(o) => { const s = { ...arithS, b: o }; setArithS(s); emit("arith", { arithS: s }); }} />
+          {arithS.op !== "abs" && (
+            <OperandInput v={arithS.b} onV={(o) => { const s = { ...arithS, b: o }; setArithS(s); emit("arith", { arithS: s }); }} />
+          )}
         </div>
       )}
 

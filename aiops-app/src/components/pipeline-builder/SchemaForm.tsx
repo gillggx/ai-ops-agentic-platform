@@ -19,7 +19,7 @@ import { FieldsEditor } from "@/components/pipeline-builder/FieldsEditor";
 import { SortColumnsEditor } from "@/components/pipeline-builder/SortColumnsEditor";
 import { ComputeExpressionEditor } from "@/components/pipeline-builder/ComputeExpressionEditor";
 import {
-  AggregationsEditor, ConditionsEditor, JsonFallbackEditor, KeyValueEditor, RulesEditor,
+  AggregationsEditor, ConditionsEditor, HighlightRulesEditor, JsonFallbackEditor, KeyValueEditor, RulesEditor,
 } from "@/components/pipeline-builder/GuidedParamEditors";
 
 
@@ -485,6 +485,9 @@ function renderWidget({
   }
   if (name === "rules" && prop.type === "array") {
     return <RulesEditor {...editorProps} />;
+  }
+  if (name === "highlight_rules" && prop.type === "array") {
+    return <HighlightRulesEditor {...editorProps} />;
   }
   if (prop.type === "object" && ["args", "args_template", "style"].includes(name)) {
     return <KeyValueEditor {...editorProps}

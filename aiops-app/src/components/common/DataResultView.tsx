@@ -47,6 +47,30 @@ interface Props {
   /** When set, a 下載 CSV button appears — full data is re-fetched server-side
    *  (tables only ship ~100 rows for render performance). */
   exportSpec?: { pipelineJson: unknown; nodeId: string } | null;
+  /** S3 (2026-07-13)：條件格式化 — 符合條件的「該欄 cell」套背景/字色。 */
+  cellStyleRules?: Array<{
+    column: string; operator: string; value?: unknown;
+    background?: string; text_color?: string;
+  }> | null;
+}
+
+/** S3：單一規則是否命中該列（運算子語意同 block_filter）。 */
+function cellRuleHit(rule: { column: string; operator: string; value?: unknown },
+                     row: Record<string, unknown>): boolean {
+  const raw = row[rule.column];
+  const v = rule.value;
+  const num = (x: unknown) => (typeof x === "number" ? x : parseFloat(String(x)));
+  switch (rule.operator) {
+    case "==": case "=": return String(raw) === String(v);
+    case "!=": return String(raw) !== String(v);
+    case ">":  return num(raw) > num(v);
+    case "<":  return num(raw) < num(v);
+    case ">=": return num(raw) >= num(v);
+    case "<=": return num(raw) <= num(v);
+    case "contains": return String(raw ?? "").includes(String(v ?? ""));
+    case "in": return Array.isArray(v) ? v.map(String).includes(String(raw)) : false;
+    default: return false;
+  }
 }
 
 type View = "structured" | "tree" | "raw";
@@ -107,7 +131,7 @@ export default function DataResultView({
   result, loading, error, latencyMs, statusSlot,
   loadingText = "載入中…", emptyText = "尚無資料",
   defaultView = "structured", maxRows = DEFAULT_MAX_ROWS, enableFullscreen = true, rowHighlight,
-  totalRows, exportSpec,
+  totalRows, exportSpec, cellStyleRules = null,
 }: Props) {
   const [view, setView] = useState<View>(defaultView);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -237,7 +261,7 @@ export default function DataResultView({
         {view === "raw" && <pre style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.65 }}>{JSON.stringify(result, null, 2)}</pre>}
         {view === "tree" && <TreeNode value={result} k="root" path="root" depth={0} open={treeOpen} setOpen={setTreeOpen} />}
         {view === "structured" && (isTable
-          ? <DataTable rows={rows} columns={columns} maxRows={maxRows} expanded={expandedRow} setExpanded={setExpandedRow} rowHighlight={rowHighlight} />
+          ? <DataTable rows={rows} columns={columns} maxRows={maxRows} expanded={expandedRow} setExpanded={setExpandedRow} rowHighlight={rowHighlight} cellStyleRules={cellStyleRules} />
           : <CardGrid value={result} />)}
       </div>
     </div>
@@ -267,10 +291,11 @@ export default function DataResultView({
 
 // ── structured: table ───────────────────────────────────────────────────────
 
-function DataTable({ rows, columns, maxRows, expanded, setExpanded, rowHighlight }: {
+function DataTable({ rows, columns, maxRows, expanded, setExpanded, rowHighlight, cellStyleRules }: {
   rows: Record<string, unknown>[]; columns: string[]; maxRows: number;
   expanded: number | null; setExpanded: (i: number | null) => void;
   rowHighlight?: (row: Record<string, unknown>) => boolean;
+  cellStyleRules?: Array<{ column: string; operator: string; value?: unknown; background?: string; text_color?: string }> | null;
 }) {
   return (
     <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: T.mono, fontSize: 12.5, whiteSpace: "nowrap" }}>
@@ -289,8 +314,14 @@ function DataTable({ rows, columns, maxRows, expanded, setExpanded, rowHighlight
               <tr onClick={() => setExpanded(open ? null : i)}
                   style={{ cursor: "pointer", background: open ? T.accentBg : hl ? T.oocBg : i % 2 ? T.panel : undefined }}>
                 <td style={{ ...td, color: open ? T.accent : hl ? T.oocT : T.faint2 }}>{open ? "▾" : i + 1}</td>
-                {columns.map(c => <td key={c} style={{ ...td, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}
-                  title={typeof r[c] === "object" && r[c] ? JSON.stringify(r[c]) : String(r[c] ?? "")}>{cell(r[c])}</td>)}
+                {columns.map(c => {
+                  // S3 條件格式化：第一條命中的規則決定該 cell 顏色
+                  const rule = (cellStyleRules ?? []).find((ru) => ru.column === c && cellRuleHit(ru, r));
+                  return <td key={c} style={{ ...td, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis",
+                    ...(rule?.background ? { background: rule.background } : {}),
+                    ...(rule?.text_color ? { color: rule.text_color, fontWeight: 700 } : {}) }}
+                    title={typeof r[c] === "object" && r[c] ? JSON.stringify(r[c]) : String(r[c] ?? "")}>{cell(r[c])}</td>;
+                })}
               </tr>
               {open && (
                 <tr>

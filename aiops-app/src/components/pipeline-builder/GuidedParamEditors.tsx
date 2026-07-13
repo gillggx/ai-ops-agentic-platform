@@ -260,6 +260,85 @@ export function KeyValueEditor(p: EditorProps & { hint?: string }) {
   );
 }
 
+// ── data_view.highlight_rules（S3 條件格式化）───────────────────────────
+type HlRow = { column: string; operator: string; value: string; background: string; text_color: string };
+
+const HL_PRESETS = [
+  { label: "紅底", background: "#FDE8E9", text_color: "#B4232D" },
+  { label: "琥珀底", background: "#FBEECF", text_color: "#8a5a06" },
+  { label: "綠底", background: "#E5F5EC", text_color: "#047857" },
+];
+
+export function HighlightRulesEditor(p: EditorProps) {
+  const cols = useCols(p.upstreamColumns);
+  const listId = `hl-cols-${p.name}`;
+  const [rows, setRows] = React.useState<HlRow[]>(() => {
+    const v = Array.isArray(p.value) ? (p.value as Array<Record<string, unknown>>) : [];
+    const r = v.map((x) => ({
+      column: String(x?.column ?? ""), operator: String(x?.operator ?? "=="),
+      value: litToStr(x?.value),
+      background: String(x?.background ?? "#FDE8E9"),
+      text_color: String(x?.text_color ?? "#B4232D"),
+    }));
+    return r.length ? r : [{ column: "", operator: "==", value: "", background: "#FDE8E9", text_color: "#B4232D" }];
+  });
+  const sync = (next: HlRow[]) => {
+    setRows(next.length ? next : [{ column: "", operator: "==", value: "", background: "#FDE8E9", text_color: "#B4232D" }]);
+    const out = next.filter((r) => r.column.trim()).map((r) => ({
+      column: r.column.trim(), operator: r.operator, value: coerceLit(r.value),
+      background: r.background, text_color: r.text_color,
+    }));
+    p.onChange(out.length ? out : undefined);
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 3,
+                              border: "1px solid #EEF2F6", borderRadius: 7, padding: "5px 6px" }}>
+          <div style={rowStyle}>
+            <input type="text" value={r.column} disabled={p.disabled} placeholder="欄位"
+              list={cols.length ? listId : undefined} autoComplete="off"
+              onChange={(e) => sync(rows.map((x, j) => (j === i ? { ...x, column: e.target.value } : x)))}
+              style={{ ...p.commonStyle, borderColor: p.borderColor, flex: 1.2 }} />
+            <select value={r.operator} disabled={p.disabled}
+              onChange={(e) => sync(rows.map((x, j) => (j === i ? { ...x, operator: e.target.value } : x)))}
+              style={{ ...p.commonStyle, borderColor: p.borderColor, width: 86, flexShrink: 0 }}>
+              {FILTER_OPS.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+            <input type="text" value={r.value} disabled={p.disabled} placeholder="值"
+              onChange={(e) => sync(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+              style={{ ...p.commonStyle, borderColor: p.borderColor, flex: 1 }} />
+            <button type="button" style={xBtnStyle} disabled={p.disabled || rows.length <= 1}
+              onClick={() => sync(rows.filter((_, j) => j !== i))}>✕</button>
+          </div>
+          <div style={{ ...rowStyle, paddingLeft: 2 }}>
+            <span style={{ fontSize: 10.5, color: "#94A3B8", flexShrink: 0 }}>命中時</span>
+            {HL_PRESETS.map((pr) => (
+              <button key={pr.label} type="button" disabled={p.disabled}
+                onClick={() => sync(rows.map((x, j) => (j === i ? { ...x, background: pr.background, text_color: pr.text_color } : x)))}
+                style={{ fontSize: 10.5, padding: "2px 9px", borderRadius: 9, cursor: "pointer",
+                         background: pr.background, color: pr.text_color,
+                         border: r.background === pr.background ? `1.5px solid ${pr.text_color}` : "1px solid #E2E8F0",
+                         fontWeight: r.background === pr.background ? 700 : 400 }}>{pr.label}</button>
+            ))}
+            <input type="color" value={r.background} disabled={p.disabled} title="自訂背景色"
+              onChange={(e) => sync(rows.map((x, j) => (j === i ? { ...x, background: e.target.value } : x)))}
+              style={{ width: 26, height: 22, padding: 0, border: "1px solid #E2E8F0", borderRadius: 5, cursor: "pointer" }} />
+            <input type="color" value={r.text_color} disabled={p.disabled} title="自訂字色"
+              onChange={(e) => sync(rows.map((x, j) => (j === i ? { ...x, text_color: e.target.value } : x)))}
+              style={{ width: 26, height: 22, padding: 0, border: "1px solid #E2E8F0", borderRadius: 5, cursor: "pointer" }} />
+          </div>
+        </div>
+      ))}
+      <button type="button" style={addBtnStyle(p.borderColor)} disabled={p.disabled}
+        onClick={() => setRows((prev) => [...prev, { column: "", operator: "==", value: "", background: "#FDE8E9", text_color: "#B4232D" }])}>
+        ＋ 加規則
+      </button>
+      {cols.length > 0 && <datalist id={listId}>{cols.map((c) => <option key={c} value={c} />)}</datalist>}
+    </div>
+  );
+}
+
 // ── 資料直灌 array / 其他複雜參數：誠實 JSON textarea ────────────────────
 export function JsonFallbackEditor(p: EditorProps & { hint?: string }) {
   const [text, setText] = React.useState<string>(() =>

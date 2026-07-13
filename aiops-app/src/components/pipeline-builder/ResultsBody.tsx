@@ -113,6 +113,7 @@ export default function ResultsBody({ summary, nodeResults, pipelineJson }: Prop
                   emptyText="無資料"
                   totalRows={v.total_rows}
                   exportSpec={pipelineJson ? { pipelineJson, nodeId: v.node_id } : null}
+                  cellStyleRules={(v as { highlight_rules?: Array<{ column: string; operator: string; value?: unknown; background?: string; text_color?: string }> }).highlight_rules ?? null}
                 />
               </div>
             </div>

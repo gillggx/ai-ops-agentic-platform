@@ -274,6 +274,11 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
   // Series traces
   // Project secondary using y2
   const primaryDash = style.line_style === 'dash' ? '6 4' : '';
+  // S5 (2026-07-13 user 需求)：指定某幾條 series 虛線（其餘照舊）。
+  const dashedSeries = new Set(
+    Array.isArray((style as { dashed_series?: unknown[] }).dashed_series)
+      ? ((style as { dashed_series?: unknown[] }).dashed_series as unknown[]).map(String)
+      : []);
   const stepMode = style.line_style === 'step';
   const dotR = markerRadius(style, T.pointR);
   for (const tr of traces) {
@@ -303,7 +308,7 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
       'stroke-width': isLimit ? 1.2 : T.stroke,
       'stroke-linecap': 'round',
       'stroke-linejoin': 'round',
-      'stroke-dasharray': isLimit ? '6 4' : (tr.axis === 'secondary' ? '4 3' : primaryDash),
+      'stroke-dasharray': isLimit ? '6 4' : dashedSeries.has(tr.name) ? '6 4' : (tr.axis === 'secondary' ? '4 3' : primaryDash),
     }, svg);
     // Points (dotR 0 = markers off; hover targets stay via invisible dots)
     const trDotR = isLimit ? 0 : dotR;

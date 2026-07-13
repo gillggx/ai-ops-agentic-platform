@@ -16,6 +16,7 @@ from python_ai_sidecar.pipeline_builder.blocks.data_view import DataViewBlockExe
 from python_ai_sidecar.pipeline_builder.blocks.cpk import CpkBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.defect_stack import DefectStackBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.delta import DeltaBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.streak import StreakBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.ewma import EwmaBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.ewma_cusum import EwmaCusumBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.filter import FilterBlockExecutor
@@ -72,6 +73,7 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_threshold": ThresholdBlockExecutor,
     "block_consecutive_rule": ConsecutiveRuleBlockExecutor,
     "block_delta": DeltaBlockExecutor,
+    "block_streak": StreakBlockExecutor,
     "block_weco_rules": WecoRulesBlockExecutor,
     "block_linear_regression": LinearRegressionBlockExecutor,
     "block_histogram": HistogramBlockExecutor,

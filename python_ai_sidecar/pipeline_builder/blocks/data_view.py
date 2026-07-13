@@ -84,5 +84,13 @@ class DataViewBlockExecutor(BlockExecutor):
             data_view_spec["description"] = description
         if dropped_columns:
             data_view_spec["dropped_columns"] = dropped_columns  # surface to UI
+        # S3 (2026-07-13 user 需求)：條件格式化 — [{column, operator, value,
+        # background?, text_color?}]，符合條件的 cell 由前端套色。壞條目略過。
+        hr = params.get("highlight_rules")
+        if isinstance(hr, list) and hr:
+            clean = [r for r in hr if isinstance(r, dict)
+                     and r.get("column") and r.get("operator")]
+            if clean:
+                data_view_spec["highlight_rules"] = clean[:20]
 
         return {"data_view": data_view_spec}

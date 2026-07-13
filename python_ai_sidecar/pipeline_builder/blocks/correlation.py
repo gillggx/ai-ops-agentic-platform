@@ -62,14 +62,27 @@ class CorrelationBlockExecutor(BlockExecutor):
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
 
-        columns = self.require(params, "columns")
-        if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
-            raise BlockExecutionError(
-                code="INVALID_PARAM", message="columns must be a list of strings"
-            )
+        # S2 (2026-07-13 user 需求)：columns 改選填 — 省略 = 全部數值欄；
+        # 逗號字串寬容（同 sort 慣例）。target 模式見下。
+        columns = params.get("columns")
+        if isinstance(columns, str):
+            columns = [c.strip() for c in columns.split(",") if c.strip()]
+        target = params.get("target") or None
+        if columns is not None:
+            if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+                raise BlockExecutionError(
+                    code="INVALID_PARAM", message="columns must be a list of strings"
+                )
+        else:
+            columns = [c for c in df.columns
+                       if pd.api.types.is_numeric_dtype(df[c])]
+        if target and target not in columns:
+            columns = [*columns, str(target)]
         if len(columns) < 2:
             raise BlockExecutionError(
-                code="INVALID_PARAM", message="need at least 2 columns to correlate"
+                code="INVALID_PARAM",
+                message=f"need at least 2 numeric columns to correlate (got {columns})",
+                hint="用 columns 指定欄位，或確認上游輸出含 ≥2 個數值欄",
             )
         df = _materialize_paths(df, list(columns))
         missing = [c for c in columns if c not in df.columns]
@@ -88,6 +101,20 @@ class CorrelationBlockExecutor(BlockExecutor):
         numeric_cols: dict[str, np.ndarray] = {}
         for c in columns:
             numeric_cols[c] = pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=float)
+
+        # S2 target 模式：「哪些欄位跟 target 最相關」→ 每欄 vs target 排行
+        if target:
+            rows_t: list[dict[str, Any]] = []
+            for c in columns:
+                if c == str(target):
+                    continue
+                r, p, n = _pair_stat(numeric_cols[c], numeric_cols[str(target)], method)
+                rows_t.append({"column": c, "correlation": r,
+                               "abs_corr": abs(r) if r == r else None,  # NaN-safe
+                               "p_value": p, "n": n})
+            out = pd.DataFrame(rows_t).sort_values(
+                "abs_corr", ascending=False, na_position="last", ignore_index=True)
+            return {"matrix": out}
 
         rows: list[dict[str, Any]] = []
         for a in columns:

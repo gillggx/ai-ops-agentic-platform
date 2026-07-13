@@ -782,7 +782,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ✅ 「最近 5 次 process 中有 3 次連續 OOC」→ flag_column=spc_xbar_chart_is_ooc, count=3\n"
                 "- ✅ 「連續 3 點上升」→ 先 block_delta 得 is_rising → consecutive_rule(flag_column=is_rising, count=3)\n"
                 "- ✅ 「連續 N 筆 APC 超出閾值」→ 先 threshold → consecutive_rule(flag_column=triggered_row, count=N)\n"
-                "- ❌ 歷史上**曾**有連續 N（審視 run） → 本 block 只看 tail，歷史掃描要自己組 transform+groupby\n"
+                "- ❌ 歷史上**曾**有連續 N（審視 run）→ 用 block_streak（每列輸出 streak_len 的歷史全掃）\n"
                 "- ❌ Nelson / WECO 多條複合規則 → 用 block_weco_rules（已內建 R1~R8）\n"
                 "- ❌ 需要 '9 點同側' 這種要比較 center 的規則 → 用 block_weco_rules R2\n"
                 "\n"
@@ -878,6 +878,51 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.delta:DeltaBlockExecutor"},
+        },
+        {
+            "name": "block_streak",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "連續上升/下降偵測（run length）— 每列輸出「目前同方向連續了幾步」。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「連續 5 筆上升就告警」→ 我 + block_filter(<col>_streak_len >= 5 且 dir=='up')\n"
+                "- ✅ 「找連跌最久的機台」→ group_by='toolID' + sort/find max streak_len\n"
+                "- ❌ 只要單點漲跌旗標 → 用 block_delta（is_rising/is_falling）\n"
+                "- ❌ 「**最近** N 筆連續 X 就告警」（tail 型、要 triggered bool）→ 用 block_consecutive_rule；"
+                "我是**歷史全掃** run length（每列都有 streak_len）\n"
+                "- ❌ SPC 圖上的趨勢視覺警示 → xbar_r / imr 內建 WECO trend rule\n"
+                "\n"
+                "== Params ==\n"
+                "value_column (string, required) 數值欄\n"
+                "sort_by      (string, required) 排序欄（時間或序號；嚴禁隱式預設）\n"
+                "group_by     (string | list, opt) 各組內獨立計算（例：每台機台）\n"
+                "\n"
+                "== Output ==\n"
+                "port: data (dataframe) — 原欄 + 2 欄：\n"
+                "  <col>_streak_dir (string)  'up' | 'down' | 'flat'（跟前一筆比）\n"
+                "  <col>_streak_len (integer) 目前同方向連續步數（首筆/flat = 0）\n"
+                "  例：值 1,2,3,3,2 → dir flat,up,up,flat,down；len 0,1,2,0,1\n"
+                "\n"
+                "== Keywords ==\n"
+                "連續上升 連續下降 consecutive rising falling streak run trend 連漲 連跌\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["value_column", "sort_by"],
+                "properties": {
+                    "value_column": {"type": "string", "x-column-source": "input.data"},
+                    "sort_by": {"type": "string", "x-column-source": "input.data"},
+                    "group_by": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                },
+            },
+            "produces": {"covers": ["transform"], "outcome_extractors": []},
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.streak:StreakBlockExecutor"},
         },
         {
             "name": "block_join",
@@ -1797,8 +1842,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 類別欄獨立性（chi-square）→ 用 block_hypothesis_test(test_type='chi_square')\n"
                 "\n"
                 "== Params ==\n"
-                "columns (array, required, >= 2) 要納入的數值欄位\n"
+                "columns (array, opt) 要納入的數值欄位 — **省略 = 全部數值欄**（逗號字串也接受）\n"
                 "method  (string, default 'pearson') pearson | spearman | kendall\n"
+                "target  (string, opt) **排行模式**：「哪些欄位跟 X 最相關」— 給了 target 輸出改為\n"
+                "        每欄 vs target 一列：column / correlation / abs_corr / p_value / n（依 abs_corr 降冪）\n"
                 "\n"
                 "== Output ==\n"
                 "port: matrix (dataframe, long) — 每 pair 一列：\n"
@@ -1823,10 +1870,11 @@ def _blocks() -> list[dict[str, Any]]:
             "output_schema": [{"port": "matrix", "type": "dataframe"}],
             "param_schema": {
                 "type": "object",
-                "required": ["columns"],
+                "required": [],
                 "properties": {
-                    "columns": {"type": "array", "items": {"type": "string"}, "title": "納入欄位"},
+                    "columns": {"type": "array", "items": {"type": "string"}, "title": "納入欄位（省略=全部數值欄）"},
                     "method":  {"type": "string", "enum": ["pearson", "spearman", "kendall"], "default": "pearson"},
+                    "target":  {"type": "string", "title": "排行模式：每欄 vs 這個欄位的相關排行", "x-column-source": "input.data"},
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.correlation:CorrelationBlockExecutor"},
@@ -2444,6 +2492,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Errors ==\n"
                 "（鮮少 fail，主要是上游無 data 才空表）\n"
+                "highlight_rules (array, opt) 條件格式化：[{column, operator, value, background?, text_color?}]\n"
+                "  例：spc_status == 'OOC' 紅底 — 該欄 cell 命中即套色（operator 同 block_filter；表單有預設色可選）\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "data_view", "type": "dict"}],
@@ -2457,6 +2507,7 @@ def _blocks() -> list[dict[str, Any]]:
                         "items": {"type": "string"},
                         "title": "要顯示的欄位（未指定則全部）",
                     },
+                    "highlight_rules": {"type": "array", "title": "條件格式化 — 命中的 cell 套色"},
                     "max_rows": {"type": "integer", "minimum": 1, "default": 200, "title": "最多顯示列數（預設 200）"},
                     "sequence": {"type": "integer", "title": "多視圖時的排序（ascending）"},
                 },
@@ -2597,6 +2648,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "x:                 string, opt — x 軸欄位（time / index / category）。**省略或填 'sequence' = 照資料順序 1..N 當 x**（資料沒有時間欄時用這個，不要硬湊）。給欄位名時必須是 input dataframe 真實欄位名\n"
                 "y:                 string | string[], required — y series 欄位。**必須是 input dataframe 真實欄位名**\n"
                 "y_secondary:       string[], opt — 右側 y 軸 series\n"
+                "style.dashed_series:  string[], opt — 指定哪幾條 series 虛線（名稱=圖例名）；style.line_style='dash' 是全部虛線\n"
                 "series_field:      string, opt — group rows 出多條 color trace。**必須是 input dataframe 真實欄位名**\n"
                 "                  常用範例：\n"
                 "                    - SPC unnest('spc_charts') 後想分顏色 → series_field='name' (chart 名稱 leaf)\n"
