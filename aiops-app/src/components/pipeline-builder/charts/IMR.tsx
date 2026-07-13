@@ -102,3 +102,14 @@ export default function IMR({ spec, height }: Props) {
 }
 
 export { compute as computeIMR };
+
+/** Headless render (result-vision, 2026-07-13) — 同 component 內容的純函式版。 */
+export function renderIMR(svg: SVGSVGElement, spec: ChartSpec): void {
+  const { top, bot } = compute(spec);
+  renderDualPanel(svg, top, bot, {
+    topLabel: 'I (individual)',
+    botLabel: 'MR (moving range)',
+    title: spec.title,
+    spcZones: (spec as { style?: { spc_zones?: boolean } }).style?.spc_zones === true,
+  });
+}

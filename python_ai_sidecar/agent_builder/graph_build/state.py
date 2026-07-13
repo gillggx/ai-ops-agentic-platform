@@ -304,6 +304,13 @@ class BuildGraphState(TypedDict, total=False):
     # 2026-06-23: consecutive non-output-leaf rejections by phase_verifier.
     # Past LEAF_PRUNE_AFTER the verifier prunes the dead leaf instead of looping.
     v30_leaf_reject_count: int
+    # P2a (2026-07-13)：視覺編碼閘退回計數（cap 2）。
+    v30_chart_encoding_rejects: int
+    # result-vision (2026-07-13)：完整 chart_spec {node_id: spec}（不進 prompt）
+    # + 完工目檢退回計數（cap 1 = 自動修一輪）+ 最終 verdict（finalize 用）。
+    v30_chart_specs: Optional[dict]
+    v30_vision_rejects: int
+    v30_vision_verdict: Optional[dict]
     # 波2 M2 (2026-07-07) — Planner plan-patch escalation. phase_revise budget
     # exhaustion routes to plan_patch_node (計畫修訂) before handover; the
     # diagnosis envelope carries why/tried so Planner never re-diagnoses.

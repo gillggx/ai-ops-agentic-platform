@@ -265,6 +265,39 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 ],
                 would_have_passed_with=would_pass,
             )
+        # ── 成品目檢 (result-vision, 2026-07-13)：最後一個 deliverable phase
+        # 要 advance 前，先看「成品」— F1 規格檢（每次、零成本）+ F2 headless
+        # 截圖給 vision judge（flag ON、只在完工前）。不過 → reject 帶具體
+        # 指導（= F3 自動修一輪，cap 1）；修完仍不過 → advance 但 verdict 存
+        # state，finalize 標失敗 → P1 失敗卡帶 judge 指導。
+        is_final_phase = idx == len(phases) - 1
+        _vision_verdict_update = None
+        if ph_expected in ("chart", "table") and is_final_phase:
+            gate = await _final_result_gate(
+                state=state, phase=phase, real_id=real_id, rows=rows,
+                kind=ph_expected,
+            )
+            # gate 契約：None=跳過；("pass", verdict)；("fail", reason, guidance, verdict|None)
+            if gate is not None and gate[0] == "pass":
+                _vision_verdict_update = gate[1]
+            elif gate is not None:
+                _, reason, guidance, verdict = gate
+                vr = (state.get("v30_vision_rejects") or 0)
+                if vr < 1:
+                    rej = _emit_reject(
+                        state=state, cur_phase=cur_phase,
+                        block_id=block_id or "(unknown)",
+                        covers=list(covers_output), rows=rows,
+                        result=reason,
+                        missing_for_phase=[guidance],
+                    )
+                    rej["v30_vision_rejects"] = vr + 1
+                    return rej
+                # 自動修過一輪仍不過 — 放行 advance，把 verdict 留給 finalize
+                # 標失敗（避免無限迴圈；P1 失敗卡會帶 judge 指導）。
+                _vision_verdict_update = verdict or {
+                    "passed": False, "reason": reason, "guidance": guidance}
+
         # P2a (2026-07-13) 視覺編碼閘：phase 語意要求「分組上色」而 chart
         # block 支援 series_field 卻沒設 → 打回。deterministic graph 檢查，
         # 不是 prompt rule；上限 2 次退回，之後放行（避免語意誤判卡死）。
@@ -365,6 +398,10 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # CONSECUTIVE leaf rejections, not lifetime).
         "v30_leaf_reject_count": 0,
     }
+    # result-vision：完工目檢 verdict（pass 或 修一輪後仍 fail）帶進 state，
+    # finalize 據此標失敗 / 完成卡加「✓ 成品已目檢」。
+    if _vision_verdict_update is not None:
+        update["v30_vision_verdict"] = _vision_verdict_update
     # If the leaf-check pruned dead leaves this round (K-th failure), the cleaned
     # pipeline must reach state so downstream nodes + finalize see it.
     if pruned_pipeline is not None:
@@ -460,6 +497,62 @@ def _synthesize_failure_reason(
             "請 inspect 上游 node 的輸出欄位，或改用相容的 block。"
         )
     return "".join(parts)[:400]
+
+
+async def _final_result_gate(
+    *, state: BuildGraphState, phase: dict, real_id: str, rows: Any, kind: str,
+):
+    """成品目檢（result-vision, 2026-07-13）— 最終 deliverable phase 的完工閘。
+
+    回傳契約：
+      None                                → 跳過（拿不到成品 / 全部通過且無 verdict）
+      ("pass", verdict)                   → vision judge 通過（完成卡加 ✓ 註記）
+      ("fail", reason, guidance, verdict) → 打回（F3：agent 依 guidance 修一輪）
+
+    F1 規格檢永遠跑（deterministic 零成本）；F2 headless 截圖 + vision judge
+    只在 RESULT_VISION_CHECK 開（預設 ON）。整條 fail-open — 渲染/judge 掛
+    就跳過，目檢不能成為 build 的單點故障。
+    """
+    from python_ai_sidecar.agent_builder.result_vision import (
+        chart_spec_gaps, is_result_vision_enabled, judge_result, render_result_png,
+    )
+
+    goal_text = f"{phase.get('goal') or ''} {phase.get('value_desc') or ''}"
+    user_goal = str(state.get("instruction") or "")
+
+    payload: dict[str, Any] | None = None
+    if kind == "chart":
+        spec = (state.get("v30_chart_specs") or {}).get(real_id)
+        if not isinstance(spec, dict):
+            return None  # 沒撈到完整 spec — 不擋
+        # F1：成品規格 vs phase 語意（參數設了但沒生效也抓得到）
+        gaps = chart_spec_gaps(spec, goal_text)
+        if gaps:
+            return ("fail", "chart 成品規格不符", "；".join(gaps), None)
+        payload = {"kind": "chart", "spec": spec}
+    else:  # table — 從 preview 的 dataframe summary 組表格截圖
+        blob = state.get("v30_last_preview") or {}
+        df = next((v for v in blob.values()
+                   if isinstance(v, dict) and v.get("type") == "dataframe"), None)
+        if not df or not df.get("sample_rows"):
+            return None
+        payload = {"kind": "table", "columns": df.get("columns") or [],
+                   "rows": df.get("sample_rows") or [],
+                   "title": str(phase.get("goal") or "")[:60]}
+
+    if not is_result_vision_enabled():
+        return None
+    png = render_result_png(payload)
+    if png is None:
+        return None  # 渲染掛 — fail-open
+    verdict = await judge_result(png=png, user_goal=user_goal,
+                                 phase_goal=goal_text, kind=kind)
+    if verdict is None:
+        return None  # judge 掛 — fail-open
+    if verdict.get("passed"):
+        return ("pass", verdict)
+    guidance = str(verdict.get("guidance") or verdict.get("reason") or "成品與目標不符")
+    return ("fail", "成品目檢不過", f"[成品目檢] {guidance[:300]}", verdict)
 
 
 _GROUP_COLOR_MARKERS = (

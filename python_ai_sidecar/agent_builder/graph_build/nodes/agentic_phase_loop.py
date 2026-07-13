@@ -672,6 +672,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # schema for the new node.
     auto_preview_result = None
     auto_preview_blob = None
+    state_update_chart_specs = None
     last_mutated_logical_id: str | None = None
     snapshot_dict = None
     mutating = {"add_node", "set_param", "connect", "remove_node"}
@@ -686,6 +687,15 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                     "status": pv.get("status"),
                 }
                 auto_preview_blob = pv.get("preview") or {}
+                # result-vision (2026-07-13)：完整 chart_spec 進 state（不進
+                # prompt）— 成品規格檢 + 完工目檢用。
+                _specs = pv.get("chart_specs") or {}
+                if _specs:
+                    merged_specs = dict(state.get("v30_chart_specs") or {})
+                    merged_specs[target_nid] = next(iter(_specs.values()))
+                    state_update_chart_specs = merged_specs
+                else:
+                    state_update_chart_specs = None
                 # Build exec_trace snapshot for verifier + next round prompt.
                 # logical_id == real_id in v30 (toolset returns real id from
                 # add_node; we don't maintain a separate logical map here).
@@ -950,6 +960,8 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         state_update["exec_trace"] = new_exec_trace
         state_update["v30_last_mutated_logical_id"] = last_mutated_logical_id
         state_update["v30_last_preview"] = auto_preview_blob
+        if state_update_chart_specs is not None:
+            state_update["v30_chart_specs"] = state_update_chart_specs
     elif verify_now:
         # v30.22: agent emitted run_verifier / phase_complete (signal tool,
         # not a mutation). Point verifier at the canvas terminal (latest
@@ -975,6 +987,12 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                     new_exec_trace = dict(state.get("exec_trace") or {})
                     new_exec_trace[terminal_lid] = fresh
                     state_update["exec_trace"] = new_exec_trace
+                    # result-vision：signal-tool 輪也要撈完整 spec（無 auto-preview）
+                    _fspecs = fresh.pop("_chart_specs", None)
+                    if _fspecs:
+                        merged_specs = dict(state.get("v30_chart_specs") or {})
+                        merged_specs[terminal_lid] = next(iter(_fspecs.values()))
+                        state_update["v30_chart_specs"] = merged_specs
             except Exception as ex:  # noqa: BLE001
                 logger.info("run_verifier fresh preview failed (non-fatal): %s", ex)
             state_update["v30_last_mutated_logical_id"] = terminal_lid
@@ -2816,6 +2834,9 @@ async def _fresh_terminal_snapshot(
         "rows": pv.get("rows"),
         "status": pv.get("status"),
         "error": _coalesce_preview_error(pv),
+        # result-vision：完整 spec 由 caller pop 出去放 state（不留 exec_trace，
+        # 避免灌爆 prompt 的 trace 渲染）。
+        "_chart_specs": pv.get("chart_specs") or None,
         "after_cursor": round_n,
     }
 

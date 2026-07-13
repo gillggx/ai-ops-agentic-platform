@@ -1306,6 +1306,10 @@ class BuilderToolset:
             "duration_ms": node_result.get("duration_ms"),
             "error": node_result.get("error"),
             "preview": _summarize_preview(node_result.get("preview"), sample_size),
+            # result-vision (2026-07-13)：完整 chart_spec 側通道 — summary 為省
+            # token 只留摘要，成品目檢（規格檢 + headless 截圖）要完整 spec。
+            # 不進 LLM prompt（agentic_phase_loop 只搬進 state.v30_chart_specs）。
+            "chart_specs": _extract_chart_specs(node_result.get("preview")),
         }
 
     # v30: agentic ReAct tools — used by agentic_phase_loop
@@ -1541,6 +1545,18 @@ class BuilderToolset:
 # ---------------------------------------------------------------------------
 # Preview summarization helper
 # ---------------------------------------------------------------------------
+
+def _extract_chart_specs(preview: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """result-vision：從 executor preview 撈出完整 __dsl chart_spec（per port）。"""
+    out: dict[str, Any] = {}
+    for port, block in (preview or {}).items():
+        if not isinstance(block, dict):
+            continue
+        snap = block.get("snapshot")
+        if isinstance(snap, dict) and snap.get("__dsl") is True:
+            out[port] = snap
+    return out
+
 
 def _summarize_preview(preview: Optional[dict[str, Any]], sample_size: int) -> dict[str, Any]:
     """Convert executor's preview dict into a compact LLM-friendly summary."""

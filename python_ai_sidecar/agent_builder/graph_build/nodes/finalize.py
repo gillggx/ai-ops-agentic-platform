@@ -438,6 +438,19 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
                 "finalize_node: strict_phase_output FAIL — %s", missing_output_reason
             )
 
+    # result-vision (2026-07-13)：完工目檢 verdict。修一輪仍不過 → 失敗
+    # （P1 失敗卡帶 judge 指導）；通過 → 完成卡加註記。
+    vision_note = ""
+    _vv = state.get("v30_vision_verdict")
+    if isinstance(_vv, dict):
+        if _vv.get("passed"):
+            vision_note = "（✓ 成品已目檢）"
+        elif status == "finished":
+            status = "failed_vision"
+            _vg = str(_vv.get("guidance") or _vv.get("reason") or "成品與目標不符")
+            vision_note = f" [no] 成品目檢不過 — {_vg[:200]}"
+            logger.warning("finalize_node: result-vision FAIL — %s", _vg[:200])
+
     if status == "failed_missing_output":
         issue_summary = f" [no] missing deliverable — {missing_output_reason}"
     elif structural_issues:
@@ -455,7 +468,7 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         issue_summary = ""
     summary = (
         f"Built {len(pipeline.nodes)} node(s), {len(pipeline.edges)} edge(s); "
-        f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}{pruned_note}"
+        f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}{pruned_note}{vision_note}"
     )
     logger.info("finalize_node: status=%s | %s", status, summary)
 
