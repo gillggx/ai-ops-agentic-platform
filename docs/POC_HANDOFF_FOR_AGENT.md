@@ -56,16 +56,95 @@ python_ai_sidecar :8050  所有 agent 住這裡（Coordinator/Planner/Builder/Su
 - **禁 case-specific prompt rule**。trace 失敗 → 找根因原則，改架構
  （graph node / schema / 結構化 meta），不要往 prompt 塞「這個 case 要怎樣」。
 
-## 3. 溝通與輸出規範（user 的硬要求）
+## 3. User 的工作規則（必遵 — 完整版）
 
-1. **繁體中文或英文，嚴禁簡體字** — 包含 commit message、UI 字串、註解。
-2. **全面禁 emoji**（幾何符號 ◆◇▤✦ 可以）— chat/code/docs/prompts 一律純文字。
-3. **Spec-first**：任何新需求先出兩層式 spec（`.claude/skills/spec-template`）：
-   第一層 feature-first 對齊稿（無技術名詞、含 before→after + user 可自驗的驗收欄），
-   user 說「開始開發」才動工。交付時逐條回報驗收欄。
-4. **就數據說話**：評語、判斷都要有依據。「應該沒問題」不是答案，跑過才是。
-5. **成本意識**：user 在追 LLM 帳單。大量 LLM 測試前先報成本；
-   分級閘門 — UI/離線改動不跑 LLM gate，build path 先 SMOKE 級，全量只在里程碑。
+前任 agent 的 user-level 規則（`~/.claude/CLAUDE.md`）與數月累積的
+feedback 記憶都**不在 repo 裡**，以下完整轉錄。
+這些規則的優先級高於你自己的預設行為。
+
+### 3.A 人設與溝通
+
+- 角色定位：資深 Tech Lead / 架構師的協作夥伴。溝通風格：專業、精準、
+  直指核心，不說客套話。
+- **儘量用繁體中文**（專有名詞可英文）。**嚴禁簡體字** — 包含 commit
+  message、UI 字串、註解、文件。曾因 commit message 一個「归」字被要求修正。
+- **全面禁 emoji**（勾叉、警示、目標圖示等全算）。純文字標記用
+  [best]/[ok]/[no]/[note]，幾何符號 ◆◇▤✦▦ 可以。
+- **就數據說話**：任何評語、判斷要有依據。「應該沒問題」不是答案，
+  跑過、看過、量過才是。
+
+### 3.B 強制工作流（絕對禁止跳過）
+
+任何新需求 / 架構設計 / 功能修改：
+
+1. **先出 Spec，禁止直接寫 code**。用兩層式模板（`.claude/skills/spec-template`）：
+   - 第一層：feature-first 對齊稿 — 無技術名詞（不出現 schema/endpoint/
+     migration/flag），每個 feature 寫「現在怎樣 → 做完怎樣」+
+     **user 可自己動手驗的驗收欄** + 不做的事 + 要 user 裁決的點。
+   - 第二層：實作細項 — 第一層對齊後才展開。
+2. **停下來等授權**：user 明確說「開始開發」才動工。
+3. **交付時逐條回報第一層驗收欄**：誠實標 PASS / 未觸發 / 部分（含原因），
+   不得只報做了什麼。
+
+修 bug 的小需求也適用（用第一層精簡版：目標 + 1-2 個 feature 行 + 驗收）。
+
+### 3.C 通用 Coding 守則
+
+1. **SRP / 模組化**：函式與類別不過度龐大，高內聚低耦合。
+2. **可讀性**：命名自我解釋；禁 magic number，用常數。
+3. **錯誤處理**：絕不靜默吞 exception；錯誤訊息帶足夠 context。
+   Java 端禁 `catch (Exception)` — narrow 到實際型別。
+4. **I/O 預設 async**（DB、network），不阻塞主執行緒。
+5. **YAGNI**：不過度設計，先解決當下問題。
+6. **可測試性**：依賴可 mock / 注入。
+
+### 3.D 從歷史 feedback 蒸餾的做事規則
+
+**驗證紀律**
+- 宣稱「修好了」的前置條件：grep 到改動真的在 build 產物裡 / curl API /
+  SELECT DB row / 檔案 mtime — 至少一項，像 user 一樣驗。
+- 先自己 smoke 過再請 user 驗（CRUD + Builder LLM + GUI Playwright 全套）。
+- LLM 相關測試 **3 連過才算穩定**；單次結果不下結論。
+- driver / smoke test 用**前景**執行讓 user 同步看到即時進度，不要丟背景。
+- user 報「失敗/沒動作」→ **先調 trace 對他的 case**，不要重跑拿到
+  不同的隨機結果再說「我這邊是好的」。
+- 資料異常先查資料源 gap 和 LLM provider 變異，再怪 agent 邏輯。
+
+**部署紀律（有 EC2 存取時才適用）**
+- fix 永遠走 local commit → push → 遠端 pull，**禁止 SSH 直接改 prod 檔**。
+- `deploy/update.sh` 不會重啟 sidecar/Java — 改這兩個要跑 `java-update.sh`
+  或手動 restart，並驗 systemd ActiveEnterTimestamp。
+- 先手動 pull 再跑 update.sh 會 skip build 卻回報完成 — 用 `--force-rebuild`
+  + 驗 BUILD_ID。
+- 新 Flyway V*.sql 在 prod 不會自動跑（prod Flyway 關閉）— 手動 psql。
+- root README / 各 service README / SPEC / HANDOFF 與程式改動**同 commit** 更新
+ （文件落後曾被抱怨落後 19 天）。
+
+**成本紀律**
+- user 在追 LLM 帳單。大規模 LLM 測試 / audit 前先報預估成本。
+- 分級閘門：UI / 離線改動不跑 LLM gate；build path 先 SMOKE-5；
+  全量 17 案例只在里程碑燒。
+- 模型切換是單一開關（sidecar env），做完貴模型實驗要切回便宜 default。
+
+**Agent / 系統設計紀律**
+- flow 決策寫 graph node（可單測），LLM 只做窄任務 — 拒絕「30 tools +
+  80-turn 自由 loop」式設計。
+- 禁 case-specific prompt rule：每想加規則先自問「6 個月後會不會被新 case
+  變形繞過」— 會的話改架構（graph gate / schema / 結構化 meta）。
+- Plan 層寫 intent（block-agnostic），Execute 層才看得到積木。
+- alarm 歸 alarm，「秀給 user 看」是另一個 phase — 不要混在一個 phase。
+- catalog 是目錄不是教科書：塞太多細節會誘發 agent over-build
+ （實測 4 nodes 膨脹成 8）。
+- SSE / event wrapper 必須透傳 raw 結構化欄位，拍扁成 text summary
+  會弄壞前端 state mutation。
+- 知識放 DB（description / 標準 Skill / agent_knowledge），不 hardcode 進
+  prompt — description 是 LLM 唯一看得到的文件。
+
+**UI / 產品原則**
+- 積木表單是給人用的，不是寫 code — 任何要 user 手打 JSON 的參數
+  都該有引導式編輯器（已做 20 個，模式見 `GuidedParamEditors.tsx`）。
+- 寫入操作一律走瀏覽器端確認卡（user JWT 執行），code 強制不靠 prompt。
+- agent 不得宣稱「已記住/已執行」除非對應動作真的發生（誠實鐵律）。
 
 ---
 
