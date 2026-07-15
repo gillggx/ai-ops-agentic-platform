@@ -87,11 +87,17 @@ PIPELINE_ONLY_MODE=1
 # SERVICE_TOKEN=dev-service-token           # 要跟前端 SIDECAR_SERVICE_TOKEN 一致
 ```
 
-啟動：
+啟動（**必須用 `--env-file`**）：
 
 ```bash
-uvicorn python_ai_sidecar.main:app --host 127.0.0.1 --port 8050
+uvicorn python_ai_sidecar.main:app --host 127.0.0.1 --port 8050 \
+  --env-file python_ai_sidecar/.env
 ```
+
+[note] Sidecar 程式碼**沒有 load_dotenv** — prod 是靠 systemd
+`EnvironmentFile=` 載入 `.env`，local 直接跑 uvicorn 的話 `.env` 完全
+不會被讀，所有 flag 都停在預設值（症狀：明明設了 flag 卻沒作用）。
+且 `CONFIG` 在 import 時凍結（`config.py` 末行），改 `.env` 必須重啟。
 
 ## 4. aiops-app（:8000）
 
@@ -118,7 +124,8 @@ cd aiops-app && npm install && npm run dev   # http://localhost:8000 需 -p 8000
 | 症狀 | 原因 | 修法 |
 |---|---|---|
 | ChatOps 打 hello 跳選單不對話 | `CHAT_AGENT_LOOP_ENABLED` 沒設（預設 0） | sidecar .env 設 1 後重啟 |
-| 對話有跑但 `/agent-activity` 空白 | `ENABLE_AGENT_EPISODES` 沒設（預設 0），episodes 沒寫 | sidecar .env 設 1 後重啟；歷史對話不會回填 |
+| 設了 flag 卻全部沒作用 | uvicorn 手動跑不會讀 `.env`（無 load_dotenv） | 啟動加 `--env-file python_ai_sidecar/.env` |
+| `/agent-activity` 空白 | 三段排查：(1) flag 沒進 process（見上列）；(2) **episodes 只記 Builder 建圖 run，純聊天不寫**（`make_recorder` 唯一 call site 在 `graph_build/runner.py`，設計如此）；(3) 寫入 Java 失敗 — fail-open 只留 warning | (1) `--env-file` 重啟；(2) 跑一個建圖 case 如「查 EQP-01 過去 7 天資料畫趨勢圖」；(3) grep sidecar log 找 `EpisodeRecorder`，多半是 `JAVA_INTERNAL_TOKEN` 兩端不一致 |
 | Agent 完全沒回應 / 500 | `ANTHROPIC_API_KEY` 沒設 | 設 key |
 | 前端按鈕沒反應但 HTTP 200 | POST body 用了 camelCase | Java wire 全 snake_case |
 | `process_history` 積木回 `MCP_UNREACHABLE` | 本 branch 沒 simulator（預期行為） | 用 System MCP 接外部 API |
