@@ -56,6 +56,31 @@ CHAT_AGENT_LOOP_ENABLED=1             # 不設 = 舊版分類器路徑：
                                       # 打招呼會跳「要做什麼」選單而不是對話
 # ── 建議 ────────────────────────────────────────────────
 ANTHROPIC_MODEL=claude-haiku-4-5-20251001   # prod 同款（成本/延遲最佳）
+
+# ── Prod parity flags（2026-07-15 抄自 prod 實際設定）────
+# 這些 flag 在 code 全部預設 0/False — 不設的話 local 行為跟 prod 有
+# 17 處差異。最有感的：ENABLE_AGENT_EPISODES 不開 → /agent-activity
+# 頁永遠空白（agent 有跑但沒寫 episodes）。
+ENABLE_AGENT_EPISODES=1        # /agent-activity 觀測頁的資料來源
+ENABLE_MEMORY_WRITES=1         # 記憶層 W1-W3 fast-path 寫入
+ENABLE_PLAN_KNOWLEDGE=1        # plan 層知識注入
+ENABLE_EXECUTE_KNOWLEDGE=1     # execute 層知識注入
+ENABLE_ATOMIC_ADD_CONNECT=1
+ENABLE_AUTO_SIGNAL=1
+ENABLE_AUTO_VERIFIER=1
+ENABLE_CONSTRUCT_PARAM_DOC=1
+ENABLE_INTERACTIVE_BRIEF=1
+ENABLE_NEXT_MEMO=1
+ENABLE_NO_DUPLICATE_NODE=1
+ENABLE_ORPHAN_RESOLVE=1
+ENABLE_RICH_CANVAS_SNAPSHOT=1
+ENABLE_RICH_SCHEMA_VALUES=1
+ENABLE_STRICT_PHASE_OUTPUT=1
+ENABLE_STRICT_PHASE_VERIFY=1
+PIPELINE_ONLY_MODE=1
+# prod 刻意關著的（不要開）：ENABLE_GOAL_AWARE_MATCHING=0、
+# ENABLE_PRESENTATION_LOOKAHEAD=0、ENABLE_LAYERED_PLAN_KNOWLEDGE 未設
+
 # ── 有預設值，非 localhost 佈局才要改 ──────────────────
 # JAVA_API_URL=http://localhost:8002
 # JAVA_INTERNAL_TOKEN=dev-internal-token    # 要跟 java 端一致
@@ -93,6 +118,7 @@ cd aiops-app && npm install && npm run dev   # http://localhost:8000 需 -p 8000
 | 症狀 | 原因 | 修法 |
 |---|---|---|
 | ChatOps 打 hello 跳選單不對話 | `CHAT_AGENT_LOOP_ENABLED` 沒設（預設 0） | sidecar .env 設 1 後重啟 |
+| 對話有跑但 `/agent-activity` 空白 | `ENABLE_AGENT_EPISODES` 沒設（預設 0），episodes 沒寫 | sidecar .env 設 1 後重啟；歷史對話不會回填 |
 | Agent 完全沒回應 / 500 | `ANTHROPIC_API_KEY` 沒設 | 設 key |
 | 前端按鈕沒反應但 HTTP 200 | POST body 用了 camelCase | Java wire 全 snake_case |
 | `process_history` 積木回 `MCP_UNREACHABLE` | 本 branch 沒 simulator（預期行為） | 用 System MCP 接外部 API |
