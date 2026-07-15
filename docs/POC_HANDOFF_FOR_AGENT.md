@@ -189,7 +189,54 @@ feedback 記憶都**不在 repo 裡**，以下完整轉錄。
 - Sidecar 直打 API 時帶 `X-Service-Token`（local dev fallback `dev-service-token`）
   + `X-User-Id: 1`。
 
-### 4.4 成品目檢（result-vision）
+### 4.4 直接呼叫 Coordinator 測試（可照抄的實戰指令）
+
+Coordinator 住在 sidecar 的 `POST /internal/agent/chat`（SSE streaming）。
+前端 GUI 走的也是這條（經 Java + Next proxy），所以直打 sidecar 驗過
+= GUI 同路徑驗過（差別只在 auth 層）。三種打法由簡到繁：
+
+**(1) 現成 harness — 首選**（自動接 SSE、畫 plan 卡、自動確認 confirm card）：
+
+```bash
+# local dev（sidecar 沒設 SERVICE_TOKEN 時 fallback 是 dev-service-token）
+SVC_TOKEN=dev-service-token \
+python3 tools/ui_consistent_verify/chat_walkthrough.py \
+  "查 EQP-01 過去 7 天的資料，畫趨勢圖" \
+  --sidecar http://localhost:8050
+```
+
+- 問答型訊息（hello / 知識問題）會直接印回覆；建圖型訊息會印 plan 卡
+  → 自動確認 → 逐 phase 進度 → 最後 summary 表。
+- `--plan-cancel` / `--plan-edit-suffix "..."` 可以測 plan 卡的取消/修改路徑。
+- Builder Glass Box 路徑（`/internal/agent/build`）用隔壁的
+  `builder_verify.py`，參數形式相同。
+
+**(2) Raw curl** — 看原始 SSE event 流（debug event 格式時用）：
+
+```bash
+curl -sN http://localhost:8050/internal/agent/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Service-Token: dev-service-token" \
+  -H "X-User-Id: 1" \
+  -H "X-User-Roles: IT_ADMIN,PE" \
+  -d '{"message": "hello", "session_id": null, "mode": "chat", "client_context": {}}'
+```
+
+**(3) 多輪對話**：第一輪的 `done` event 會帶 `session_id`，
+下一輪把它塞回 body 的 `session_id` 就是同一個對話（記憶、草稿都延續）。
+
+判讀要點：
+
+- 正常結束一定有 `event: done`；`event: error` = 出事了看 data。
+- 回覆是空的 + 沒有 error → 先查 `ANTHROPIC_API_KEY` 有沒有設、
+  再查 `CHAT_AGENT_LOOP_ENABLED=1`（沒設會走舊分類器，行為完全不同）。
+- 寫入型動作（開 alarm、記偏好）**不會**在這條路徑直接執行 —
+  Coordinator 只會回確認卡 event，真正執行要靠瀏覽器端 user JWT。
+  直打 API 測寫入路徑只能驗「卡有沒有出」，這是設計不是 bug。
+- 每輪對話都是真 LLM call（Haiku 4.5）— 有成本，煙測用 3-5 句就好，
+  不要 loop 幾十次。
+
+### 4.5 成品目檢（result-vision）
 
 Builder 完工前會把 chart/table headless 截圖給 vision judge 把關
 （`RESULT_VISION_CHECK` 預設 ON）。基建在 `tools/result_render/`
